@@ -1,4 +1,17 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openclaw_admin
+      POSTGRES_USER: openclaw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
   openclaw-admin:
     build:
       context: .
@@ -8,3 +21,11 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://openclaw:${POSTGRES_PASSWORD}@postgres:5432/openclaw_admin
+      SESSION_SECRET: ${SESSION_SECRET}
+
+volumes:
+  postgres_data:
