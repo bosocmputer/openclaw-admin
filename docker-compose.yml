@@ -12,12 +12,13 @@ services:
       - /usr/local/bin/mcporter:/usr/local/bin/mcporter:ro
 
   openclaw-admin:
-    build: .
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: http://${SERVER_IP}:4000
+        NEXT_PUBLIC_API_TOKEN: ${API_TOKEN}
     restart: unless-stopped
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://${SERVER_IP}:4000
-      - NEXT_PUBLIC_API_TOKEN=${API_TOKEN}
     depends_on:
       - openclaw-api
