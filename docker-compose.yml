@@ -10,6 +10,8 @@ services:
       - ${OPENCLAW_HOME}/.openclaw:/root/.openclaw
       - /home/bosscatdog/.npm-global/bin/openclaw:/usr/local/bin/openclaw:ro
       - /home/bosscatdog/.npm-global/bin/mcporter:/usr/local/bin/mcporter:ro
+      - /home/bosscatdog/.npm-global/lib/node_modules/openclaw:/usr/local/lib/node_modules/openclaw:ro
+      - /home/bosscatdog/.npm-global/lib/node_modules/mcporter:/usr/local/lib/node_modules/mcporter:ro
 
   openclaw-admin:
     build:
