@@ -381,7 +381,7 @@ openclaw gateway restart
 4. เลือก Role: **chat**
 5. กด **Add**
 
-> พนักงาน role=chat จะ login แล้วเข้าหน้า Webchat ได้เลย ไม่เห็นเมนูอื่น
+> พนักงาน role=chat จะ login แล้วเข้าหน้า Webchat ได้เลย — **ไม่มี sidebar เมนู** เห็นแค่รายการห้องแชทที่มีสิทธิ์ทางซ้าย และ chat area ทางขวา
 
 ---
 
