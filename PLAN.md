@@ -1,6 +1,6 @@
 # OpenClaw Admin — Project Plan
 
-> อัปเดตล่าสุด: 2026-03-24 (รอบ 4)
+> อัปเดตล่าสุด: 2026-03-24 (รอบ 5)
 
 ---
 
@@ -10,8 +10,39 @@
 
 - Server: Ubuntu 24.04 LTS (192.168.2.109, user: bosscatdog)
 - OpenClaw: v2026.3.13
-- Express API: port 4000, token `sml-openclaw-2026`
-- Gateway: port 18789 (systemd service: `openclaw-gateway.service`)
+
+## 3 Services บน Server
+
+| Service | Repo | Deploy | Port | หมายเหตุ |
+| ------- | ---- | ------ | ---- | -------- |
+| **openclaw-gateway** | — | systemd | 18789 | ติดตั้งโดย openclaw CLI |
+| **openclaw-api** | [bosocmputer/openclaw-api](https://github.com/bosocmputer/openclaw-api) | pm2 บน host | 4000 | ต้องรันบน host เพราะใช้ systemd + openclaw CLI |
+| **openclaw-admin** | [bosocmputer/openclaw-admin](https://github.com/bosocmputer/openclaw-admin) | Docker | 3000 | Next.js Web UI |
+
+### Deploy / อัปเดตแต่ละ Service
+
+**openclaw-gateway** (systemd — ไม่ต้องแตะ):
+
+```bash
+openclaw gateway restart
+```
+
+**openclaw-api** (pm2):
+
+```bash
+cd ~/openclaw-api
+git pull
+npm install
+pm2 restart openclaw-api
+```
+
+**openclaw-admin** (Docker):
+
+```bash
+cd ~/openclaw-admin
+git pull
+docker compose up -d --build
+```
 
 ---
 
