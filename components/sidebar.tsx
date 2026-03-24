@@ -12,7 +12,7 @@ const adminNavItems = [
   { href: '/agents', label: 'Agents' },
   { href: '/telegram', label: 'Telegram' },
   { href: '/webchat', label: 'Webchat' },
-  { href: '/chats', label: 'Chats' },
+  { href: '/chats', label: 'Telegram History' },
   { href: '/logs', label: 'Logs' },
   { href: '/guide', label: 'คู่มือผู้ใช้' },
 ]

@@ -270,8 +270,8 @@ export default function ChatsPage() {
     <div className="space-y-4 w-full">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Chats</h1>
-          <p className="text-sm text-zinc-500 mt-1">ดูประวัติแชทแยกตาม user และ agent</p>
+          <h1 className="text-2xl font-bold">Telegram Chats History</h1>
+          <p className="text-sm text-zinc-500 mt-1">ดูประวัติแชท Telegram แยกตาม user และ agent</p>
         </div>
 
         {/* Agent selector */}
