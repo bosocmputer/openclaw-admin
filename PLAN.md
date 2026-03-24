@@ -1,77 +1,145 @@
 # OpenClaw Admin — Project Plan
 
-> สร้างเมื่อ 2026-03-20 — ต่อยอดจาก ERP Chatbot project บน OpenClaw
+> อัปเดตล่าสุด: 2026-03-24 (รอบ 4)
 
 ---
 
-## บริบทที่มาของโปรเจค
+## บริบทโปรเจค
 
-ก่อนหน้านี้เราได้ deploy **OpenClaw ERP Chatbot** สำหรับบริษัท SML โดย:
+**OpenClaw ERP Chatbot** สำหรับบริษัท SML — Web Admin Panel ให้ config ได้จากหน้าเว็บโดยไม่ต้อง SSH server
 
-- ติดตั้ง OpenClaw 2026.3.13 บน Ubuntu 24.04 LTS (server: 192.168.2.109, user: bosscatdog)
-- Telegram Bot: @sml_213_sale_bot
-- Agents: `sale`, `stock` — พนักงานคุยผ่าน Telegram DM
-- MCP: เชื่อม HTTP MCP server ที่ 192.168.2.213:3248 ผ่าน **mcporter CLI** (เพราะ OpenClaw v2026.3.13 ยังไม่รองรับ native .mcp.json)
-- ปัญหาที่พบ: การ config ต้องเข้า SSH server ทุกครั้ง — ไม่สะดวกสำหรับการ deploy บริษัทใหม่
-
-**โปรเจคนี้จึงเกิดขึ้นเพื่อแก้ปัญหานั้น** — สร้าง Web Admin Panel ให้ config ได้จากหน้าเว็บ
+- Server: Ubuntu 24.04 LTS (192.168.2.109, user: bosscatdog)
+- OpenClaw: v2026.3.13
+- Express API: port 4000, token `sml-openclaw-2026`
+- Gateway: port 18789 (systemd service: `openclaw-gateway.service`)
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```
-Browser → Next.js (Vercel) → Express API (server:4000) → openclaw.json / SOUL.md / mcporter.json
+Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.json / SOUL.md / mcporter.json
 ```
-
-### Server ที่มีอยู่ (192.168.2.109)
-
-- OpenClaw gateway รันอยู่ที่ port 18789
-- **Express API รันอยู่แล้วที่ port 4000** (`~/openclaw-api/index.js`)
-- API Token: `sml-openclaw-2026`
-- Files ที่ API จัดการ:
-  - `~/.openclaw/openclaw.json` — config หลัก
-  - `~/.openclaw/workspace-sale/SOUL.md` — SOUL ของ agent sale
-  - `~/.openclaw/workspace-stock/SOUL.md` — SOUL ของ agent stock
-  - `~/.openclaw/workspace-*/config/mcporter.json` — MCP config ต่อ agent
 
 ---
 
-## Express API (บน server — ทำเสร็จแล้ว ✅)
+## Stack
 
-**Location:** `~/openclaw-api/index.js` บน server 192.168.2.109
+| ส่วน | Technology |
+|------|-----------|
+| Framework | Next.js 16.2.0 + TypeScript + Turbopack |
+| UI | shadcn/ui + Tailwind CSS |
+| Data | TanStack Query v5 |
+| HTTP | axios |
+| Toast | Sonner v2 |
 
-**Endpoints:**
+---
+
+## หน้าทั้งหมด (สร้างเสร็จแล้ว ✅)
+
+### 1. Dashboard (`/`)
+- Gateway status badge (online/offline) + ปุ่ม Restart Gateway
+- จำนวน agents / users / bots / default model
+- **Config Health card** — เช็ค config valid/invalid + ปุ่ม Auto Fix (รัน `openclaw doctor --fix`)
+
+### 2. Model (`/model`)
+- **Multi-provider**: OpenRouter, Google, Anthropic, OpenAI — เลือก provider ด้วยปุ่ม grid
+- **API Key** ต่อ provider — Show/Hide, Test (ping endpoint), Save
+- Model ที่ใช้อยู่ตอนนี้
+- Model แนะนำ 4 ตัว (OpenRouter only: free / ประหยัด / แนะนำ / ดีสุด)
+- **Combobox search** (shadcn Command+Popover) เลือก model + แสดงราคา
+- โหลด model เดิมที่บันทึกไว้ถูกต้องแม้ switch provider (ใช้ `useRef` guard init)
+- Layout 2 คอลัมน์บนจอกว้าง
+
+### 3. Agents (`/agents`)
+- รายการ agents ทั้งหมด พร้อม users badge (grid 3 คอลัมน์)
+- เพิ่ม agent — ระบุ **Agent ID** + **Access Mode** (admin/sales/purchase/stock/general) → server auto-generate `SOUL.md` จาก template ตาม mode
+- ลบ agent — ใช้ **Dialog** (ไม่ใช้ browser confirm)
+
+### 4. Agent Detail (`/agents/[id]`)
+- **ไม่มี Tab** — 2-column layout เห็นทุกส่วนพร้อมกัน
+- ซ้าย: **SOUL** — textarea full height, badge "Unsaved", ปุ่ม **Load Template** โหลด template ตาม Access Mode ปัจจุบันจาก server (path ใช้ `~` ไม่ hardcode username)
+- ขวาบน: **Users** — เพิ่ม/ลบ Telegram user ID + nickname, กด Enter ได้, **auto restart gateway** หลัง add/remove
+- ขวาล่าง: **MCP** — URL + Ping (เช็ค online), Access Mode (admin/sales/purchase/stock/general), ปุ่ม Test Access รัน `mcporter list --json` ดู tools จริงบน server, tools list collapsible
+- ปุ่ม Chat Monitor → `/agents/[id]/chat`
+- **MCP_ACCESS_MODE options**: admin, sales, purchase, stock, general (default)
+- **Role ส่งผ่าน HTTP header** `mcp-access-mode` (ไม่ใช่ env) — บันทึกใน `mcporter.json` ใต้ `headers` field
+- **Tool count จริงต่อ role**: admin=9+(~12 admin-only), sales=7, purchase=5, stock=6, general=4
+
+### 5. Agent Chat Monitor (`/agents/[id]/chat`)
+- Sidebar แสดง Users แยกตาม sender_id
+- Chat bubbles threaded ตาม turn ของ user (เฉพาะ assistant replies ใน turn นั้น)
+- Analytics: users, messages, tokens, sessions
+
+### 6. Telegram (`/telegram`)
+- **How it works card** — อธิบายขั้นตอน 4 ขั้น
+- **เพิ่ม Bot ใหม่** — validate ห้ามชื่อซ้ำ/ห้ามชื่อ `default`, default dmPolicy=open, เขียน config โดยตรง (ไม่ใช้ CLI)
+- **Bot cards** แต่ละ account (grid 2 คอลัมน์):
+  - ชื่อ bot จริงจาก Telegram API (`getMe`)
+  - Dropdown ผูก Agent + **warning ถ้ายังไม่ได้ผูก** (bot จะ fallback ไป default agent)
+  - Bot Token — Show/Hide, Save
+  - DM Policy: **open** (ค่าเริ่มต้น) / **allowlist** เท่านั้น
+  - Warning + link นำทาง ถ้าเลือก allowlist แต่ยังไม่มี user
+  - Users ที่อนุญาต — read-only badges (กรอง `"*"` ออก), link ไปหน้า Agent
+  - ปุ่ม **Set as Default** → เปิด Dialog (validate ห้ามชื่อซ้ำ/ห้าม `default`)
+  - ปุ่ม **Delete Bot** → เปิด Dialog (ซ่อนสำหรับ default), ลบ config โดยตรง (ไม่ใช้ CLI)
+
+### 7. Chats (`/chats`)
+- เลือก agent (ปุ่ม top)
+- Analytics: users, messages, tokens, sessions
+- Sidebar Users แยกตาม sender_id
+- Chat threaded ตาม turn ของ user
+
+### 8. Logs (`/logs`)
+- Live polling ทุก 3 วินาที
+- Filter level: ALL / INFO / WARN / ERROR / DEBUG
+- ค้นหา message / subsystem
+- Pause / Resume, Auto scroll
+
+### 9. คู่มือผู้ใช้ (`/guide`)
+- ขั้นตอน 3 ขั้น: หา User ID → Admin เพิ่มสิทธิ์ → Start bot (พิมพ์คุยได้เลย)
+- ตารางสรุป "สิ่งที่ต้องส่งให้ Admin": Telegram User ID + ชื่อ/แผนก
+- Troubleshoot เบื้องต้น (ไม่มี Pairing code แล้ว — ถูกลบออก)
+
+---
+
+## Express API Endpoints (บน server — `~/openclaw-api/index.js`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/status` | gateway online/offline |
-| GET | `/api/config` | อ่าน openclaw.json ทั้งหมด |
+| GET | `/api/config` | อ่าน openclaw.json |
 | PUT | `/api/config` | เขียน openclaw.json |
 | GET | `/api/agents` | รายการ agents + soul + mcp + users |
-| GET | `/api/agents/:id/soul` | อ่าน SOUL.md ของ agent |
-| PUT | `/api/agents/:id/soul` | เขียน SOUL.md ของ agent |
-| GET | `/api/agents/:id/mcp` | อ่าน mcporter.json ของ agent |
-| PUT | `/api/agents/:id/mcp` | เขียน mcporter.json ของ agent |
-| POST | `/api/gateway/restart` | restart openclaw gateway |
+| POST | `/api/agents` | เพิ่ม agent ใหม่ + auto-generate SOUL.md จาก template ตาม `accessMode` |
+| GET | `/api/agents/:id/soul/template` | ดึง SOUL template ตาม Access Mode ปัจจุบันของ agent (path ใช้ `~`) |
+| DELETE | `/api/agents/:id` | ลบ agent |
+| GET | `/api/agents/:id/soul` | อ่าน SOUL.md |
+| PUT | `/api/agents/:id/soul` | เขียน SOUL.md |
+| GET | `/api/agents/:id/mcp` | อ่าน mcporter.json |
+| PUT | `/api/agents/:id/mcp` | เขียน mcporter.json |
+| GET | `/api/agents/:id/users` | รายการ users ของ agent |
+| POST | `/api/agents/:id/users` | เพิ่ม user (+ เพิ่ม allowFrom ถูก account อัตโนมัติ) |
+| DELETE | `/api/agents/:id/users/:userId` | ลบ user |
+| GET | `/api/usernames` | อ่าน usernames.json |
 | GET | `/api/models` | ดึง model list จาก OpenRouter |
-
-**Auth:** Bearer token ใน header `Authorization: Bearer sml-openclaw-2026`
-
-**ทดสอบแล้ว:**
-```bash
-curl -s -H "Authorization: Bearer sml-openclaw-2026" http://192.168.2.109:4000/api/status
-# {"gateway":"online"}
-
-curl -s -H "Authorization: Bearer sml-openclaw-2026" http://192.168.2.109:4000/api/agents
-# ได้ข้อมูล agents sale + stock พร้อม soul, mcp, users
-```
+| POST | `/api/gateway/restart` | รัน `openclaw gateway restart` |
+| GET | `/api/gateway/logs` | อ่าน JSONL log จาก `/tmp/openclaw/` |
+| GET | `/api/agents/:id/sessions` | รายการ sessions ของ agent |
+| GET | `/api/agents/:id/sessions/:sessionId` | messages ใน session |
+| GET | `/api/telegram/botinfo` | ชื่อ bot จริงจาก Telegram API |
+| GET | `/api/telegram/bindings` | route bindings (bot → agent) |
+| PUT | `/api/telegram/bindings` | set route binding |
+| POST | `/api/telegram/accounts` | เพิ่ม bot account ใหม่ |
+| DELETE | `/api/telegram/accounts/:id` | ลบ bot account |
+| POST | `/api/telegram/set-default` | สลับ bot ขึ้นเป็น default |
+| POST | `/api/telegram/approve` | approve pairing code (ยังมีใน server แต่ไม่มีใน UI แล้ว) |
+| GET | `/api/doctor/status` | เช็ค config valid/invalid + ดึง problems |
+| POST | `/api/doctor/fix` | รัน `openclaw doctor --fix` |
 
 ---
 
-## OpenClaw Config จริงบน Server
-
-### openclaw.json (สรุปส่วนสำคัญ)
+## Config Structure ปัจจุบัน (OpenClaw v2026.3.13)
 
 ```json
 {
@@ -80,170 +148,71 @@ curl -s -H "Authorization: Bearer sml-openclaw-2026" http://192.168.2.109:4000/a
     "MCP_ACCESS_MODE": "open"
   },
   "agents": {
-    "defaults": {
-      "model": { "primary": "openrouter/google/gemini-2.0-flash-lite-001" }
-    },
+    "defaults": { "model": { "primary": "openrouter/qwen/qwen3.5-flash-02-23" } },
     "list": [
       { "id": "sale", "workspace": "~/.openclaw/workspace-sale" },
       { "id": "stock", "workspace": "~/.openclaw/workspace-stock" }
     ]
   },
   "bindings": [
-    { "agentId": "sale", "match": { "channel": "telegram", "peer": { "kind": "direct", "id": "7548005041" } } },
-    { "agentId": "sale", "match": { "channel": "telegram", "peer": { "kind": "direct", "id": "7065340944" } } }
+    { "type": "route", "agentId": "sale", "match": { "channel": "telegram", "accountId": "default" } },
+    { "type": "route", "agentId": "stock", "match": { "channel": "telegram", "accountId": "stock" } },
+    { "agentId": "sale", "match": { "channel": "telegram", "accountId": "default", "peer": { "kind": "direct", "id": "..." } } },
+    { "agentId": "stock", "match": { "channel": "telegram", "accountId": "stock", "peer": { "kind": "direct", "id": "..." } } }
   ],
   "channels": {
     "telegram": {
       "enabled": true,
-      "dmPolicy": "allowlist",
-      "botToken": "...",
-      "allowFrom": [7548005041, 7065340944]
+      "dmPolicy": "open",
+      "groupPolicy": "allowlist",
+      "streaming": "partial",
+      "accounts": {
+        "default": {
+          "botToken": "...",
+          "dmPolicy": "open",
+          "allowFrom": ["*"]
+        },
+        "stock": {
+          "botToken": "...",
+          "dmPolicy": "allowlist",
+          "allowFrom": [123456789]
+        }
+      }
     }
   },
-  "gateway": { "mode": "local" }
-}
-```
-
-### MCP Config (workspace-sale/config/mcporter.json)
-
-```json
-{
-  "mcpServers": {
-    "smlmcp": {
-      "type": "http",
-      "url": "http://192.168.2.213:3248/sse",
-      "allowHttp": true,
-      "env": { "MCP_ACCESS_MODE": "open" }
-    }
-  }
+  "session": { "dmScope": "per-channel-peer" }
 }
 ```
 
 ---
 
-## Next.js Project (ต้องสร้างใหม่)
+## Files สำคัญ
 
-### Stack
-
-| ส่วน | Technology |
-|------|-----------|
-| Framework | Next.js 15 + TypeScript |
-| UI Components | shadcn/ui |
-| Styling | Tailwind CSS |
-| State/Data | React Query (TanStack Query) |
-| Deploy | Vercel |
-
-### โครงสร้างไฟล์
-
-```
-openclaw-admin/
-├── app/
-│   ├── layout.tsx              ← root layout + sidebar
-│   ├── page.tsx                ← Dashboard / Status
-│   ├── model/page.tsx          ← เปลี่ยน AI model
-│   ├── mcp/page.tsx            ← config MCP server
-│   ├── agents/
-│   │   ├── page.tsx            ← รายการ agents
-│   │   └── [id]/page.tsx       ← แก้ไข agent (SOUL + Users + MCP)
-│   └── telegram/page.tsx       ← Telegram Bot config
-├── components/
-│   ├── sidebar.tsx
-│   ├── status-badge.tsx
-│   └── agent-card.tsx
-├── lib/
-│   └── api.ts                  ← fetch wrapper ไปที่ Express API
-├── .env.local                  ← NEXT_PUBLIC_API_URL + NEXT_PUBLIC_API_TOKEN
-└── PLAN.md                     ← ไฟล์นี้
-```
-
----
-
-## หน้าทั้งหมดที่ต้องสร้าง
-
-### 1. Dashboard (`/`)
-- แสดง gateway status badge (online/offline)
-- Telegram bot connected หรือไม่
-- จำนวน agents / users ทั้งหมด
-- ปุ่ม Restart Gateway
-
-### 2. Model Config (`/model`)
-- แสดง model ปัจจุบัน
-- Dropdown/Search เลือก model จาก OpenRouter
-- แสดงราคา input/output ต่อ model
-- ปุ่ม Save → PUT /api/config
-
-### 3. MCP Config (`/mcp`)
-- URL ของ MCP server
-- ทดสอบ connection ได้จากหน้าเว็บ
-
-### 4. Agents (`/agents`)
-- รายการ agents ทั้งหมด (card แต่ละตัว)
-- ปุ่มเพิ่ม agent ใหม่
-- ปุ่มลบ agent
-
-### 5. Agent Detail (`/agents/[id]`)
-- Tab: **SOUL** — textarea แก้ SOUL.md
-- Tab: **Users** — เพิ่ม/ลบ Telegram user ID + ชื่อเล่น
-- Tab: **MCP** — URL, MCP_ACCESS_MODE
-- ปุ่ม Save ต่อ tab
-
-### 6. Telegram Config (`/telegram`)
-- Bot token (masked)
-- dmPolicy toggle
-- allowFrom list
-
----
-
-## Environment Variables
-
-### `.env.local` (Next.js บน Mac/Vercel)
-
-```env
-NEXT_PUBLIC_API_URL=http://192.168.2.109:4000
-NEXT_PUBLIC_API_TOKEN=sml-openclaw-2026
-```
-
----
-
-## ลำดับการทำ (Phase 2 — Next.js)
-
-```
-Step 1: สร้าง Next.js project
-  npx create-next-app@latest openclaw-admin --typescript --tailwind --app --no-src-dir
-
-Step 2: ติดตั้ง dependencies
-  npx shadcn@latest init
-  npm install @tanstack/react-query axios
-
-Step 3: สร้าง lib/api.ts
-  - fetch wrapper พร้อม Bearer token
-
-Step 4: Layout + Sidebar
-  - sidebar navigation
-
-Step 5: หน้า Dashboard
-  - status badge, restart button
-
-Step 6: หน้า Model
-  - dropdown model list
-
-Step 7: หน้า Agents + Agent Detail
-  - SOUL editor, Users management, MCP config
-
-Step 8: หน้า Telegram
-  - bot token, allowFrom
-
-Step 9: Deploy บน Vercel
-  - ตั้ง env vars
-  - ทดสอบ end-to-end
-```
+| File | หมายเหตุ |
+|------|---------|
+| `openclaw-api/index.js` | **ต้อง scp ทุกครั้งที่แก้** → `scp openclaw-api/index.js bosscatdog@192.168.2.109:~/openclaw-api/index.js` |
+| `lib/api.ts` | API functions ทั้งหมด |
+| `components/sidebar.tsx` | เมนู navigation |
+| `~/.openclaw/usernames.json` | ชื่อ user แยกนอก openclaw.json |
 
 ---
 
 ## หมายเหตุสำคัญ
 
-- **Gateway hot-reload**: แก้ `openclaw.json` แล้วบันทึก — gateway reload อัตโนมัติ ไม่ต้อง restart (ยกเว้นเพิ่ม agent ใหม่)
-- **mcporter**: ใช้ผ่าน exec tool ใน SOUL.md — ไม่ใช่ native MCP (รอ OpenClaw version ใหม่)
-- **model format**: ใส่ใน openclaw.json เป็น `openrouter/<provider>/<model-id>` เช่น `openrouter/google/gemini-2.0-flash-lite-001`
-- **Telegram user ID**: ต้องเป็น numeric ID เท่านั้น (ไม่ใช่ @username) หาได้จาก @userinfobot
-- **Express API**: รันอยู่แล้วบน server — ถ้า server reboot ต้องรัน `nohup node ~/openclaw-api/index.js > /tmp/openclaw-api.log 2>&1 &` ใหม่
+- **openclaw.json schema strict** — ไม่รองรับ unknown keys เช่น `peer.name`, `userNames` → ต้องเก็บแยกใน `usernames.json`
+- **Config format v2026.3.13**: botToken อยู่ใน `channels.telegram.accounts.*` เสมอ — ไม่ใช่ top-level
+- **dmPolicy="open"** ต้องมี `"*"` ใน `allowFrom` มิฉะนั้น config invalid
+- **dmPolicy="allowlist"** ต้องมี user ID อย่างน้อย 1 คนใน `allowFrom` มิฉะนั้น config invalid
+- **Multi-bot**: ใช้ `openclaw channels add --account <id>` — แต่ละ bot อยู่ใน `channels.telegram.accounts.<id>`
+- **Set as Default**: ห้ามตั้งชื่อ oldAccountId เป็น `"default"` — validate ทั้ง UI และ server
+- **session.dmScope = per-channel-peer** — แยก session ต่อ user ต่อ channel
+- **Gateway restart**: ใช้ `openclaw gateway restart` (systemd) — ไม่ใช่ pkill
+- **Sonner v2**: ไม่รองรับ `toastOptions` — ลบออกแล้ว
+- **Log format**: JSONL ที่ `/tmp/openclaw/openclaw-YYYY-MM-DD.log` — sort by mtime รองรับขึ้นวันใหม่
+- **Dialog แทน confirm/alert**: ทุก destructive action ใช้ shadcn Dialog
+- **Add/Delete Bot**: เขียน/ลบ config โดยตรง ไม่ใช้ `openclaw channels add/remove` CLI (เร็วกว่า ไม่ timeout)
+- **Add Bot default**: dmPolicy=open, allowFrom=["*"] เสมอ
+- **Bot ไม่ผูก Agent**: fallback ไป default agent — UI แสดง warning ใต้ dropdown
+- **Peer binding ต้องมี `accountId`**: peer binding ที่ไม่มี `accountId` จะ match ทุก bot → user ที่ผูกกับ sale จะ DM stock bot ได้ด้วย — ต้องระบุ `accountId` เสมอ (POST /api/agents/:id/users แก้แล้ว v2026-03-23-r3)
+- **POST /api/agents/:id/users**: สร้าง peer binding พร้อม `accountId` จาก route binding ของ agent อัตโนมัติ
+- **DELETE /api/agents/:id/users/:userId**: ลบ allowFrom เฉพาะ account ที่ถูกต้อง (ใช้ `match.accountId` จาก route binding ไม่ใช่ channel string parse)

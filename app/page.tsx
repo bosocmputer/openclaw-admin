@@ -1,65 +1,161 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getStatus, getAgents, getConfig, restartGateway, getDoctorStatus, runDoctorFix } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
+
+export default function DashboardPage() {
+  const qc = useQueryClient()
+
+  const { data: status, isLoading: statusLoading } = useQuery({
+    queryKey: ['status'],
+    queryFn: getStatus,
+    refetchInterval: 15000,
+  })
+
+  const { data: agents } = useQuery({
+    queryKey: ['agents'],
+    queryFn: getAgents,
+  })
+
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: getConfig,
+  })
+
+  const restart = useMutation({
+    mutationFn: restartGateway,
+    onSuccess: () => {
+      toast.success('Gateway restarting...')
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['status'] }), 3000)
+    },
+    onError: () => toast.error('Failed to restart gateway'),
+  })
+
+  const { data: doctorStatus, isLoading: doctorLoading, refetch: refetchDoctor } = useQuery({
+    queryKey: ['doctor-status'],
+    queryFn: getDoctorStatus,
+    refetchInterval: 60000,
+  })
+
+  const doctorFix = useMutation({
+    mutationFn: runDoctorFix,
+    onSuccess: () => {
+      toast.success('Doctor fix applied — gateway restarted')
+      refetchDoctor()
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['status'] }), 3000)
+    },
+    onError: () => toast.error('Doctor fix failed'),
+  })
+
+  const totalUsers = agents?.reduce((sum, a) => sum + (a.users?.length ?? 0), 0) ?? 0
+  const allAccounts = Object.entries(config?.channels?.telegram?.accounts ?? {}).filter(([, acc]) => acc.botToken)
+  const topLevelToken = config?.channels?.telegram?.botToken
+  const botCount = allAccounts.length + (topLevelToken && !allAccounts.length ? 1 : 0)
+  const botToken = allAccounts.length > 0 || topLevelToken
+  const model = config?.agents?.defaults?.model?.primary ?? '-'
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="space-y-6 w-full">
+      <div>
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <p className="text-sm text-zinc-500 mt-1">OpenClaw ERP Chatbot Admin</p>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-zinc-500">Gateway Status</CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between">
+            {statusLoading ? (
+              <span className="text-sm text-zinc-400">Checking...</span>
+            ) : (
+              <Badge variant={status?.gateway === 'online' ? 'default' : 'destructive'}>
+                {status?.gateway ?? 'unknown'}
+              </Badge>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => restart.mutate()}
+              disabled={restart.isPending}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              {restart.isPending ? 'Restarting...' : 'Restart'}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-zinc-500">Telegram Bots</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{botToken ? botCount : '-'}</p>
+            <p className="text-xs text-zinc-500">{botToken ? `${botCount} bot${botCount > 1 ? 's' : ''} configured` : 'No bot configured'}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-zinc-500">Agents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{agents?.length ?? '-'}</p>
+            <p className="text-xs text-zinc-500">{totalUsers} users total</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-zinc-500">Default Model</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs font-mono break-all text-zinc-700 dark:text-zinc-300">{model}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium text-zinc-500">Config Health</CardTitle>
+            {!doctorLoading && doctorStatus && !doctorStatus.valid && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => doctorFix.mutate()}
+                disabled={doctorFix.isPending}
+              >
+                {doctorFix.isPending ? 'Fixing...' : 'Auto Fix'}
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-zinc-400 mt-1">
+            ตรวจสอบว่า <span className="font-mono">openclaw.json</span> ถูกต้องตาม schema หรือไม่ —
+            เช่น dmPolicy=open ต้องมี <span className="font-mono">&quot;*&quot;</span> ใน allowFrom,
+            dmPolicy=allowlist ต้องมี user ID อย่างน้อย 1 คน
+            ถ้า Config Invalid กด <span className="font-medium">Auto Fix</span> เพื่อให้ระบบซ่อมและ restart gateway อัตโนมัติ
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+        </CardHeader>
+        <CardContent>
+          {doctorLoading ? (
+            <p className="text-sm text-zinc-400">Checking...</p>
+          ) : doctorStatus?.valid ? (
+            <Badge variant="default" className="bg-green-600">Config Valid</Badge>
+          ) : (
+            <div className="space-y-2">
+              <Badge variant="destructive">Config Invalid</Badge>
+              {doctorStatus?.problems.map((p, i) => (
+                <p key={i} className="text-xs text-red-500 font-mono">{p}</p>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
-  );
+  )
 }

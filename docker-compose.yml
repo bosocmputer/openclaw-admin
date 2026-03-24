@@ -1,0 +1,23 @@
+services:
+  openclaw-api:
+    build: ./openclaw-api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - API_TOKEN=${API_TOKEN}
+    volumes:
+      - ${OPENCLAW_HOME}/.openclaw:/root/.openclaw
+      - /usr/local/bin/openclaw:/usr/local/bin/openclaw:ro
+      - /usr/local/bin/mcporter:/usr/local/bin/mcporter:ro
+
+  openclaw-admin:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://${SERVER_IP}:4000
+      - NEXT_PUBLIC_API_TOKEN=${API_TOKEN}
+    depends_on:
+      - openclaw-api
