@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-03-24 (รอบ 7)
+> อัปเดต: 2026-03-24 (รอบ 8)
 
 ---
 
@@ -221,6 +221,25 @@ Multi-provider: OpenRouter / Google / Anthropic / OpenAI
 
 ---
 
+### 10. Analysis
+
+```
+GET /api/agents → จำนวน agents
+GET /api/agents/:id/sessions → sessions + messages ต่อ agent (นับ tokens, users)
+GET /api/members → รายการ members แยก role + สถานะ active
+GET /api/webchat/rooms → รายการห้อง + policy + agent info
+GET /api/gateway/logs → นับ ERROR/WARN/INFO/DEBUG + แสดง error ล่าสุด
+
+UI sections:
+  Overview     → 4 cards: Agents, Telegram Users, Members, Webchat Rooms
+  Agents       → ต่อ agent: sessions, tokens, top users
+  Webchat      → ต่อห้อง: policy, agent, สมาชิก
+  Members      → จัดกลุ่มตาม role (superadmin/admin/chat) + active status
+  System Logs  → นับตาม level + ตาราง error ล่าสุด
+```
+
+---
+
 ## File Structure
 
 ```
@@ -244,6 +263,7 @@ openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 │       ├── mcp/page.tsx              ← MCP (standalone)
 │       ├── guide/page.tsx            ← คู่มือผู้ใช้
 │       ├── members/page.tsx          ← จัดการสมาชิก (superadmin only)
+│       ├── analysis/page.tsx         ← วิเคราะห์ข้อมูล (agents/sessions/tokens/members/logs)
 │       └── webchat/
 │           ├── page.tsx              ← Server Component — ส่ง session ลง client
 │           └── webchat-client.tsx    ← Chat UI (2-column admin / minimal chat user)
