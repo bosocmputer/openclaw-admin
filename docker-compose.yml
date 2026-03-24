@@ -1,19 +1,4 @@
 services:
-  openclaw-api:
-    build: ./openclaw-api
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
-    environment:
-      - API_TOKEN=${API_TOKEN}
-      - OPENCLAW_PKG=/usr/local/lib/node_modules/openclaw
-    volumes:
-      - ${OPENCLAW_HOME}/.openclaw:/root/.openclaw
-      - /home/bosscatdog/.npm-global/bin/openclaw:/usr/local/bin/openclaw:ro
-      - /home/bosscatdog/.npm-global/bin/mcporter:/usr/local/bin/mcporter:ro
-      - /home/bosscatdog/.npm-global/lib/node_modules/openclaw:/usr/local/lib/node_modules/openclaw:ro
-      - /home/bosscatdog/.npm-global/lib/node_modules/mcporter:/usr/local/lib/node_modules/mcporter:ro
-
   openclaw-admin:
     build:
       context: .
@@ -23,5 +8,3 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    depends_on:
-      - openclaw-api
