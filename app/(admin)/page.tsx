@@ -36,7 +36,7 @@ export default function DashboardPage() {
 
   const { data: webchatRooms } = useQuery({
     queryKey: ['webchat-rooms-dash'],
-    queryFn: getWebchatRooms,
+    queryFn: () => getWebchatRooms(),
   })
 
   const { data: chatUsers } = useQuery({
