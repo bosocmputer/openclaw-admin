@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { apiClient } from '@/lib/api'
+import { api } from '@/lib/api'
 
 interface Member {
   id: string
@@ -21,22 +21,22 @@ interface Member {
 }
 
 async function getMembers(): Promise<Member[]> {
-  const res = await apiClient.get('/api/members')
+  const res = await api.get('/api/members')
   return res.data
 }
 
 async function createMember(data: { username: string; password: string; role: string; display_name: string }) {
-  const res = await apiClient.post('/api/members', data)
+  const res = await api.post('/api/members', data)
   return res.data
 }
 
 async function updateMember(id: string, data: Partial<{ role: string; display_name: string; is_active: boolean; password: string }>) {
-  const res = await apiClient.patch(`/api/members/${id}`, data)
+  const res = await api.patch(`/api/members/${id}`, data)
   return res.data
 }
 
 async function deleteMember(id: string) {
-  const res = await apiClient.delete(`/api/members/${id}`)
+  const res = await api.delete(`/api/members/${id}`)
   return res.data
 }
 
