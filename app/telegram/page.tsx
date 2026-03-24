@@ -278,9 +278,16 @@ export default function TelegramPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (accountId: string) => {
-      if (!config) return
-      const tg = { ...config.channels?.telegram }
+      // refetch config ใหม่ก่อน save เพื่อไม่ overwrite binding ที่เพิ่งเซฟไป
+      const fresh = await qc.fetchQuery({ queryKey: ['config'], queryFn: getConfig })
+      if (!fresh) return
+      const tg = { ...fresh.channels?.telegram }
       const state = accounts[accountId]
+
+      // dmPolicy='open' ต้องมี '*' ใน allowFrom เสมอ
+      const allowFrom = state.dmPolicy === 'open'
+        ? ['*']
+        : state.allowFrom.filter((id: number | string) => String(id) !== '*')
 
       // OpenClaw v2026.3.13: เขียนลง accounts.* เสมอ
       if (!tg.accounts) tg.accounts = {}
@@ -290,14 +297,14 @@ export default function TelegramPage() {
           ...tg.accounts[accountId],
           botToken: state.botToken,
           dmPolicy: state.dmPolicy,
-          allowFrom: state.allowFrom,
+          allowFrom,
         },
       }
       // ลบ top-level botToken/dmPolicy/allowFrom ออก (format เก่า)
       delete (tg as Record<string, unknown>).botToken
       delete (tg as Record<string, unknown>).allowFrom
 
-      await putConfig({ ...config, channels: { ...config.channels, telegram: tg } })
+      await putConfig({ ...fresh, channels: { ...fresh.channels, telegram: tg } })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['config'] })
