@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-03-23 (รอบ 3)
+> อัปเดต: 2026-03-24 (รอบ 5)
 
 ---
 
@@ -9,21 +9,22 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         Admin Browser                               │
-│                    http://localhost:3000                             │
+│                  http://192.168.2.109:3000                           │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │ HTTP (TanStack Query + axios)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Next.js App (port 3000)                           │
-│                  app/**/page.tsx  (Client Components)               │
+│             openclaw-admin — Next.js (Docker port 3000)             │
+│             github: bosocmputer/openclaw-admin                      │
+│             deploy: docker compose up -d --build                    │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │ HTTP REST (Bearer token)
                                │ NEXT_PUBLIC_API_URL = http://192.168.2.109:4000
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  Express API (port 4000)                             │
-│                  ~/openclaw-api/index.js                             │
-│                  token: sml-openclaw-2026                            │
+│             openclaw-api — Express.js (pm2 port 4000)               │
+│             github: bosocmputer/openclaw-api                        │
+│             deploy: git pull && pm2 restart openclaw-api            │
 └───┬───────────────┬────────────────┬──────────────────┬─────────────┘
     │               │                │                  │
     ▼               ▼                ▼                  ▼
@@ -31,7 +32,21 @@
 openclaw.json  workspace-*/      workspace-*/      (gateway restart,
                SOUL.md           config/           doctor)
                                  mcporter.json
+                                                        │
+                                                        ▼
+                                              ┌─────────────────┐
+                                              │ openclaw-gateway │
+                                              │ systemd port 18789│
+                                              └─────────────────┘
 ```
+
+## 3 Services
+
+| Service | Deploy | Port | Repo | อัปเดต |
+| ------- | ------ | ---- | ---- | ------ |
+| openclaw-gateway | systemd | 18789 | — | `openclaw gateway restart` |
+| openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull && pm2 restart openclaw-api` |
+| openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull && docker compose up -d --build` |
 
 ---
 
@@ -203,7 +218,7 @@ Multi-provider: OpenRouter / Google / Anthropic / OpenAI
 ## File Structure
 
 ```
-openclaw-admin/
+openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 ├── app/
 │   ├── layout.tsx                    ← root layout + Sidebar + QueryProvider
 │   ├── page.tsx                      ← Dashboard
@@ -223,24 +238,21 @@ openclaw-admin/
 │   ├── sidebar.tsx                   ← Navigation menu
 │   ├── query-provider.tsx            ← TanStack Query Provider
 │   └── ui/                           ← shadcn/ui components
-│       ├── badge.tsx
-│       ├── button.tsx
-│       ├── card.tsx
-│       ├── dialog.tsx
-│       ├── input.tsx
-│       ├── label.tsx
-│       ├── select.tsx
-│       ├── separator.tsx
-│       ├── sonner.tsx
-│       ├── tabs.tsx
-│       └── textarea.tsx
 │
 ├── lib/
 │   └── api.ts                        ← axios instance + TypeScript types + API functions
 │
-├── .env.local                        ← NEXT_PUBLIC_API_URL, NEXT_PUBLIC_API_TOKEN
+├── Dockerfile                        ← Build Next.js standalone
+├── docker-compose.yml                ← Deploy admin container
+├── .env.local                        ← NEXT_PUBLIC_API_URL, NEXT_PUBLIC_API_TOKEN (local dev)
+├── .env.example                      ← Template สำหรับ server
 ├── PLAN.md                           ← Project plan (Thai)
 └── ARCHITECTURE.md                   ← ไฟล์นี้
+
+openclaw-api/                         ← github: bosocmputer/openclaw-api (แยก repo)
+├── index.js                          ← Express API endpoints ทั้งหมด
+├── package.json
+└── .env                              ← API_TOKEN, PORT (บน server)
 ```
 
 ---
