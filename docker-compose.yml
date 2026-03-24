@@ -6,6 +6,7 @@ services:
       - "4000:4000"
     environment:
       - API_TOKEN=${API_TOKEN}
+      - OPENCLAW_PKG=/usr/local/lib/node_modules/openclaw
     volumes:
       - ${OPENCLAW_HOME}/.openclaw:/root/.openclaw
       - /home/bosscatdog/.npm-global/bin/openclaw:/usr/local/bin/openclaw:ro

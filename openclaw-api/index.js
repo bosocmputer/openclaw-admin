@@ -16,6 +16,10 @@ const HOME = process.env.HOME
 const CONFIG_PATH = path.join(HOME, '.openclaw/openclaw.json')
 const USERNAMES_PATH = path.join(HOME, '.openclaw/usernames.json')
 
+// openclaw CLI ต้องรันจาก package directory เพราะใช้ relative path หา dist/
+const OPENCLAW_PKG = process.env.OPENCLAW_PKG || ''
+const execOpts = OPENCLAW_PKG ? { cwd: OPENCLAW_PKG } : {}
+
 // SOUL template generator — path ใช้ ~ เพื่อรองรับทุก server/user
 function generateSoulTemplate(workspace, accessMode = 'general') {
   const configPath = `${workspace}/config/mcporter.json`
@@ -616,6 +620,7 @@ app.put('/api/model', (req, res) => {
 app.post('/api/gateway/restart', (req, res) => {
   exec(
     'openclaw gateway restart',
+    execOpts,
     (err) => {
       if (err) return res.status(500).json({ error: err.message })
       res.json({ ok: true })
@@ -734,7 +739,7 @@ app.get('/api/agents/:id/sessions/:sessionId', (req, res) => {
 
 // GET /api/doctor/status — เช็ค config valid/invalid
 app.get('/api/doctor/status', (req, res) => {
-  exec('openclaw doctor', { timeout: 15000 }, (err, stdout, stderr) => {
+  exec('openclaw doctor', { ...execOpts, timeout: 15000 }, (err, stdout, stderr) => {
     const output = stdout + stderr
     const invalid = output.includes('Config invalid') || output.includes('Invalid config')
     const problems = []
@@ -751,7 +756,7 @@ app.get('/api/doctor/status', (req, res) => {
 
 // POST /api/doctor/fix — รัน openclaw doctor --fix
 app.post('/api/doctor/fix', (req, res) => {
-  exec('openclaw doctor --fix', { timeout: 30000 }, (err, stdout, stderr) => {
+  exec('openclaw doctor --fix', { ...execOpts, timeout: 30000 }, (err, stdout, stderr) => {
     if (err && !stdout.includes('Doctor complete')) {
       return res.status(500).json({ error: stderr || err.message })
     }
