@@ -8,8 +8,8 @@ services:
       - API_TOKEN=${API_TOKEN}
     volumes:
       - ${OPENCLAW_HOME}/.openclaw:/root/.openclaw
-      - /usr/local/bin/openclaw:/usr/local/bin/openclaw:ro
-      - /usr/local/bin/mcporter:/usr/local/bin/mcporter:ro
+      - /home/bosscatdog/.npm-global/bin/openclaw:/usr/local/bin/openclaw:ro
+      - /home/bosscatdog/.npm-global/bin/mcporter:/usr/local/bin/mcporter:ro
 
   openclaw-admin:
     build:
