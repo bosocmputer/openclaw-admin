@@ -6,14 +6,19 @@ import { cn } from '@/lib/utils'
 import { useTransition } from 'react'
 import { logout } from '@/app/actions/auth'
 
-const navItems = [
+const adminNavItems = [
   { href: '/', label: 'Dashboard' },
   { href: '/model', label: 'Model' },
   { href: '/agents', label: 'Agents' },
   { href: '/telegram', label: 'Telegram' },
+  { href: '/webchat', label: 'Webchat' },
   { href: '/chats', label: 'Chats' },
   { href: '/logs', label: 'Logs' },
   { href: '/guide', label: 'คู่มือผู้ใช้' },
+]
+
+const chatNavItems = [
+  { href: '/webchat', label: 'Webchat' },
 ]
 
 interface SidebarProps {
@@ -26,10 +31,12 @@ export default function Sidebar({ role, username, displayName }: SidebarProps) {
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
 
-  const allNavItems = [
-    ...navItems,
-    ...(role === 'superadmin' ? [{ href: '/members', label: 'สมาชิก' }] : []),
-  ]
+  const navItems = role === 'chat'
+    ? chatNavItems
+    : [
+        ...adminNavItems,
+        ...(role === 'superadmin' ? [{ href: '/members', label: 'สมาชิก' }] : []),
+      ]
 
   return (
     <aside className="w-52 shrink-0 border-r bg-zinc-50 dark:bg-zinc-900 flex flex-col">
@@ -37,7 +44,7 @@ export default function Sidebar({ role, username, displayName }: SidebarProps) {
         <span className="font-bold text-base tracking-tight">OpenClaw Admin</span>
       </div>
       <nav className="flex flex-col gap-1 p-3 flex-1">
-        {allNavItems.map(({ href, label }) => {
+        {navItems.map(({ href, label }) => {
           const active = href === '/' ? pathname === '/' : pathname.startsWith(href)
           return (
             <Link

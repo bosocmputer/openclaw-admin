@@ -332,3 +332,69 @@ export async function getSessionMessages(agentId: string, sessionId: string): Pr
   const { data } = await api.get(`/api/agents/${agentId}/sessions/${sessionId}`)
   return data
 }
+
+// ─── Webchat ──────────────────────────────────────────────────────────────────
+
+export interface WebchatRoom {
+  id: number
+  agent_id: string
+  display_name: string
+  policy: 'open' | 'allowlist'
+  created_at: string
+  allowed_users: string[]
+}
+
+export interface WebchatMessage {
+  id: number
+  username: string
+  role: 'user' | 'assistant'
+  content: string
+  run_id?: string
+  created_at: string
+}
+
+export interface ChatUser {
+  username: string
+  display_name: string
+}
+
+export async function getWebchatRooms(username?: string): Promise<WebchatRoom[]> {
+  const { data } = await api.get('/api/webchat/rooms', { params: username ? { username } : {} })
+  return data
+}
+
+export async function createWebchatRoom(agentId: string, displayName: string, policy: 'open' | 'allowlist'): Promise<WebchatRoom> {
+  const { data } = await api.post('/api/webchat/rooms', { agent_id: agentId, display_name: displayName, policy })
+  return data
+}
+
+export async function updateWebchatRoom(id: number, fields: { display_name?: string; policy?: string }): Promise<void> {
+  await api.put(`/api/webchat/rooms/${id}`, fields)
+}
+
+export async function deleteWebchatRoom(id: number): Promise<void> {
+  await api.delete(`/api/webchat/rooms/${id}`)
+}
+
+export async function addWebchatRoomUser(roomId: number, username: string): Promise<void> {
+  await api.post(`/api/webchat/rooms/${roomId}/users`, { username })
+}
+
+export async function removeWebchatRoomUser(roomId: number, username: string): Promise<void> {
+  await api.delete(`/api/webchat/rooms/${roomId}/users/${username}`)
+}
+
+export async function getWebchatHistory(roomId: number, username: string): Promise<WebchatMessage[]> {
+  const { data } = await api.get(`/api/webchat/history/${roomId}`, { params: { username } })
+  return data
+}
+
+export async function sendWebchatMessage(roomId: number, username: string, message: string): Promise<{ ok: boolean; reply: string }> {
+  const { data } = await api.post('/api/webchat/send', { roomId, username, message })
+  return data
+}
+
+export async function getChatUsers(): Promise<ChatUser[]> {
+  const { data } = await api.get('/api/webchat/chat-users')
+  return data
+}

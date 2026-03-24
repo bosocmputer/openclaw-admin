@@ -43,7 +43,7 @@ async function deleteMember(id: string) {
 const ROLE_LABELS: Record<string, string> = {
   superadmin: 'Super Admin',
   admin: 'Admin',
-  viewer: 'Viewer',
+  chat: 'Chat',
 }
 
 export default function MembersPage() {
@@ -172,7 +172,7 @@ export default function MembersPage() {
                   <SelectContent>
                     <SelectItem value="superadmin">Super Admin</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="chat">Chat</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -221,7 +221,7 @@ export default function MembersPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="chat">Chat</SelectItem>
                 </SelectContent>
               </Select>
             </div>
