@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useTransition } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { logout } from '@/app/actions/auth'
 import {
   getWebchatRooms, createWebchatRoom, updateWebchatRoom, deleteWebchatRoom,
   addWebchatRoomUser, removeWebchatRoomUser,
@@ -37,6 +38,7 @@ interface OptimisticMessage {
 export default function WebchatClient({ username, role }: Props) {
   const isAdmin = role === 'admin' || role === 'superadmin'
   const qc = useQueryClient()
+  const [isPending, startTransition] = useTransition()
 
   const { data: rooms = [] } = useQuery({
     queryKey: ['webchat-rooms', username],
@@ -174,44 +176,62 @@ export default function WebchatClient({ username, role }: Props) {
   // ─── render role=chat (full-screen 2-column, no nav) ─────────────────────
   if (!isAdmin) {
     return (
-      <div className="flex h-screen gap-0 overflow-hidden">
-        {/* room sidebar */}
-        <div className="w-64 shrink-0 border-r flex flex-col bg-zinc-50 dark:bg-zinc-900">
-          <div className="px-4 py-3 border-b">
-            <span className="font-semibold text-sm">ห้องแชท</span>
+      <div className="flex h-screen overflow-hidden bg-white dark:bg-zinc-950">
+        {/* ── sidebar ── */}
+        <div className="w-56 shrink-0 border-r flex flex-col bg-zinc-50 dark:bg-zinc-900">
+          {/* brand */}
+          <div className="px-4 py-4 border-b">
+            <p className="font-bold text-sm tracking-tight">OpenClaw</p>
+            <p className="text-xs text-zinc-400 mt-0.5">ห้องแชท</p>
           </div>
-          <div className="flex-1 overflow-y-auto py-1">
-            {rooms.length === 0 && <p className="text-xs text-zinc-400 px-4 py-3">คุณยังไม่มีห้องแชท</p>}
+
+          {/* room list */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+            {rooms.length === 0 && (
+              <p className="text-xs text-zinc-400 px-3 py-4 text-center">ยังไม่มีห้องที่เข้าถึงได้</p>
+            )}
             {rooms.map(room => (
               <button
                 type="button"
                 key={room.id}
                 onClick={() => setActiveRoomId(room.id)}
-                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${
                   activeRoomId === room.id
                     ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'
-                    : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                    : 'text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800'
                 }`}
               >
-                <p className="font-medium">{room.display_name}</p>
+                <p className="font-medium truncate">{room.display_name}</p>
               </button>
             ))}
           </div>
-          {/* user info bottom */}
-          <div className="px-4 py-3 border-t">
-            <p className="text-xs text-zinc-500 truncate">{username}</p>
+
+          {/* user + logout */}
+          <div className="p-3 border-t space-y-1.5">
+            <div className="px-3 py-1">
+              <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">{username}</p>
+              <p className="text-xs text-zinc-400">chat</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => startTransition(() => logout())}
+              disabled={isPending}
+              className="w-full rounded-md px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors text-left"
+            >
+              {isPending ? 'กำลังออก...' : 'ออกจากระบบ'}
+            </button>
           </div>
         </div>
 
-        {/* chat panel */}
+        {/* ── chat panel ── */}
         <div className="flex-1 flex flex-col min-w-0">
           {!activeRoom ? (
-            <div className="flex-1 flex items-center justify-center text-zinc-400 text-sm">
-              เลือกห้องแชททางซ้าย
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 text-zinc-400">
+              <p className="text-sm">เลือกห้องแชททางซ้าย</p>
             </div>
           ) : (
             <>
-              <div className="px-5 py-3 border-b bg-white dark:bg-zinc-950">
+              <div className="px-5 py-3.5 border-b bg-white dark:bg-zinc-950 shrink-0">
                 <h2 className="font-semibold text-sm">{activeRoom.display_name}</h2>
               </div>
               <ChatArea allMessages={allMessages} message={message} sending={sending} username={username} onMessageChange={setMessage} onSend={handleSend} bottomRef={bottomRef} />
