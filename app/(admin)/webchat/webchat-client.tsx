@@ -171,23 +171,53 @@ export default function WebchatClient({ username, role }: Props) {
     ...optimisticMsgs,
   ]
 
-  // ─── render role=chat (minimal) ──────────────────────────────────────────
+  // ─── render role=chat (full-screen 2-column, no nav) ─────────────────────
   if (!isAdmin) {
     return (
-      <div className="flex flex-col h-full">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-bold">{activeRoom ? activeRoom.display_name : 'Webchat'}</h1>
-          {rooms.length > 1 && (
-            <Select value={activeRoomId?.toString() ?? ''} onValueChange={v => setActiveRoomId(Number(v))}>
-              <SelectTrigger className="w-44 h-8 text-sm"><SelectValue placeholder="เลือกห้อง" /></SelectTrigger>
-              <SelectContent>{rooms.map(r => <SelectItem key={r.id} value={r.id.toString()}>{r.display_name}</SelectItem>)}</SelectContent>
-            </Select>
+      <div className="flex h-screen gap-0 overflow-hidden">
+        {/* room sidebar */}
+        <div className="w-64 shrink-0 border-r flex flex-col bg-zinc-50 dark:bg-zinc-900">
+          <div className="px-4 py-3 border-b">
+            <span className="font-semibold text-sm">ห้องแชท</span>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {rooms.length === 0 && <p className="text-xs text-zinc-400 px-4 py-3">คุณยังไม่มีห้องแชท</p>}
+            {rooms.map(room => (
+              <button
+                type="button"
+                key={room.id}
+                onClick={() => setActiveRoomId(room.id)}
+                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                  activeRoomId === room.id
+                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'
+                    : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                }`}
+              >
+                <p className="font-medium">{room.display_name}</p>
+              </button>
+            ))}
+          </div>
+          {/* user info bottom */}
+          <div className="px-4 py-3 border-t">
+            <p className="text-xs text-zinc-500 truncate">{username}</p>
+          </div>
+        </div>
+
+        {/* chat panel */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {!activeRoom ? (
+            <div className="flex-1 flex items-center justify-center text-zinc-400 text-sm">
+              เลือกห้องแชททางซ้าย
+            </div>
+          ) : (
+            <>
+              <div className="px-5 py-3 border-b bg-white dark:bg-zinc-950">
+                <h2 className="font-semibold text-sm">{activeRoom.display_name}</h2>
+              </div>
+              <ChatArea allMessages={allMessages} message={message} sending={sending} username={username} onMessageChange={setMessage} onSend={handleSend} bottomRef={bottomRef} />
+            </>
           )}
         </div>
-        {!activeRoom
-          ? <p className="text-sm text-zinc-400">คุณยังไม่มีห้องแชทที่เข้าถึงได้</p>
-          : <ChatArea allMessages={allMessages} message={message} sending={sending} username={username} onMessageChange={setMessage} onSend={handleSend} bottomRef={bottomRef} />
-        }
       </div>
     )
   }

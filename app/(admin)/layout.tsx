@@ -8,11 +8,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const session = await getSession()
   if (!session) redirect('/login')
 
+  const isChat = session.role === 'chat'
+
   return (
     <div className="h-screen flex overflow-hidden">
       <QueryProvider>
-        <Sidebar role={session.role} username={session.username} displayName={session.displayName} />
-        <main className="flex-1 overflow-y-auto p-6 min-w-0">{children}</main>
+        {!isChat && <Sidebar role={session.role} username={session.username} displayName={session.displayName} />}
+        <main className={`flex-1 overflow-y-auto min-w-0 ${isChat ? '' : 'p-6'}`}>{children}</main>
         <Toaster />
       </QueryProvider>
     </div>
