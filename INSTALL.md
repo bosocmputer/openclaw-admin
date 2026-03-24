@@ -159,9 +159,16 @@ nano ~/openclaw-api/.env
 API_TOKEN=sml-openclaw-2026
 PORT=4000
 DATABASE_URL=postgresql://openclaw:POSTGRES_PASSWORD_HERE@localhost:5432/openclaw_admin
+HOOKS_TOKEN=ใส่ค่าสุ่มที่นี่
 ```
 
 > `POSTGRES_PASSWORD_HERE` ให้ใส่รหัสผ่านที่จะตั้งในขั้นตอนที่ 9 (ต้องตรงกัน)
+
+**วิธีสร้าง HOOKS_TOKEN** (รันคำสั่งนี้แล้ว copy ผลลัพธ์มาวาง):
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
 บันทึกไฟล์: กด `Ctrl+X` → `Y` → `Enter`
 
@@ -334,6 +341,48 @@ password: superadmin
 3. ถ้าไม่ Valid กด **Auto Fix**
 4. กด **Restart Gateway**
 
+### 11.8 ตั้งค่า Webchat (ถ้าต้องการให้พนักงานแชทผ่านเว็บ)
+
+**เปิด Hooks ใน openclaw.json:**
+
+```bash
+nano ~/.openclaw/openclaw.json
+```
+
+เพิ่ม section `hooks` ลงใน JSON (ก่อน closing `}`):
+
+```json
+"hooks": {
+  "enabled": true,
+  "token": "ค่าเดียวกับ HOOKS_TOKEN ใน ~/openclaw-api/.env",
+  "allowRequestSessionKey": true
+}
+```
+
+บันทึกแล้ว restart gateway:
+
+```bash
+openclaw gateway restart
+```
+
+**เพิ่มห้องแชทใน Admin:**
+
+1. ไปที่เมนู **Webchat**
+2. กด **+ เพิ่มห้อง**
+3. กรอก Agent (เช่น `sale`) และชื่อห้อง (เช่น `ฝ่ายขาย`)
+4. เลือก Policy: **open** (ทุกคน) หรือ **allowlist** (เฉพาะที่กำหนด)
+5. กด **Add**
+
+**เพิ่มพนักงานที่ใช้ Webchat:**
+
+1. ไปที่เมนู **สมาชิก**
+2. กด **เพิ่มสมาชิก**
+3. กรอก username / password / ชื่อ
+4. เลือก Role: **chat**
+5. กด **Add**
+
+> พนักงาน role=chat จะ login แล้วเข้าหน้า Webchat ได้เลย ไม่เห็นเมนูอื่น
+
 ---
 
 ## ขั้นตอนที่ 12 — ทดสอบ Bot
@@ -407,6 +456,15 @@ pm2 logs openclaw-api --lines 30
 2. เช็คว่า Bot ผูก Agent ไว้แล้วใน **Telegram**
 3. เช็คว่า User ID ถูก add ไว้ใน **Agents → Users** แล้ว
 4. ลอง **Restart Gateway** จาก Dashboard
+
+### Webchat ไม่ตอบ (timeout / 502)
+
+1. ตรวจสอบ `hooks` ใน `~/.openclaw/openclaw.json` — ต้องมี `enabled:true`, `token`, และ `allowRequestSessionKey:true`
+2. ตรวจสอบ `HOOKS_TOKEN` ใน `~/openclaw-api/.env` ต้องตรงกับ `hooks.token` ใน openclaw.json
+3. Restart gateway: `openclaw gateway restart`
+4. Restart api: `pm2 restart openclaw-api --update-env`
+
+---
 
 ### ลืมรหัสผ่าน superadmin
 

@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-03-24 (รอบ 6)
+> อัปเดต: 2026-03-24 (รอบ 7)
 
 ---
 
@@ -239,11 +239,14 @@ openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 │       │       ├── page.tsx          ← Agent Detail (2-column: SOUL ซ้าย, Users+MCP ขวา)
 │       │       └── chat/page.tsx     ← Chat Monitor
 │       ├── telegram/page.tsx         ← Telegram Bot management
-│       ├── chats/page.tsx            ← All chats (เลือก agent)
+│       ├── chats/page.tsx            ← Telegram Chats History (เลือก agent)
 │       ├── logs/page.tsx             ← Live logs
 │       ├── mcp/page.tsx              ← MCP (standalone)
 │       ├── guide/page.tsx            ← คู่มือผู้ใช้
-│       └── members/page.tsx          ← จัดการสมาชิก (superadmin only)
+│       ├── members/page.tsx          ← จัดการสมาชิก (superadmin only)
+│       └── webchat/
+│           ├── page.tsx              ← Server Component — ส่ง session ลง client
+│           └── webchat-client.tsx    ← Chat UI (2-column admin / minimal chat user)
 │
 ├── components/
 │   ├── sidebar.tsx                   ← Navigation + logout + แสดงชื่อ/role

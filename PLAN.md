@@ -1,6 +1,6 @@
 # OpenClaw Admin — Project Plan
 
-> อัปเดตล่าสุด: 2026-03-24 (รอบ 6)
+> อัปเดตล่าสุด: 2026-03-24 (รอบ 7)
 
 ---
 
@@ -117,7 +117,8 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
   - ปุ่ม **Set as Default** → เปิด Dialog (validate ห้ามชื่อซ้ำ/ห้าม `default`)
   - ปุ่ม **Delete Bot** → เปิด Dialog (ซ่อนสำหรับ default), ลบ config โดยตรง (ไม่ใช้ CLI)
 
-### 7. Chats (`/chats`)
+### 7. Telegram Chats History (`/chats`)
+- ชื่อเมนู "Telegram History" — แสดงประวัติแชท Telegram เท่านั้น
 - เลือก agent (ปุ่ม top)
 - Analytics: users, messages, tokens, sessions
 - Sidebar Users แยกตาม sender_id
@@ -140,9 +141,23 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - `proxy.ts` guard redirect ทุกหน้าถ้าไม่มี session
 
 ### 11. สมาชิก (`/members`) — เฉพาะ superadmin
+
 - รายการ admin_users ทั้งหมด
 - เพิ่ม/ลบ/disable user, reset password, เปลี่ยน role
-- Roles: superadmin / admin / viewer
+- Roles: **superadmin** / **admin** / **chat** (ไม่มี viewer แล้ว)
+
+### 12. Webchat (`/webchat`)
+
+- **role=admin/superadmin**: layout 2 คอลัมน์ — room list ซ้าย + chat ขวา
+  - เพิ่ม/แก้ไข/ลบห้องแชท (Dialog)
+  - กำหนด Policy: **open** (ทุกคน) / **allowlist** (เฉพาะที่กำหนด)
+  - Allowlist inline — เพิ่ม/ลบ user ใน header bar
+  - เปลี่ยน Policy ได้ทันทีจาก Select ใน header
+- **role=chat**: เห็นเฉพาะหน้า Webchat — แสดงชื่อห้อง, เลือกห้อง (ถ้ามีหลายห้อง)
+- Optimistic messages — ข้อความขึ้นทันทีก่อน AI ตอบ
+- Strip `[[ reply_to_current]]` artifact จาก gateway
+- Chat history เก็บใน PostgreSQL (`webchat_messages` table)
+- ส่งข้อความผ่าน openclaw Hooks API (`POST /hooks/agent`) + poll response จาก `.jsonl` files
 
 ---
 
@@ -183,6 +198,15 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 | POST | `/api/members` | เพิ่ม admin user ใหม่ (bcrypt password) |
 | PATCH | `/api/members/:id` | แก้ role / display_name / is_active / password |
 | DELETE | `/api/members/:id` | ลบ admin user (ห้ามลบ superadmin คนสุดท้าย) |
+| GET | `/api/webchat/rooms` | list rooms (กรอง policy=allowlist ตาม ?username=) |
+| POST | `/api/webchat/rooms` | สร้าง room ใหม่ |
+| PUT | `/api/webchat/rooms/:id` | แก้ display_name / policy |
+| DELETE | `/api/webchat/rooms/:id` | ลบ room + messages |
+| POST | `/api/webchat/rooms/:id/users` | เพิ่ม user ใน allowlist |
+| DELETE | `/api/webchat/rooms/:id/users/:username` | ลบ user จาก allowlist |
+| GET | `/api/webchat/history/:roomId` | ดึง messages ของ user ใน room |
+| POST | `/api/webchat/send` | ส่งข้อความ → hooks → poll response → บันทึก PostgreSQL |
+| GET | `/api/webchat/chat-users` | list users ที่มี role=chat |
 
 ---
 
@@ -274,3 +298,8 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - **PostgreSQL**: อยู่ใน docker-compose เดียวกับ openclaw-admin — volume `postgres_data` ห้าม `down -v`
 - **superadmin default**: `superadmin` / `superadmin` — seed ใน `db/init.sql` (bcrypt cost=12)
 - **Telegram saveMutation**: refetch config ก่อน save เพื่อไม่ overwrite binding ที่เพิ่งเซฟ — `dmPolicy=open` ต้องมี `allowFrom: ['*']` เสมอ
+- **role=chat**: login แล้ว redirect `/webchat` ทันที — proxy.ts กั้น route อื่นทั้งหมด
+- **Webchat Hooks**: ต้องเปิด `hooks.enabled=true` + `hooks.token` + `hooks.allowRequestSessionKey=true` ใน `~/.openclaw/openclaw.json` — token เก็บใน `~/openclaw-api/.env` เป็น `HOOKS_TOKEN`
+- **Webchat poll**: HTTP `/sessions/{key}/history` ต้องการ auth แบบอื่น — ใช้วิธีอ่าน `~/.openclaw/agents/{agentId}/sessions/sessions.json` + `.jsonl` โดยตรงแทน
+- **Webchat session key**: gateway สร้าง key เป็น `agent:{agentId}:hook:webchat:{username}` — ต้อง lookup จาก `sessions.json` ด้วย full key
+- **PostgreSQL constraint**: `admin_users_role_check` ต้องแก้ manual หลัง deploy ครั้งแรก: `ALTER TABLE admin_users DROP CONSTRAINT admin_users_role_check; ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_check CHECK (role IN ('superadmin', 'admin', 'chat'));`
