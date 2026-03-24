@@ -1,7 +1,10 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getStatus, getAgents, getConfig, restartGateway, getDoctorStatus, runDoctorFix } from '@/lib/api'
+import {
+  getStatus, getAgents, getConfig, restartGateway, getDoctorStatus, runDoctorFix,
+  getMembers, getWebchatRooms, getChatUsers,
+} from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,6 +27,21 @@ export default function DashboardPage() {
   const { data: config } = useQuery({
     queryKey: ['config'],
     queryFn: getConfig,
+  })
+
+  const { data: members } = useQuery({
+    queryKey: ['members'],
+    queryFn: getMembers,
+  })
+
+  const { data: webchatRooms } = useQuery({
+    queryKey: ['webchat-rooms-dash'],
+    queryFn: getWebchatRooms,
+  })
+
+  const { data: chatUsers } = useQuery({
+    queryKey: ['chat-users-dash'],
+    queryFn: getChatUsers,
   })
 
   const restart = useMutation({
@@ -58,6 +76,9 @@ export default function DashboardPage() {
   const botToken = allAccounts.length > 0 || topLevelToken
   const model = config?.agents?.defaults?.model?.primary ?? '-'
 
+  const adminCount = members?.filter(m => m.role === 'admin').length ?? 0
+  const chatCount = members?.filter(m => m.role === 'chat').length ?? 0
+
   return (
     <div className="space-y-6 w-full">
       <div>
@@ -65,7 +86,7 @@ export default function DashboardPage() {
         <p className="text-sm text-zinc-500 mt-1">OpenClaw ERP Chatbot Admin</p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-500">Gateway Status</CardTitle>
@@ -91,6 +112,16 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-zinc-500">Agents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{agents?.length ?? '-'}</p>
+            <p className="text-xs text-zinc-500">{totalUsers} Telegram users</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-500">Telegram Bots</CardTitle>
           </CardHeader>
           <CardContent>
@@ -101,11 +132,11 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-500">Agents</CardTitle>
+            <CardTitle className="text-sm font-medium text-zinc-500">Members</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{agents?.length ?? '-'}</p>
-            <p className="text-xs text-zinc-500">{totalUsers} users total</p>
+            <p className="text-2xl font-bold">{members?.length ?? '-'}</p>
+            <p className="text-xs text-zinc-500">{adminCount} admin · {chatCount} chat</p>
           </CardContent>
         </Card>
 
@@ -119,43 +150,73 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-medium text-zinc-500">Config Health</CardTitle>
-            {!doctorLoading && doctorStatus && !doctorStatus.valid && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => doctorFix.mutate()}
-                disabled={doctorFix.isPending}
-              >
-                {doctorFix.isPending ? 'Fixing...' : 'Auto Fix'}
-              </Button>
-            )}
-          </div>
-          <p className="text-xs text-zinc-400 mt-1">
-            ตรวจสอบว่า <span className="font-mono">openclaw.json</span> ถูกต้องตาม schema หรือไม่ —
-            เช่น dmPolicy=open ต้องมี <span className="font-mono">&quot;*&quot;</span> ใน allowFrom,
-            dmPolicy=allowlist ต้องมี user ID อย่างน้อย 1 คน
-            ถ้า Config Invalid กด <span className="font-medium">Auto Fix</span> เพื่อให้ระบบซ่อมและ restart gateway อัตโนมัติ
-          </p>
-        </CardHeader>
-        <CardContent>
-          {doctorLoading ? (
-            <p className="text-sm text-zinc-400">Checking...</p>
-          ) : doctorStatus?.valid ? (
-            <Badge variant="default" className="bg-green-600">Config Valid</Badge>
-          ) : (
-            <div className="space-y-2">
-              <Badge variant="destructive">Config Invalid</Badge>
-              {doctorStatus?.problems.map((p, i) => (
-                <p key={i} className="text-xs text-red-500 font-mono">{p}</p>
-              ))}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <Card className="lg:col-span-3">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-zinc-500">Config Health</CardTitle>
+              {!doctorLoading && doctorStatus && !doctorStatus.valid && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => doctorFix.mutate()}
+                  disabled={doctorFix.isPending}
+                >
+                  {doctorFix.isPending ? 'Fixing...' : 'Auto Fix'}
+                </Button>
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <p className="text-xs text-zinc-400 mt-1">
+              ตรวจสอบว่า <span className="font-mono">openclaw.json</span> ถูกต้องตาม schema หรือไม่ —
+              เช่น dmPolicy=open ต้องมี <span className="font-mono">&quot;*&quot;</span> ใน allowFrom,
+              dmPolicy=allowlist ต้องมี user ID อย่างน้อย 1 คน
+              ถ้า Config Invalid กด <span className="font-medium">Auto Fix</span> เพื่อให้ระบบซ่อมและ restart gateway อัตโนมัติ
+            </p>
+          </CardHeader>
+          <CardContent>
+            {doctorLoading ? (
+              <p className="text-sm text-zinc-400">Checking...</p>
+            ) : doctorStatus?.valid ? (
+              <Badge variant="default" className="bg-green-600">Config Valid</Badge>
+            ) : (
+              <div className="space-y-2">
+                <Badge variant="destructive">Config Invalid</Badge>
+                {doctorStatus?.problems.map((p, i) => (
+                  <p key={i} className="text-xs text-red-500 font-mono">{p}</p>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-zinc-500">Webchat Rooms</CardTitle>
+            <p className="text-xs text-zinc-400 mt-1">
+              {webchatRooms?.length ?? 0} ห้อง · {chatUsers?.length ?? 0} chat users
+            </p>
+          </CardHeader>
+          <CardContent>
+            {!webchatRooms || webchatRooms.length === 0 ? (
+              <p className="text-sm text-zinc-400">ยังไม่มีห้อง</p>
+            ) : (
+              <div className="space-y-2">
+                {webchatRooms.map(room => (
+                  <div key={room.id} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{room.display_name}</p>
+                      <p className="text-xs text-zinc-400 truncate">Agent: {room.agent_id}</p>
+                    </div>
+                    <Badge variant={room.policy === 'open' ? 'default' : 'secondary'} className="shrink-0 text-xs">
+                      {room.policy}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

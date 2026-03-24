@@ -398,3 +398,40 @@ export async function getChatUsers(): Promise<ChatUser[]> {
   const { data } = await api.get('/api/webchat/chat-users')
   return data
 }
+
+// ─── Members ──────────────────────────────────────────────────────────────────
+export interface Member {
+  id: number
+  username: string
+  role: 'superadmin' | 'admin' | 'chat'
+  display_name: string
+  is_active: boolean
+  created_at: string
+}
+
+export async function getMembers(): Promise<Member[]> {
+  const { data } = await api.get('/api/members')
+  return data
+}
+
+// ─── Analysis ─────────────────────────────────────────────────────────────────
+export interface AnalysisStats {
+  agents: Agent[]
+  sessions: Record<string, ChatSession[]>
+  members: Member[]
+  webchatRooms: WebchatRoom[]
+  webchatMessages: Record<number, WebchatMessage[]>
+  logs: LogEntry[]
+}
+
+export interface LogEntry {
+  time: string
+  level: string
+  subsystem: string
+  msg: string
+}
+
+export async function getGatewayLogs(lines = 500): Promise<LogEntry[]> {
+  const { data } = await api.get('/api/gateway/logs', { params: { lines } })
+  return data
+}
