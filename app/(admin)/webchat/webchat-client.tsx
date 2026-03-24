@@ -244,7 +244,7 @@ export default function WebchatClient({ username, role }: Props) {
 
   // ─── render role=admin (2-column) ────────────────────────────────────────
   return (
-    <div className="flex h-[calc(100vh-48px)] gap-0 -m-6 overflow-hidden">
+    <div className="fixed inset-0 left-52 flex gap-0 overflow-hidden">
 
       {/* ── Left: room list ── */}
       <div className="w-64 shrink-0 border-r flex flex-col bg-zinc-50 dark:bg-zinc-900">

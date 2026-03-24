@@ -14,7 +14,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className="h-screen flex overflow-hidden">
       <QueryProvider>
         {!isChat && <Sidebar role={session.role} username={session.username} displayName={session.displayName} />}
-        <main className={`flex-1 overflow-y-auto min-w-0 ${isChat ? '' : 'p-6'}`}>{children}</main>
+        <main className={`flex-1 min-w-0 flex flex-col ${isChat ? 'overflow-hidden' : 'overflow-y-auto p-6'}`}>{children}</main>
         <Toaster />
       </QueryProvider>
     </div>
