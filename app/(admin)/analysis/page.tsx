@@ -264,7 +264,7 @@ function SystemSection({ logs }: { logs: LogEntry[] }) {
 export default function AnalysisPage() {
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: getAgents })
   const { data: members = [] } = useQuery({ queryKey: ['members'], queryFn: getMembers })
-  const { data: webchatRooms = [] } = useQuery({ queryKey: ['webchat-rooms-dash'], queryFn: getWebchatRooms })
+  const { data: webchatRooms = [] } = useQuery({ queryKey: ['webchat-rooms-dash'], queryFn: () => getWebchatRooms() })
   const { data: chatUsers = [] } = useQuery({ queryKey: ['chat-users-dash'], queryFn: getChatUsers })
   const { data: logs = [], isLoading: logsLoading } = useQuery({
     queryKey: ['gateway-logs'],
