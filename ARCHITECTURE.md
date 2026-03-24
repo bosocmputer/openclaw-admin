@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-03-24 (รอบ 5)
+> อัปเดต: 2026-03-24 (รอบ 6)
 
 ---
 
@@ -12,11 +12,16 @@
 │                  http://192.168.2.109:3000                           │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │ HTTP (TanStack Query + axios)
+                               │ session cookie (JWT HttpOnly)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │             openclaw-admin — Next.js (Docker port 3000)             │
 │             github: bosocmputer/openclaw-admin                      │
 │             deploy: docker compose up -d --build                    │
+│             proxy.ts → guard ทุก route, redirect /login             │
+├─────────────────────────────────────────────────────────────────────┤
+│             PostgreSQL 16 (Docker port 5432)                        │
+│             volume: postgres_data — admin_users table               │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │ HTTP REST (Bearer token)
                                │ NEXT_PUBLIC_API_URL = http://192.168.2.109:4000
@@ -40,13 +45,14 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
                                               └─────────────────┘
 ```
 
-## 3 Services
+## 4 Services
 
 | Service | Deploy | Port | Repo | อัปเดต |
 | ------- | ------ | ---- | ---- | ------ |
 | openclaw-gateway | systemd | 18789 | — | `openclaw gateway restart` |
-| openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull && pm2 restart openclaw-api` |
+| openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull && npm install && pm2 restart openclaw-api` |
 | openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull && docker compose up -d --build` |
+| PostgreSQL | Docker | 5432 | — (same compose) | restart อัตโนมัติกับ openclaw-admin |
 
 ---
 
@@ -220,39 +226,49 @@ Multi-provider: OpenRouter / Google / Anthropic / OpenAI
 ```
 openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 ├── app/
-│   ├── layout.tsx                    ← root layout + Sidebar + QueryProvider
-│   ├── page.tsx                      ← Dashboard
-│   ├── model/page.tsx                ← Model settings
-│   ├── agents/
-│   │   ├── page.tsx                  ← Agents list
-│   │   └── [id]/
-│   │       ├── page.tsx              ← Agent Detail (2-column: SOUL ซ้าย, Users+MCP ขวา)
-│   │       └── chat/page.tsx         ← Chat Monitor
-│   ├── telegram/page.tsx             ← Telegram Bot management
-│   ├── chats/page.tsx                ← All chats (เลือก agent)
-│   ├── logs/page.tsx                 ← Live logs
-│   ├── mcp/page.tsx                  ← MCP (standalone)
-│   └── guide/page.tsx                ← คู่มือผู้ใช้
+│   ├── layout.tsx                    ← root layout (ไม่มี Sidebar — อยู่ใน (admin)/layout)
+│   ├── login/page.tsx                ← Login page (public)
+│   ├── actions/auth.ts               ← Server Actions: login / logout
+│   └── (admin)/                      ← route group — protected ทั้งหมด
+│       ├── layout.tsx                ← Protected layout + Sidebar + QueryProvider
+│       ├── page.tsx                  ← Dashboard
+│       ├── model/page.tsx            ← Model settings
+│       ├── agents/
+│       │   ├── page.tsx              ← Agents list
+│       │   └── [id]/
+│       │       ├── page.tsx          ← Agent Detail (2-column: SOUL ซ้าย, Users+MCP ขวา)
+│       │       └── chat/page.tsx     ← Chat Monitor
+│       ├── telegram/page.tsx         ← Telegram Bot management
+│       ├── chats/page.tsx            ← All chats (เลือก agent)
+│       ├── logs/page.tsx             ← Live logs
+│       ├── mcp/page.tsx              ← MCP (standalone)
+│       ├── guide/page.tsx            ← คู่มือผู้ใช้
+│       └── members/page.tsx          ← จัดการสมาชิก (superadmin only)
 │
 ├── components/
-│   ├── sidebar.tsx                   ← Navigation menu
+│   ├── sidebar.tsx                   ← Navigation + logout + แสดงชื่อ/role
 │   ├── query-provider.tsx            ← TanStack Query Provider
 │   └── ui/                           ← shadcn/ui components
 │
 ├── lib/
-│   └── api.ts                        ← axios instance + TypeScript types + API functions
+│   ├── api.ts                        ← axios instance + TypeScript types + API functions
+│   ├── session.ts                    ← JWT encrypt/decrypt (jose)
+│   └── db.ts                         ← PostgreSQL client (postgres.js)
 │
+├── db/
+│   └── init.sql                      ← CREATE TABLE admin_users + seed superadmin
+│
+├── proxy.ts                          ← Route guard (Next.js 16 ใช้ proxy.ts)
 ├── Dockerfile                        ← Build Next.js standalone
-├── docker-compose.yml                ← Deploy admin container
-├── .env.local                        ← NEXT_PUBLIC_API_URL, NEXT_PUBLIC_API_TOKEN (local dev)
-├── .env.example                      ← Template สำหรับ server
+├── docker-compose.yml                ← openclaw-admin + PostgreSQL
+├── .env.local                        ← local dev env
 ├── PLAN.md                           ← Project plan (Thai)
 └── ARCHITECTURE.md                   ← ไฟล์นี้
 
 openclaw-api/                         ← github: bosocmputer/openclaw-api (แยก repo)
-├── index.js                          ← Express API endpoints ทั้งหมด
-├── package.json
-└── .env                              ← API_TOKEN, PORT (บน server)
+├── index.js                          ← Express API endpoints ทั้งหมด (รวม /api/members)
+├── package.json                      ← dependencies: express, bcryptjs, pg, dotenv, cors
+└── .env                              ← API_TOKEN, PORT, DATABASE_URL (บน server)
 ```
 
 ---

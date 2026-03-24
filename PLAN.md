@@ -1,6 +1,6 @@
 # OpenClaw Admin — Project Plan
 
-> อัปเดตล่าสุด: 2026-03-24 (รอบ 5)
+> อัปเดตล่าสุด: 2026-03-24 (รอบ 6)
 
 ---
 
@@ -63,6 +63,8 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 | Data | TanStack Query v5 |
 | HTTP | axios |
 | Toast | Sonner v2 |
+| Auth | JWT (jose) ใน HttpOnly Cookie — proxy.ts guard |
+| Database | PostgreSQL 16 (Docker) — admin_users table |
 
 ---
 
@@ -132,6 +134,16 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - ตารางสรุป "สิ่งที่ต้องส่งให้ Admin": Telegram User ID + ชื่อ/แผนก
 - Troubleshoot เบื้องต้น (ไม่มี Pairing code แล้ว — ถูกลบออก)
 
+### 10. Login (`/login`)
+- หน้า login สาธารณะ (ไม่ต้อง auth)
+- JWT session 7 วัน ใน HttpOnly Cookie
+- `proxy.ts` guard redirect ทุกหน้าถ้าไม่มี session
+
+### 11. สมาชิก (`/members`) — เฉพาะ superadmin
+- รายการ admin_users ทั้งหมด
+- เพิ่ม/ลบ/disable user, reset password, เปลี่ยน role
+- Roles: superadmin / admin / viewer
+
 ---
 
 ## Express API Endpoints (บน server — `~/openclaw-api/index.js`)
@@ -167,6 +179,10 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 | POST | `/api/telegram/approve` | approve pairing code (ยังมีใน server แต่ไม่มีใน UI แล้ว) |
 | GET | `/api/doctor/status` | เช็ค config valid/invalid + ดึง problems |
 | POST | `/api/doctor/fix` | รัน `openclaw doctor --fix` |
+| GET | `/api/members` | รายการ admin_users (ต้องการ DATABASE_URL) |
+| POST | `/api/members` | เพิ่ม admin user ใหม่ (bcrypt password) |
+| PATCH | `/api/members/:id` | แก้ role / display_name / is_active / password |
+| DELETE | `/api/members/:id` | ลบ admin user (ห้ามลบ superadmin คนสุดท้าย) |
 
 ---
 
@@ -221,10 +237,14 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 
 | File | หมายเหตุ |
 |------|---------|
-| `openclaw-api/index.js` | **ต้อง scp ทุกครั้งที่แก้** → `scp openclaw-api/index.js bosscatdog@192.168.2.109:~/openclaw-api/index.js` |
+| `openclaw-api/index.js` | git pull + pm2 restart openclaw-api |
 | `lib/api.ts` | API functions ทั้งหมด |
-| `components/sidebar.tsx` | เมนู navigation |
-| `~/.openclaw/usernames.json` | ชื่อ user แยกนอก openclaw.json |
+| `lib/session.ts` | JWT encrypt/decrypt — COOKIE_SECURE=true เฉพาะ HTTPS |
+| `lib/db.ts` | PostgreSQL client (postgres.js) |
+| `proxy.ts` | Route guard — Next.js 16 ใช้ proxy.ts แทน middleware.ts |
+| `db/init.sql` | CREATE TABLE admin_users + seed superadmin |
+| `components/sidebar.tsx` | เมนู navigation + logout + แสดงชื่อ/role |
+| `~/.openclaw/usernames.json` | ชื่อ Telegram user แยกนอก openclaw.json |
 
 ---
 
@@ -247,3 +267,10 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - **Peer binding ต้องมี `accountId`**: peer binding ที่ไม่มี `accountId` จะ match ทุก bot → user ที่ผูกกับ sale จะ DM stock bot ได้ด้วย — ต้องระบุ `accountId` เสมอ (POST /api/agents/:id/users แก้แล้ว v2026-03-23-r3)
 - **POST /api/agents/:id/users**: สร้าง peer binding พร้อม `accountId` จาก route binding ของ agent อัตโนมัติ
 - **DELETE /api/agents/:id/users/:userId**: ลบ allowFrom เฉพาะ account ที่ถูกต้อง (ใช้ `match.accountId` จาก route binding ไม่ใช่ channel string parse)
+- **Login**: JWT ใน HttpOnly Cookie — `proxy.ts` guard ทุก route ยกเว้น `/login`
+- **cookie secure**: ใช้ `COOKIE_SECURE=true` เฉพาะ HTTPS — HTTP ต้องปล่อย false (default)
+- **proxy.ts**: Next.js 16 เปลี่ยนชื่อจาก `middleware.ts` → `proxy.ts` และ export ชื่อ `proxy` ไม่ใช่ `middleware`
+- **Members API**: ต้องการ `DATABASE_URL` และ `pg` package ใน openclaw-api — ถ้าไม่ set จะ return 503
+- **PostgreSQL**: อยู่ใน docker-compose เดียวกับ openclaw-admin — volume `postgres_data` ห้าม `down -v`
+- **superadmin default**: `superadmin` / `superadmin` — seed ใน `db/init.sql` (bcrypt cost=12)
+- **Telegram saveMutation**: refetch config ก่อน save เพื่อไม่ overwrite binding ที่เพิ่งเซฟ — `dmPolicy=open` ต้องมี `allowFrom: ['*']` เสมอ
