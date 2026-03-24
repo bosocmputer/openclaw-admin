@@ -176,7 +176,7 @@ export default function WebchatClient({ username, role }: Props) {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-bold">Webchat</h1>
+          <h1 className="text-xl font-bold">{activeRoom ? activeRoom.display_name : 'Webchat'}</h1>
           {rooms.length > 1 && (
             <Select value={activeRoomId?.toString() ?? ''} onValueChange={v => setActiveRoomId(Number(v))}>
               <SelectTrigger className="w-44 h-8 text-sm"><SelectValue placeholder="เลือกห้อง" /></SelectTrigger>
