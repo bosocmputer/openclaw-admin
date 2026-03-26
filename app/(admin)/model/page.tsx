@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getConfig, putConfig, getModels, PROVIDERS, type ProviderConfig } from '@/lib/api'
+import { getConfig, putConfig, getModels, testProvider, PROVIDERS, type ProviderConfig } from '@/lib/api'
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,41 +9,52 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { toast } from 'sonner'
-import { ChevronsUpDown, Check } from 'lucide-react'
+import { ChevronsUpDown, Check, AlertCircle } from 'lucide-react'
 
-// แยก provider prefix จาก model string เช่น "openrouter/qwen/qwen3.5-27b" → "openrouter"
 function parseProviderFromModel(model: string): string {
   const p = PROVIDERS.find(pr => model.startsWith(pr.modelPrefix + '/'))
   return p?.id ?? 'openrouter'
 }
 
-// แยก model id จาก full string เช่น "openrouter/qwen/qwen3.5-27b" → "qwen/qwen3.5-27b"
 function parseModelId(model: string, prefix: string): string {
   return model.startsWith(prefix + '/') ? model.slice(prefix.length + 1) : model
 }
 
+function formatPrice(val: string) {
+  const n = parseFloat(val)
+  if (isNaN(n) || n === 0) return 'ฟรี'
+  return `$${(n * 1_000_000).toFixed(2)}/1M`
+}
+
+const RECOMMENDED = [
+  { id: 'openrouter/openrouter/free',             label: 'ฟรี',         desc: 'OpenRouter Free — ทดสอบ' },
+  { id: 'openrouter/qwen/qwen3.5-flash-02-23',    label: 'ประหยัดสุด',  desc: 'Qwen 3.5 Flash — Thai ดี, ราคาถูก' },
+  { id: 'openrouter/qwen/qwen3.5-27b',            label: 'แนะนำ ⭐',    desc: 'Qwen 3.5 27B — สมดุลราคา/ประสิทธิภาพ' },
+  { id: 'openrouter/qwen/qwen3.5-122b-a10b',      label: 'ดีที่สุด',    desc: 'Qwen 3.5 122B — ประสิทธิภาพสูงสุด' },
+]
+
 export default function ModelPage() {
   const qc = useQueryClient()
   const [selectedProvider, setSelectedProvider] = useState<ProviderConfig>(PROVIDERS[0])
-  const [selectedModelId, setSelectedModelId] = useState('')  // id without prefix
+  const [selectedModelId, setSelectedModelId] = useState('')
   const [open, setOpen] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [testResult, setTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
   const [testing, setTesting] = useState(false)
-  // savedModelId = model ที่บันทึกไว้ใน config (id ไม่มี prefix) — ใช้ restore เมื่อ switch provider กลับ
   const savedProviderRef = useRef<string>('')
   const savedModelRef = useRef<string>('')
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
-  const { data: fetchedModels, isLoading: modelsLoading } = useQuery({
+  const { data: fetchedModels, isLoading: modelsLoading, isError: modelsError } = useQuery({
     queryKey: ['models', selectedProvider.id],
     queryFn: () => getModels(selectedProvider.id),
     enabled: !!config,
     staleTime: 5 * 60 * 1000,
+    retry: 1,
   })
 
-  // โหลด current model + api key จาก config
+  // โหลด current provider + model + api key จาก config
   useEffect(() => {
     if (!config) return
     const current = config.agents?.defaults?.model?.primary ?? ''
@@ -61,170 +72,156 @@ export default function ModelPage() {
     }
   }, [config])
 
-  // เมื่อ user เปลี่ยน provider — โหลด key, restore model ถ้าเป็น provider ที่บันทึกไว้
+  // เมื่อ user เปลี่ยน provider
   useEffect(() => {
     if (!config) return
     setApiKey(config.env?.[selectedProvider.envKey] ?? '')
     setTestResult('idle')
-    if (selectedProvider.id === savedProviderRef.current) {
-      setSelectedModelId(savedModelRef.current)
-    } else {
-      setSelectedModelId('')
-    }
+    setSelectedModelId(selectedProvider.id === savedProviderRef.current ? savedModelRef.current : '')
   }, [selectedProvider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fullModel = selectedModelId ? `${selectedProvider.modelPrefix}/${selectedModelId}` : ''
-  const current = config?.agents?.defaults?.model?.primary ?? '-'
-
-  // model list สำหรับ provider ปัจจุบัน — โหลดจาก API จริงทุก provider
-  const modelList: { id: string; name: string; pricing?: { prompt: string; completion: string } }[] =
-    fetchedModels ?? []
-
+  const currentModel = config?.agents?.defaults?.model?.primary ?? '-'
+  const modelList: { id: string; name: string; pricing?: { prompt: string; completion: string } }[] = fetchedModels ?? []
   const selectedModelInfo = modelList.find(m => m.id === selectedModelId)
 
-  function formatPrice(val: string) {
-    const n = parseFloat(val)
-    if (isNaN(n) || n === 0) return 'ฟรี'
-    return `$${(n * 1_000_000).toFixed(2)}/1M`
-  }
-
-  async function testApiKey() {
-    setTesting(true); setTestResult('idle')
+  async function handleTest() {
+    setTesting(true)
+    setTestResult('idle')
     try {
-      const { testUrl, authHeader, extraHeaders } = selectedProvider
-      if (!testUrl) { setTestResult('ok'); setTesting(false); return }
-
-      const headers: Record<string, string> = { ...(extraHeaders ?? {}) }
-      if (authHeader === 'x-api-key') headers['x-api-key'] = apiKey.trim()
-      else headers['Authorization'] = `Bearer ${apiKey.trim()}`
-
-      // Google ใช้ query param แทน header
-      const url = selectedProvider.id === 'google'
-        ? `${testUrl}?key=${apiKey.trim()}`
-        : testUrl
-
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) })
-      setTestResult(res.ok ? 'ok' : 'fail')
-    } catch { setTestResult('fail') }
-    finally { setTesting(false) }
+      const ok = await testProvider(selectedProvider.id, apiKey.trim())
+      setTestResult(ok ? 'ok' : 'fail')
+    } catch {
+      setTestResult('fail')
+    } finally {
+      setTesting(false)
+    }
   }
 
-  const saveApiKey = useMutation({
-    mutationFn: async () => {
+  // บันทึก API key + model ในครั้งเดียว
+  const saveMutation = useMutation({
+    mutationFn: async ({ saveKey, saveModel }: { saveKey: boolean; saveModel: boolean }) => {
       if (!config) return
-      await putConfig({
-        ...config,
-        env: { ...config.env, [selectedProvider.envKey]: apiKey.trim() },
-      })
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['config'] }); toast.success('API Key saved') },
-    onError: () => toast.error('Failed to save API Key'),
-  })
-
-  const saveModel = useMutation({
-    mutationFn: async () => {
-      if (!config || !fullModel) return
-      await putConfig({
-        ...config,
-        agents: {
+      const updated = { ...config }
+      if (saveKey && !selectedProvider.noApiKey) {
+        updated.env = { ...config.env, [selectedProvider.envKey]: apiKey.trim() }
+      }
+      if (saveModel && fullModel) {
+        updated.agents = {
           ...config.agents,
           defaults: { ...config.agents?.defaults, model: { primary: fullModel } },
-        },
-      })
+        }
+      }
+      await putConfig(updated)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['config'] }); toast.success('Model saved') },
-    onError: () => toast.error('Failed to save model'),
+    onSuccess: (_, { saveKey, saveModel }) => {
+      qc.invalidateQueries({ queryKey: ['config'] })
+      if (saveKey && saveModel) toast.success('บันทึก API Key และ Model แล้ว')
+      else if (saveKey) toast.success('บันทึก API Key แล้ว')
+      else toast.success('บันทึก Model แล้ว')
+    },
+    onError: () => toast.error('บันทึกไม่สำเร็จ'),
   })
 
-  const RECOMMENDED = [
-    { id: 'openrouter/openrouter/free', label: 'ฟรี', desc: 'OpenRouter Free — ทดสอบ' },
-    { id: 'openrouter/qwen/qwen3.5-flash-02-23', label: 'ประหยัดสุด', desc: 'Qwen 3.5 Flash — Thai ดี, ราคาถูก' },
-    { id: 'openrouter/qwen/qwen3.5-27b', label: 'แนะนำ ⭐', desc: 'Qwen 3.5 27B — สมดุลราคา/ประสิทธิภาพ' },
-    { id: 'openrouter/qwen/qwen3.5-122b-a10b', label: 'ดีที่สุด', desc: 'Qwen 3.5 122B — ประสิทธิภาพสูงสุด' },
-  ]
+  const currentKeyInConfig = config?.env?.[selectedProvider.envKey] ?? ''
+  const keyChanged = !selectedProvider.noApiKey && apiKey.trim() !== currentKeyInConfig
+  const modelChanged = !!fullModel && fullModel !== currentModel
 
   return (
     <div className="space-y-6 w-full">
       <div>
         <h1 className="text-2xl font-bold">Model</h1>
-        <p className="text-sm text-zinc-500 mt-1">เลือก AI model ค่าเริ่มต้นสำหรับทุก agent — เปลี่ยนแล้วต้อง restart gateway เพื่อให้มีผล</p>
+        <p className="text-sm text-zinc-500 mt-1">เลือก AI Provider และ Model — บันทึกแล้ว restart gateway เพื่อให้มีผล</p>
       </div>
+
+      {/* ขั้นตอน 1: เลือก Provider */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">ขั้นตอนที่ 1 — เลือก AI Provider</CardTitle>
+          <p className="text-xs text-zinc-500 mt-1">
+            ใช้อยู่ตอนนี้:&nbsp;
+            <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{currentModel}</span>
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {PROVIDERS.map(p => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setSelectedProvider(p)}
+                className={`px-3 py-2 rounded-md border text-sm transition-colors text-left ${
+                  selectedProvider.id === p.id
+                    ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800 font-medium'
+                    : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
+                }`}
+              >
+                {p.label}
+                {p.noApiKey && <span className="block text-xs text-green-600 font-normal">ไม่ต้องใช้ key</span>}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         {/* คอลัมน์ซ้าย */}
-        <div className="space-y-6">
+        <div className="space-y-4">
 
-          {/* Provider selector */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">AI Provider</CardTitle>
-              <p className="text-xs text-zinc-500 mt-1">เลือก provider ที่ต้องการใช้</p>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {PROVIDERS.map(p => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setSelectedProvider(p)}
-                    className={`px-3 py-2 rounded-md border text-sm transition-colors text-left ${
-                      selectedProvider.id === p.id
-                        ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800 font-medium'
-                        : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
-                    }`}
+          {/* ขั้นตอน 2: API Key (ซ่อนถ้าไม่ต้องการ key) */}
+          {!selectedProvider.noApiKey && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">ขั้นตอนที่ 2 — ใส่ API Key</CardTitle>
+                <p className="text-xs text-zinc-500 font-mono mt-1">{selectedProvider.envKey}</p>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    type={showKey ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={e => { setApiKey(e.target.value); setTestResult('idle') }}
+                    placeholder="วาง API Key ที่นี่..."
+                    className="font-mono text-sm"
+                  />
+                  <Button variant="outline" size="sm" onClick={() => setShowKey(v => !v)}>
+                    {showKey ? 'ซ่อน' : 'แสดง'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTest}
+                    disabled={testing || !apiKey.trim()}
                   >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                    {testing ? 'กำลังทดสอบ...' : 'ทดสอบ'}
+                  </Button>
+                </div>
+                {testResult === 'ok' && (
+                  <p className="text-xs text-green-600 dark:text-green-400">✓ API Key ใช้งานได้</p>
+                )}
+                {testResult === 'fail' && (
+                  <p className="text-xs text-red-500">✗ API Key ไม่ถูกต้อง หรือเชื่อมต่อไม่ได้</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-          {/* API Key */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{selectedProvider.label} API Key</CardTitle>
-              <p className="text-xs text-zinc-500 mt-1 font-mono">{selectedProvider.envKey}</p>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex gap-2">
-                <Input
-                  type={showKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={e => { setApiKey(e.target.value); setTestResult('idle') }}
-                  placeholder="API Key..."
-                  className="font-mono"
-                />
-                <Button variant="outline" size="sm" onClick={() => setShowKey(v => !v)}>
-                  {showKey ? 'Hide' : 'Show'}
-                </Button>
-                <Button variant="outline" size="sm" onClick={testApiKey} disabled={testing || !apiKey.trim()}>
-                  {testing ? '...' : 'Test'}
-                </Button>
-                <Button onClick={() => saveApiKey.mutate()} disabled={saveApiKey.isPending || !apiKey.trim()}>
-                  {saveApiKey.isPending ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
-              {testResult === 'ok' && <p className="text-xs text-green-600 dark:text-green-400">✓ API Key ใช้งานได้</p>}
-              {testResult === 'fail' && <p className="text-xs text-red-500">✗ API Key ไม่ถูกต้องหรือเชื่อมต่อไม่ได้</p>}
-            </CardContent>
-          </Card>
-
-          {/* Current model */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium text-zinc-500">Model ที่ใช้อยู่ตอนนี้</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="font-mono text-sm break-all">{current}</p>
-            </CardContent>
-          </Card>
+          {/* Kilo AI — แจ้งว่าไม่ต้อง key */}
+          {selectedProvider.noApiKey && (
+            <Card className="border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-900">
+              <CardContent className="pt-4">
+                <p className="text-sm text-green-700 dark:text-green-400">
+                  ✓ <strong>{selectedProvider.label}</strong> ไม่ต้องใช้ API Key — เลือก Model แล้วบันทึกได้เลย
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Recommended (OpenRouter only) */}
           {selectedProvider.id === 'openrouter' && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">แนะนำสำหรับ ERP Chatbot ภาษาไทย</CardTitle>
+                <CardTitle className="text-sm">แนะนำสำหรับ ERP Chatbot ภาษาไทย</CardTitle>
                 <p className="text-xs text-zinc-500 mt-1">Thai ดี + Tool Use — คลิกเพื่อเลือก</p>
               </CardHeader>
               <CardContent>
@@ -253,15 +250,27 @@ export default function ModelPage() {
           )}
         </div>
 
-        {/* คอลัมน์ขวา */}
+        {/* คอลัมน์ขวา: เลือก Model */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">เลือก Model — {selectedProvider.label}</CardTitle>
+            <CardTitle className="text-base">
+              {selectedProvider.noApiKey ? 'ขั้นตอนที่ 2' : 'ขั้นตอนที่ 3'} — เลือก Model
+              <span className="text-zinc-400 font-normal text-sm ml-2">({selectedProvider.label})</span>
+            </CardTitle>
             {selectedProvider.id === 'openrouter' && (
               <p className="text-xs text-zinc-500 mt-1">ราคาเป็น USD ต่อ 1 ล้าน token</p>
             )}
           </CardHeader>
           <CardContent className="space-y-4">
+
+            {/* Error state */}
+            {modelsError && (
+              <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 rounded-md px-3 py-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>โหลด model list ไม่สำเร็จ — ตรวจสอบ API Key แล้วลองใหม่</span>
+              </div>
+            )}
+
             <Popover open={open} onOpenChange={setOpen}>
               <PopoverTrigger
                 role="combobox"
@@ -272,8 +281,8 @@ export default function ModelPage() {
               >
                 <span className="truncate">
                   {modelsLoading
-                    ? 'Loading models...'
-                    : (selectedModelInfo?.name ?? selectedModelId ?? 'เลือก Model...')}
+                    ? 'กำลังโหลด models...'
+                    : (selectedModelInfo?.name ?? (selectedModelId ? selectedModelId : 'เลือก Model...'))}
                 </span>
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </PopoverTrigger>
@@ -281,7 +290,9 @@ export default function ModelPage() {
                 <Command>
                   <CommandInput placeholder="ค้นหา model..." />
                   <CommandList>
-                    <CommandEmpty>ไม่พบ model ที่ค้นหา</CommandEmpty>
+                    <CommandEmpty>
+                      {modelsError ? 'โหลดไม่สำเร็จ — ตรวจสอบ API Key' : 'ไม่พบ model ที่ค้นหา'}
+                    </CommandEmpty>
                     {modelList.map(m => {
                       const isActive = selectedModelId === m.id
                       return (
@@ -324,13 +335,45 @@ export default function ModelPage() {
               </div>
             )}
 
-            <Button
-              className="w-full"
-              onClick={() => saveModel.mutate()}
-              disabled={saveModel.isPending || !fullModel}
-            >
-              {saveModel.isPending ? 'Saving...' : `Save — ${fullModel || 'เลือก model ก่อน'}`}
-            </Button>
+            {/* Save buttons */}
+            <div className="space-y-2 pt-1">
+              {/* บันทึกทั้ง key + model */}
+              {keyChanged && modelChanged && (
+                <Button
+                  className="w-full"
+                  onClick={() => saveMutation.mutate({ saveKey: true, saveModel: true })}
+                  disabled={saveMutation.isPending}
+                >
+                  {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึก API Key + Model'}
+                </Button>
+              )}
+              {/* บันทึก key อย่างเดียว */}
+              {keyChanged && !modelChanged && (
+                <Button
+                  className="w-full"
+                  onClick={() => saveMutation.mutate({ saveKey: true, saveModel: false })}
+                  disabled={saveMutation.isPending}
+                >
+                  {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึก API Key'}
+                </Button>
+              )}
+              {/* บันทึก model อย่างเดียว */}
+              {!keyChanged && modelChanged && (
+                <Button
+                  className="w-full"
+                  onClick={() => saveMutation.mutate({ saveKey: false, saveModel: true })}
+                  disabled={saveMutation.isPending}
+                >
+                  {saveMutation.isPending ? 'กำลังบันทึก...' : `บันทึก Model — ${fullModel}`}
+                </Button>
+              )}
+              {/* ไม่มีอะไรเปลี่ยน */}
+              {!keyChanged && !modelChanged && (
+                <Button className="w-full" disabled variant="outline">
+                  {fullModel ? 'ไม่มีการเปลี่ยนแปลง' : 'เลือก Model ก่อน'}
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>

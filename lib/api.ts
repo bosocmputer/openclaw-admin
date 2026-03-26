@@ -93,67 +93,23 @@ export interface ProviderConfig {
   label: string
   envKey: string
   modelPrefix: string
-  testUrl?: string
-  authHeader?: 'bearer' | 'x-api-key'
-  extraHeaders?: Record<string, string>
+  noApiKey?: boolean  // provider ที่ไม่ต้องการ API key (เช่น Kilo AI)
 }
 
 export const PROVIDERS: ProviderConfig[] = [
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    envKey: 'OPENROUTER_API_KEY',
-    modelPrefix: 'openrouter',
-    testUrl: 'https://openrouter.ai/api/v1/models',
-    authHeader: 'bearer',
-  },
-  {
-    id: 'anthropic',
-    label: 'Anthropic',
-    envKey: 'ANTHROPIC_API_KEY',
-    modelPrefix: 'anthropic',
-    testUrl: 'https://api.anthropic.com/v1/models',
-    authHeader: 'x-api-key',
-    extraHeaders: { 'anthropic-version': '2023-06-01' },
-  },
-  {
-    id: 'google',
-    label: 'Google Gemini',
-    envKey: 'GEMINI_API_KEY',
-    modelPrefix: 'google',
-    testUrl: 'https://generativelanguage.googleapis.com/v1beta/models',
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    envKey: 'OPENAI_API_KEY',
-    modelPrefix: 'openai',
-    testUrl: 'https://api.openai.com/v1/models',
-    authHeader: 'bearer',
-  },
-  {
-    id: 'mistral',
-    label: 'Mistral',
-    envKey: 'MISTRAL_API_KEY',
-    modelPrefix: 'mistral',
-    testUrl: 'https://api.mistral.ai/v1/models',
-    authHeader: 'bearer',
-  },
-  {
-    id: 'groq',
-    label: 'Groq',
-    envKey: 'GROQ_API_KEY',
-    modelPrefix: 'groq',
-    testUrl: 'https://api.groq.com/openai/v1/models',
-    authHeader: 'bearer',
-  },
-  {
-    id: 'kilocode',
-    label: 'Kilo AI',
-    envKey: 'KILOCODE_API_KEY',
-    modelPrefix: 'kilocode',
-  },
+  { id: 'openrouter', label: 'OpenRouter',    envKey: 'OPENROUTER_API_KEY', modelPrefix: 'openrouter' },
+  { id: 'anthropic',  label: 'Anthropic',     envKey: 'ANTHROPIC_API_KEY',  modelPrefix: 'anthropic'  },
+  { id: 'google',     label: 'Google Gemini', envKey: 'GEMINI_API_KEY',     modelPrefix: 'google'     },
+  { id: 'openai',     label: 'OpenAI',        envKey: 'OPENAI_API_KEY',     modelPrefix: 'openai'     },
+  { id: 'mistral',    label: 'Mistral',       envKey: 'MISTRAL_API_KEY',    modelPrefix: 'mistral'    },
+  { id: 'groq',       label: 'Groq',          envKey: 'GROQ_API_KEY',       modelPrefix: 'groq'       },
+  { id: 'kilocode',   label: 'Kilo AI',       envKey: 'KILOCODE_API_KEY',   modelPrefix: 'kilocode', noApiKey: true },
 ]
+
+export async function testProvider(provider: string, apiKey: string): Promise<boolean> {
+  const { data } = await api.post('/api/models/test', { provider, apiKey })
+  return !!data.ok
+}
 
 export interface OpenRouterModel {
   id: string
