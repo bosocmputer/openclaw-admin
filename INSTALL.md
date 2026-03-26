@@ -369,10 +369,13 @@ password: superadmin
 ### 11.2 เพิ่ม Telegram Bot
 
 1. ไปที่เมนู **Telegram**
-2. กด **เพิ่ม Bot ใหม่**
-3. กรอก Account ID (ชื่อสั้นๆ เช่น `sale`, `stock`)
-4. วาง Bot Token จาก @BotFather
-5. กด **Add Bot**
+2. ถ้าเห็น banner สีเหลือง **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram** ก่อน
+3. กด **เพิ่ม Bot ใหม่**
+4. กรอก Account ID (ชื่อสั้นๆ เช่น `sale`, `stock`)
+5. วาง Bot Token จาก @BotFather
+6. กด **Add Bot**
+
+> **หมายเหตุ**: wizard ตอน onboard จะตั้ง `telegram.enabled = false` เสมอ — ต้องเปิดด้วยตัวเองที่นี่
 
 ### 11.3 เพิ่ม Agent
 
@@ -511,10 +514,11 @@ pm2 logs openclaw-api --lines 30
 
 ### Bot ไม่ตอบ
 
-1. เช็ค **Dashboard → Config Health** — ถ้าไม่ Valid กด Auto Fix
-2. เช็คว่า Bot ผูก Agent ไว้แล้วใน **Telegram**
-3. เช็คว่า User ID ถูก add ไว้ใน **Agents → Users** แล้ว
-4. ลอง **Restart Gateway** จาก Dashboard
+1. ไปที่เมนู **Telegram** — ถ้าเห็น banner สีเหลือง **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram** ก่อน
+2. เช็ค **Dashboard → Config Health** — ถ้าไม่ Valid กด Auto Fix
+3. เช็คว่า Bot ผูก Agent ไว้แล้วใน **Telegram**
+4. เช็คว่า User ID ถูก add ไว้ใน **Agents → Users** แล้ว
+5. ลอง **Restart Gateway** จาก Dashboard
 
 ### Webchat สร้างห้องไม่ได้ (error: role "openclaw" does not exist)
 

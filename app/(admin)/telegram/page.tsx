@@ -379,12 +379,37 @@ export default function TelegramPage() {
     ? 'Account ID นี้มีอยู่แล้ว'
     : ''
 
+  const telegramEnabled = config?.channels?.telegram?.enabled ?? false
+
+  async function handleEnableTelegram() {
+    const fresh = await qc.fetchQuery({ queryKey: ['config'], queryFn: getConfig })
+    if (!fresh) return
+    const tg = { ...fresh.channels?.telegram, enabled: true }
+    await putConfig({ ...fresh, channels: { ...fresh.channels, telegram: tg } })
+    qc.invalidateQueries({ queryKey: ['config'] })
+    toast.success('เปิดใช้งาน Telegram แล้ว — gateway จะ restart อัตโนมัติ')
+    setTimeout(() => qc.invalidateQueries({ queryKey: ['status'] }), 3000)
+  }
+
   return (
     <div className="space-y-6 w-full">
       <div>
         <h1 className="text-2xl font-bold">Telegram</h1>
         <p className="text-sm text-zinc-500 mt-1">ตั้งค่า Telegram Bot — รองรับหลาย bot account</p>
       </div>
+
+      {/* Telegram disabled warning */}
+      {!telegramEnabled && (
+        <div className="rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950 dark:border-yellow-800 px-4 py-3 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">Telegram ยังไม่ได้เปิดใช้งาน</p>
+            <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-0.5">Bot จะไม่รับข้อความจาก Telegram จนกว่าจะเปิดใช้งาน</p>
+          </div>
+          <Button size="sm" onClick={handleEnableTelegram} className="shrink-0 bg-yellow-600 hover:bg-yellow-700 text-white">
+            เปิดใช้งาน Telegram
+          </Button>
+        </div>
+      )}
 
       {/* How it works */}
       <Card className="border-zinc-200 bg-zinc-50 dark:bg-zinc-900">
