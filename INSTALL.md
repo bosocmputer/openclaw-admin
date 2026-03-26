@@ -119,13 +119,16 @@ npm install -g pm2
 ## ขั้นตอนที่ 7 — ติดตั้ง openclaw-gateway
 
 ```bash
-openclaw onboard --install-daemon
+openclaw onboard --install-daemon --skip-setup
 ```
 
 คำสั่งนี้จะ:
 - สร้างไฟล์ config ที่ `~/.openclaw/openclaw.json`
 - ติดตั้ง `openclaw-gateway` เป็น systemd service
 - เริ่มรัน gateway อัตโนมัติ
+
+> **หมายเหตุ**: ถ้า wizard ถามเรื่อง model/provider ให้กด `Ctrl+C` แล้วรันใหม่ด้วย `--skip-setup`
+> ถ้า flag นี้ไม่ได้ผล ให้เลือกอะไรก็ได้ไปก่อน — ค่าทุกอย่างแก้ได้ภายหลังผ่าน Web Admin
 
 ตรวจสอบสถานะ:
 
