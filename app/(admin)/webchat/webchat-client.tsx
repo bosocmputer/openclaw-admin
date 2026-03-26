@@ -67,6 +67,7 @@ export default function WebchatClient({ username, role }: Props) {
     queryKey: ['webchat-history', activeRoomId, username],
     queryFn: () => getWebchatHistory(activeRoomId!, username),
     enabled: !!activeRoomId,
+    refetchInterval: 5000,
   })
 
   // optimistic messages (แสดงก่อน API ตอบกลับ)
@@ -116,6 +117,9 @@ export default function WebchatClient({ username, role }: Props) {
   const [editDisplayName, setEditDisplayName] = useState('')
   const [editPolicy, setEditPolicy] = useState<'open' | 'allowlist'>('open')
 
+  const duplicateRoomName = newDisplayName.trim() &&
+    rooms.some(r => r.display_name.trim().toLowerCase() === newDisplayName.trim().toLowerCase())
+
   const createMutation = useMutation({
     mutationFn: () => createWebchatRoom(newAgentId, newDisplayName || newAgentId, newPolicy),
     onSuccess: () => {
@@ -163,7 +167,13 @@ export default function WebchatClient({ username, role }: Props) {
   })
 
   const removeUserMutation = useMutation({
-    mutationFn: ({ roomId, u }: { roomId: number; u: string }) => removeWebchatRoomUser(roomId, u),
+    mutationFn: ({ roomId, u, allowedCount }: { roomId: number; u: string; allowedCount: number }) => {
+      if (allowedCount <= 1) {
+        toast.error('ลบไม่ได้ — ต้องมี User อย่างน้อย 1 คนเมื่อ policy=allowlist')
+        return Promise.reject()
+      }
+      return removeWebchatRoomUser(roomId, u)
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['webchat-rooms'] }),
   })
 
@@ -299,7 +309,12 @@ export default function WebchatClient({ username, role }: Props) {
             <div className="px-5 py-3 border-b flex items-center gap-3 bg-white dark:bg-zinc-950">
               <div className="flex-1">
                 <h2 className="font-semibold text-sm">{activeRoom.display_name}</h2>
-                <p className="text-xs text-zinc-400">agent: {activeRoom.agent_id}</p>
+                <p className="text-xs text-zinc-400">
+                  agent: {activeRoom.agent_id}
+                  {agents.length > 0 && !agents.some(a => a.id === activeRoom.agent_id) && (
+                    <span className="ml-2 text-amber-500">⚠ agent นี้ถูกลบออกจากระบบแล้ว — bot จะไม่ตอบ</span>
+                  )}
+                </p>
               </div>
               <Badge variant="secondary" className="text-xs">{activeRoom.policy}</Badge>
               {/* policy toggle */}
@@ -322,7 +337,7 @@ export default function WebchatClient({ username, role }: Props) {
                 {activeRoom.allowed_users.map(u => (
                   <Badge key={u} variant="secondary" className="text-xs gap-1 pr-1">
                     {u}
-                    <button className="ml-0.5 hover:text-red-500" onClick={() => removeUserMutation.mutate({ roomId: activeRoom.id, u })}>×</button>
+                    <button className="ml-0.5 hover:text-red-500" onClick={() => removeUserMutation.mutate({ roomId: activeRoom.id, u, allowedCount: activeRoom.allowed_users.length })}>×</button>
                   </Badge>
                 ))}
                 {addUserRoomId === activeRoom.id ? (
@@ -379,7 +394,15 @@ export default function WebchatClient({ username, role }: Props) {
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">ชื่อห้อง</label>
-              <Input value={newDisplayName} onChange={e => setNewDisplayName(e.target.value)} placeholder="เช่น ฝ่ายขาย, คลังสินค้า" />
+              <Input
+                value={newDisplayName}
+                onChange={e => setNewDisplayName(e.target.value)}
+                placeholder="เช่น ฝ่ายขาย, คลังสินค้า"
+                className={duplicateRoomName ? 'border-red-400' : ''}
+              />
+              {duplicateRoomName && (
+                <p className="text-xs text-red-500">ชื่อห้องนี้มีอยู่แล้ว</p>
+              )}
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Policy</label>
@@ -394,7 +417,7 @@ export default function WebchatClient({ username, role }: Props) {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDialog(false)}>ยกเลิก</Button>
-            <Button disabled={!newAgentId || createMutation.isPending} onClick={() => createMutation.mutate()}>
+            <Button disabled={!newAgentId || !!duplicateRoomName || createMutation.isPending} onClick={() => createMutation.mutate()}>
               {createMutation.isPending ? 'กำลังสร้าง...' : 'สร้างห้อง'}
             </Button>
           </DialogFooter>

@@ -276,8 +276,11 @@ export default function TelegramPage() {
     })
   }, [config])
 
+  const [savingAccountId, setSavingAccountId] = useState<string | null>(null)
+
   const saveMutation = useMutation({
     mutationFn: async (accountId: string) => {
+      setSavingAccountId(accountId)
       // refetch config ใหม่ก่อน save เพื่อไม่ overwrite binding ที่เพิ่งเซฟไป
       const fresh = await qc.fetchQuery({ queryKey: ['config'], queryFn: getConfig })
       if (!fresh) return
@@ -307,10 +310,11 @@ export default function TelegramPage() {
       await putConfig({ ...fresh, channels: { ...fresh.channels, telegram: tg } })
     },
     onSuccess: () => {
+      setSavingAccountId(null)
       qc.invalidateQueries({ queryKey: ['config'] })
-      toast.success('Saved')
+      toast.success('บันทึกสำเร็จ')
     },
-    onError: () => toast.error('Failed to save'),
+    onError: () => { setSavingAccountId(null); toast.error('บันทึกไม่สำเร็จ') },
   })
 
   const addAccountMutation = useMutation({
@@ -387,7 +391,13 @@ export default function TelegramPage() {
     const tg = { ...fresh.channels?.telegram, enabled: true }
     await putConfig({ ...fresh, channels: { ...fresh.channels, telegram: tg } })
     qc.invalidateQueries({ queryKey: ['config'] })
-    toast.success('เปิดใช้งาน Telegram แล้ว — gateway จะ restart อัตโนมัติ')
+    toast.loading('กำลัง Restart Gateway...', { id: 'tg-enable' })
+    try {
+      await restartGateway()
+      toast.success('เปิดใช้งาน Telegram แล้ว — Gateway restarted', { id: 'tg-enable' })
+    } catch {
+      toast.error('เปิดใช้งานแล้ว แต่ Restart Gateway ไม่สำเร็จ — ลอง Restart จาก Dashboard', { id: 'tg-enable' })
+    }
     setTimeout(() => qc.invalidateQueries({ queryKey: ['status'] }), 3000)
   }
 
@@ -469,7 +479,7 @@ export default function TelegramPage() {
             userNames={userNames}
             onChange={patch => patchAccount(id, patch)}
             onSave={() => saveMutation.mutate(id)}
-            saving={saveMutation.isPending}
+            saving={savingAccountId === id}
             boundAgentId={routeBindings.find(b => b.accountId === id)?.agentId ?? ''}
             agents={agents}
             onBindAgent={agentId => bindMutation.mutate({ accountId: id, agentId })}
