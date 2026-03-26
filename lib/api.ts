@@ -179,6 +179,17 @@ export const PROVIDERS: ProviderConfig[] = [
       { id: 'gemma2-9b-it', name: 'Gemma2 9B' },
     ],
   },
+  {
+    id: 'kilocode',
+    label: 'Kilo AI',
+    envKey: 'KILOCODE_API_KEY',
+    modelPrefix: 'kilocode',
+    testUrl: 'https://api.kilo.ai/api/gateway/v1/models',
+    authHeader: 'bearer',
+    models: [
+      { id: 'kilo/auto', name: 'Kilo Auto' },
+    ],
+  },
 ]
 
 export interface OpenRouterModel {
