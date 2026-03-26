@@ -255,6 +255,7 @@ docker compose up -d --build
 ```
 
 > ครั้งแรกจะใช้เวลา 3–5 นาที เพราะต้อง download image และ build
+> Docker จะสร้าง PostgreSQL user `openclaw` และ database `openclaw_admin` อัตโนมัติจาก `POSTGRES_PASSWORD` ที่ตั้งใน `.env` — **ทำได้เฉพาะครั้งแรกที่ volume ว่างเปล่าเท่านั้น**
 
 ตรวจสอบ:
 
@@ -268,6 +269,22 @@ docker compose ps
 NAME                              STATUS
 openclaw-admin-openclaw-admin-1   running
 openclaw-admin-postgres-1         running
+```
+
+ตรวจสอบว่า database และ tables ถูกสร้างแล้ว:
+
+```bash
+docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin -c "\dt"
+```
+
+ต้องเห็น tables: `admin_users`, `webchat_rooms`, `webchat_messages`, `webchat_room_users`
+
+ถ้าเข้าไม่ได้หรือไม่มี tables ให้รัน:
+
+```bash
+# ลบ volume แล้วสร้างใหม่ (ข้อมูลจะหายทั้งหมด — ใช้ได้เฉพาะตอนติดตั้งใหม่)
+docker compose down -v
+docker compose up -d --build
 ```
 
 ---
