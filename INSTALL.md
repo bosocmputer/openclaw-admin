@@ -142,99 +142,43 @@ openclaw gateway status
 
 ---
 
-## ขั้นตอนที่ 8 — ติดตั้ง openclaw-api
+## ขั้นตอนที่ 8 — ติดตั้ง openclaw-admin + PostgreSQL
+
+> ทำขั้นตอนนี้ก่อน เพราะต้องได้ `POSTGRES_PASSWORD` ไปใช้ในขั้นตอนที่ 9
 
 ### 8.1 Clone repo
-
-```bash
-git clone https://github.com/bosocmputer/openclaw-api.git ~/openclaw-api
-cd ~/openclaw-api
-npm install
-```
-
-### 8.2 สร้างไฟล์ .env
-
-```bash
-nano ~/openclaw-api/.env
-```
-
-วางข้อความนี้ลงไป **แล้วแก้ค่าให้ถูกต้อง**:
-
-```env
-API_TOKEN=sml-openclaw-2026
-PORT=4000
-DATABASE_URL=postgresql://openclaw:POSTGRES_PASSWORD_HERE@localhost:5432/openclaw_admin
-HOOKS_TOKEN=ใส่ค่าสุ่มที่นี่
-```
-
-> `POSTGRES_PASSWORD_HERE` ให้ใส่รหัสผ่านที่จะตั้งในขั้นตอนที่ 9 (ต้องตรงกัน)
-
-**วิธีสร้าง HOOKS_TOKEN** (รันคำสั่งนี้แล้ว copy ผลลัพธ์มาวาง):
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-บันทึกไฟล์: กด `Ctrl+X` → `Y` → `Enter`
-
-### 8.3 รันด้วย pm2
-
-```bash
-pm2 start index.js --name openclaw-api
-pm2 save
-pm2 startup
-```
-
-คำสั่ง `pm2 startup` จะแสดงคำสั่งให้รันต่อ เช่น:
-
-```
-[PM2] To setup the Startup Script, copy/paste the following command:
-sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u bosscatdog --hp /home/bosscatdog
-```
-
-**ให้ copy คำสั่งนั้นแล้วรันเลย** (แต่ละเครื่องจะต่างกัน)
-
-ตรวจสอบ:
-
-```bash
-pm2 status
-```
-
-> ต้องเห็น `openclaw-api` สถานะ `online`
-
----
-
-## ขั้นตอนที่ 9 — ติดตั้ง openclaw-admin + PostgreSQL
-
-### 9.1 Clone repo
 
 ```bash
 git clone https://github.com/bosocmputer/openclaw-admin.git ~/openclaw-admin
 cd ~/openclaw-admin
 ```
 
-### 9.2 สร้างไฟล์ .env
+### 8.2 ตั้งค่า .env
 
-```bash
-nano ~/openclaw-admin/.env
-```
-
-วางข้อความนี้ลงไป **แล้วแก้ค่าให้ถูกต้อง**:
-
-```env
-SERVER_IP=192.168.1.100
-API_TOKEN=sml-openclaw-2026
-POSTGRES_PASSWORD=ตั้งรหัสผ่านที่นี่
-SESSION_SECRET=สร้างค่าสุ่มที่นี่
-```
-
-**วิธีสร้าง SESSION_SECRET** (รันคำสั่งนี้แล้ว copy ผลลัพธ์มาวาง):
+**ขั้นตอนที่ 1** — สร้าง SESSION_SECRET ก่อน:
 
 ```bash
 openssl rand -hex 32
 ```
 
-ตัวอย่าง `.env` ที่กรอกครบแล้ว:
+copy ค่าที่ได้ไว้ก่อน
+
+**ขั้นตอนที่ 2** — สร้างไฟล์ .env:
+
+```bash
+nano ~/openclaw-admin/.env
+```
+
+วางข้อความนี้ แล้วแก้ค่า `SERVER_IP`, `POSTGRES_PASSWORD`, `SESSION_SECRET`:
+
+```env
+SERVER_IP=192.168.1.100
+API_TOKEN=sml-openclaw-2026
+POSTGRES_PASSWORD=ตั้งรหัสผ่านที่นี่
+SESSION_SECRET=วางค่าที่ได้จาก openssl ด้านบน
+```
+
+ตัวอย่างที่กรอกครบ:
 
 ```env
 SERVER_IP=192.168.1.100
@@ -243,19 +187,18 @@ POSTGRES_PASSWORD=MyStr0ngP@ss
 SESSION_SECRET=a3f8c2d1e9b4f7a2c5d8e1f4b7c0d3e6f9a2b5c8d1e4f7a0b3c6d9e2f5a8b1
 ```
 
-> **สำคัญ**: `POSTGRES_PASSWORD` ที่ตั้งในไฟล์นี้จะถูกใช้สร้าง PostgreSQL user `openclaw` อัตโนมัติตอน `docker compose up` ครั้งแรก — ต้องตรงกับรหัสผ่านใน `DATABASE_URL` ของ `~/openclaw-api/.env` เสมอ (ขั้นตอนที่ 8.2)
+บันทึก: กด `Ctrl+X` → `Y` → `Enter`
 
-บันทึกไฟล์: กด `Ctrl+X` → `Y` → `Enter`
+> **จดรหัสผ่านนี้ไว้** — จะต้องใช้อีกในขั้นตอนที่ 9
 
-### 9.3 รัน Docker
+### 8.3 รัน Docker
 
 ```bash
 cd ~/openclaw-admin
 docker compose up -d --build
 ```
 
-> ครั้งแรกจะใช้เวลา 3–5 นาที เพราะต้อง download image และ build
-> Docker จะสร้าง PostgreSQL user `openclaw` และ database `openclaw_admin` อัตโนมัติจาก `POSTGRES_PASSWORD` ที่ตั้งใน `.env` — **ทำได้เฉพาะครั้งแรกที่ volume ว่างเปล่าเท่านั้น**
+> ครั้งแรกใช้เวลา 3–5 นาที — Docker จะสร้าง PostgreSQL user `openclaw` และ tables อัตโนมัติ
 
 ตรวจสอบ:
 
@@ -265,27 +208,90 @@ docker compose ps
 
 ต้องเห็น 2 containers สถานะ `running`:
 
-```
+```text
 NAME                              STATUS
 openclaw-admin-openclaw-admin-1   running
 openclaw-admin-postgres-1         running
 ```
 
-ตรวจสอบว่า database และ tables ถูกสร้างแล้ว:
+**ตรวจสอบ tables** (ต้องทำก่อนไปขั้นตอนต่อไป):
 
 ```bash
 docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin -c "\dt"
 ```
 
-ต้องเห็น tables: `admin_users`, `webchat_rooms`, `webchat_messages`, `webchat_room_users`
+ต้องเห็น 4 tables: `admin_users`, `webchat_rooms`, `webchat_messages`, `webchat_room_users`
 
-ถ้าเข้าไม่ได้หรือไม่มี tables ให้รัน:
+ถ้าไม่เห็น tables ให้รัน:
 
 ```bash
-# ลบ volume แล้วสร้างใหม่ (ข้อมูลจะหายทั้งหมด — ใช้ได้เฉพาะตอนติดตั้งใหม่)
-docker compose down -v
-docker compose up -d --build
+docker compose down -v && docker compose up -d --build
 ```
+
+---
+
+## ขั้นตอนที่ 9 — ติดตั้ง openclaw-api
+
+### 9.1 Clone repo
+
+```bash
+git clone https://github.com/bosocmputer/openclaw-api.git ~/openclaw-api
+cd ~/openclaw-api
+npm install
+```
+
+### 9.2 สร้างไฟล์ .env
+
+**ขั้นตอนที่ 1** — สร้าง HOOKS_TOKEN:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+copy ค่าที่ได้ไว้ก่อน
+
+**ขั้นตอนที่ 2** — สร้างไฟล์ .env:
+
+```bash
+nano ~/openclaw-api/.env
+```
+
+วางข้อความนี้ แล้วแก้ `POSTGRES_PASSWORD_HERE` เป็นรหัสผ่านเดียวกับที่ตั้งในขั้นตอนที่ 8:
+
+```env
+API_TOKEN=sml-openclaw-2026
+PORT=4000
+DATABASE_URL=postgresql://openclaw:POSTGRES_PASSWORD_HERE@localhost:5432/openclaw_admin
+HOOKS_TOKEN=วางค่าที่ได้จาก node ด้านบน
+```
+
+> **สำคัญ**: `POSTGRES_PASSWORD_HERE` ต้องเป็นรหัสผ่านเดียวกับ `POSTGRES_PASSWORD` ใน `~/openclaw-admin/.env`
+> และ URL ต้องใช้ `localhost` เสมอ — ห้ามใส่ IP address อื่น
+
+บันทึก: กด `Ctrl+X` → `Y` → `Enter`
+
+### 9.3 รันด้วย pm2
+
+```bash
+cd ~/openclaw-api
+pm2 start index.js --name openclaw-api
+pm2 save
+pm2 startup
+```
+
+คำสั่ง `pm2 startup` จะแสดงคำสั่งให้รันต่อ — **copy แล้วรันทันที** (แต่ละเครื่องจะต่างกัน):
+
+```bash
+sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u <user> --hp /home/<user>
+```
+
+ตรวจสอบ:
+
+```bash
+pm2 status
+```
+
+ต้องเห็น `openclaw-api` สถานะ `online`
 
 ---
 
