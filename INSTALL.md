@@ -116,7 +116,19 @@ npm install -g pm2
 
 ---
 
-## ขั้นตอนที่ 7 — ติดตั้ง openclaw-gateway
+## ขั้นตอนที่ 7 — Generate HOOKS_TOKEN
+
+สร้าง HOOKS_TOKEN ก่อน — จะต้องใช้ทั้งใน `openclaw.json` และ `~/openclaw-api/.env`:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**จด/copy ค่าที่ได้ไว้** เช่น `88e232...` — จะใช้ใน ขั้นตอน 7.3 และ 9.2
+
+---
+
+## ขั้นตอนที่ 7.1 — ติดตั้ง openclaw-gateway
 
 ```bash
 openclaw onboard --install-daemon
@@ -131,15 +143,25 @@ openclaw onboard --install-daemon
 > **สำคัญ**: ค่าที่เลือกใน wizard ไม่มีผลถาวร — แก้ได้ทั้งหมดผ่าน Web Admin ในขั้นตอนถัดไป
 > ห้ามกด Ctrl+C กลางคัน เพราะจะทำให้ `openclaw.json` ไม่ถูกสร้าง
 
-### 7.1 ตรวจสอบ gateway
+---
+
+## ขั้นตอนที่ 7.2 — ตรวจสอบและ start gateway
 
 ```bash
 openclaw gateway status
 ```
 
-ถ้าเห็น `RPC probe: ok` แสดงว่า gateway รันอยู่แล้ว ข้ามไปขั้นตอน 7.2 ได้เลย
+ถ้าเห็น `RPC probe: ok` — gateway รันอยู่แล้ว ไปขั้นตอน 7.3 ได้เลย
 
-ถ้า gateway ไม่รัน (หรือรัน root user ที่ใช้ systemd --user ไม่ได้) ให้รันผ่าน pm2 แทน:
+ถ้า gateway ไม่รัน ให้หา path ของ openclaw ก่อน:
+
+```bash
+ls /usr/lib/node_modules/openclaw/dist/index.js 2>/dev/null \
+  && echo "path: /usr/lib/node_modules/openclaw/dist/index.js" \
+  || echo "path: $(npm root -g)/openclaw/dist/index.js"
+```
+
+แล้วรันผ่าน pm2 โดยใช้ path ที่ได้:
 
 ```bash
 pm2 start /usr/lib/node_modules/openclaw/dist/index.js \
@@ -148,12 +170,14 @@ pm2 start /usr/lib/node_modules/openclaw/dist/index.js \
   -- gateway --port 18789
 pm2 save
 pm2 startup
-# copy คำสั่งที่ได้แล้วรัน
+# copy คำสั่งที่แสดงออกมาแล้วรัน
 ```
 
 > **หมายเหตุ**: ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` แทน `openclaw gateway restart` ทุกครั้ง
 
-### 7.2 ตั้งค่า Hooks สำหรับ Webchat
+---
+
+## ขั้นตอนที่ 7.3 — ตั้งค่า Hooks สำหรับ Webchat
 
 เปิดไฟล์ config:
 
@@ -168,14 +192,13 @@ nano ~/.openclaw/openclaw.json
   "gateway": { ... },
   "hooks": {
     "enabled": true,
-    "token": "ค่าเดียวกับ HOOKS_TOKEN ที่จะตั้งในขั้นตอนที่ 9",
+    "token": "วางค่า HOOKS_TOKEN ที่ได้จากขั้นตอนที่ 7 ที่นี่",
     "allowRequestSessionKey": true
   }
 }
 ```
 
 > **สำคัญ**: `hooks` ต้องอยู่ระดับเดียวกับ `gateway` — ห้ามวางไว้ข้างใน `gateway` จะ error
-> ค่า `token` ต้องตรงกับ `HOOKS_TOKEN` ใน `~/openclaw-api/.env` เสมอ
 
 บันทึกไฟล์: กด `Ctrl+X` → `Y` → `Enter`
 
@@ -281,27 +304,17 @@ npm install
 
 ### 9.2 สร้างไฟล์ .env
 
-**ขั้นตอนที่ 1** — สร้าง HOOKS_TOKEN:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-copy ค่าที่ได้ไว้ก่อน
-
-**ขั้นตอนที่ 2** — สร้างไฟล์ .env:
-
 ```bash
 nano ~/openclaw-api/.env
 ```
 
-วางข้อความนี้ แล้วแก้ `POSTGRES_PASSWORD_HERE` เป็นรหัสผ่านเดียวกับที่ตั้งในขั้นตอนที่ 8:
+วางข้อความนี้ แล้วแก้ค่าให้ถูกต้อง:
 
 ```env
 API_TOKEN=sml-openclaw-2026
 PORT=4000
 DATABASE_URL=postgresql://openclaw:POSTGRES_PASSWORD_HERE@localhost:5432/openclaw_admin
-HOOKS_TOKEN=วางค่าที่ได้จาก node ด้านบน
+HOOKS_TOKEN=ค่า HOOKS_TOKEN ที่ได้จากขั้นตอนที่ 7 (ใช้ค่าเดิม อย่า generate ใหม่)
 ```
 
 > **สำคัญ**: `POSTGRES_PASSWORD_HERE` ต้องเป็นรหัสผ่านเดียวกับ `POSTGRES_PASSWORD` ใน `~/openclaw-admin/.env`
