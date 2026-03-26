@@ -356,15 +356,21 @@ password: superadmin
 nano ~/.openclaw/openclaw.json
 ```
 
-เพิ่ม section `hooks` ลงใน JSON (ก่อน closing `}`):
+เพิ่ม section `hooks` ลงใน JSON — ต้องอยู่ **ระดับ root** (ไม่ใช่ข้างใน `gateway`):
 
 ```json
-"hooks": {
-  "enabled": true,
-  "token": "ค่าเดียวกับ HOOKS_TOKEN ใน ~/openclaw-api/.env",
-  "allowRequestSessionKey": true
+{
+  "gateway": { ... },
+  "hooks": {
+    "enabled": true,
+    "token": "ค่าเดียวกับ HOOKS_TOKEN ใน ~/openclaw-api/.env",
+    "allowRequestSessionKey": true
+  },
+  "session": { ... }
 }
 ```
+
+> **สำคัญ**: `hooks` ต้องอยู่ระดับเดียวกับ `gateway` — ถ้าวางไว้ข้างใน `gateway` จะ error `Unrecognized key: "hooks"`
 
 บันทึกแล้ว restart gateway:
 
