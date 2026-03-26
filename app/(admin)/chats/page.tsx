@@ -220,16 +220,20 @@ export default function ChatsPage() {
     refetchInterval: 30000,
   })
 
-  // โหลด messages จากทุก session ของ agent นั้น
+  // โหลด messages จาก 20 sessions ล่าสุดเท่านั้น เพื่อป้องกัน N+1 requests
+  const recentSessions = useMemo(
+    () => [...sessions].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20),
+    [sessions]
+  )
   const { data: allMessages = [], isLoading: messagesLoading } = useQuery({
-    queryKey: ['all-messages', selectedAgentId, sessions.length],
+    queryKey: ['all-messages', selectedAgentId, recentSessions.length],
     queryFn: async () => {
       const results = await Promise.all(
-        sessions.map(s => getSessionMessages(selectedAgentId, s.sessionId))
+        recentSessions.map(s => getSessionMessages(selectedAgentId, s.sessionId))
       )
       return results.flat().sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
     },
-    enabled: !!selectedAgentId && sessions.length > 0,
+    enabled: !!selectedAgentId && recentSessions.length > 0,
     refetchInterval: 30000,
   })
 

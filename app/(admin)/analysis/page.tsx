@@ -1,10 +1,11 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import {
-  getAgents, getMembers, getWebchatRooms, getChatUsers, getGatewayLogs, getAgentSessions,
-  type Agent, type Member, type WebchatRoom, type ChatUser, type LogEntry, type ChatSession,
+  getAgents, getMembers, getWebchatRooms, getGatewayLogs, getAgentSessions,
+  type Agent, type Member, type WebchatRoom, type LogEntry, type ChatSession,
 } from '@/lib/api'
+import { useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
@@ -19,12 +20,7 @@ function fmtTime(ts: number | string): string {
   return d.toLocaleString('th-TH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function AgentCard({ agent }: { agent: Agent }) {
-  const { data: sessions = [] } = useQuery<ChatSession[]>({
-    queryKey: ['sessions', agent.id],
-    queryFn: () => getAgentSessions(agent.id),
-  })
-
+function AgentCard({ agent, sessions }: { agent: Agent, sessions: ChatSession[] }) {
   const totalInput = sessions.reduce((s, x) => s + (x.inputTokens ?? 0), 0)
   const totalOutput = sessions.reduce((s, x) => s + (x.outputTokens ?? 0), 0)
 
@@ -106,13 +102,13 @@ function OverviewSection({ agents, members, webchatRooms }: { agents: Agent[], m
   )
 }
 
-function AgentsSection({ agents }: { agents: Agent[] }) {
+function AgentsSection({ agents, sessionsByAgent }: { agents: Agent[], sessionsByAgent: Record<string, ChatSession[]> }) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Agents &amp; Telegram</h2>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {agents.map(agent => (
-          <AgentCard key={agent.id} agent={agent} />
+          <AgentCard key={agent.id} agent={agent} sessions={sessionsByAgent[agent.id] ?? []} />
         ))}
       </div>
     </div>
@@ -265,11 +261,27 @@ export default function AnalysisPage() {
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: getAgents })
   const { data: members = [] } = useQuery({ queryKey: ['members'], queryFn: getMembers })
   const { data: webchatRooms = [] } = useQuery({ queryKey: ['webchat-rooms-dash'], queryFn: () => getWebchatRooms() })
-  const { data: chatUsers = [] } = useQuery({ queryKey: ['chat-users-dash'], queryFn: getChatUsers })
   const { data: logs = [], isLoading: logsLoading } = useQuery({
     queryKey: ['gateway-logs'],
     queryFn: () => getGatewayLogs(1000),
   })
+
+  // โหลด sessions ทุก agent พร้อมกันใน parent — ไม่ให้แต่ละ AgentCard เรียก API เอง
+  const sessionResults = useQueries({
+    queries: agents.map(a => ({
+      queryKey: ['sessions', a.id],
+      queryFn: () => getAgentSessions(a.id),
+      enabled: agents.length > 0,
+    })),
+  })
+
+  const sessionsByAgent = useMemo(() => {
+    const map: Record<string, ChatSession[]> = {}
+    agents.forEach((a, i) => {
+      map[a.id] = (sessionResults[i]?.data as ChatSession[] | undefined) ?? []
+    })
+    return map
+  }, [agents, sessionResults])
 
   return (
     <div className="space-y-8 w-full">
@@ -280,7 +292,7 @@ export default function AnalysisPage() {
 
       <OverviewSection agents={agents} members={members} webchatRooms={webchatRooms} />
 
-      <AgentsSection agents={agents} />
+      <AgentsSection agents={agents} sessionsByAgent={sessionsByAgent} />
 
       <WebchatSection rooms={webchatRooms} />
 
