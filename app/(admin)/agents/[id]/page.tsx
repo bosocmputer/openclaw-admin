@@ -135,8 +135,8 @@ function UsersPanel({ agentId }: { agentId: string }) {
   })
 
   function addUser() {
-    if (!newId || isNaN(parseInt(newId))) { toast.error('User ID must be a number'); return }
-    if (users.find(u => u.id === newId)) { toast.error('User already added'); return }
+    if (!newId || !/^\d+$/.test(newId.trim())) { toast.error('User ID ต้องเป็นตัวเลขเท่านั้น เช่น 123456789'); return }
+    if (users.find(u => u.id === newId.trim())) { toast.error('User already added'); return }
     add.mutate()
   }
 
@@ -237,6 +237,7 @@ function McpPanel({ agentId }: { agentId: string }) {
             url,
             allowHttp: url.startsWith('http://'),
             headers: { 'mcp-access-mode': accessMode },
+            // ไม่ส่ง env เพื่อลบ MCP_ACCESS_MODE เก่าที่อาจ conflict กับ headers
           },
         },
       }

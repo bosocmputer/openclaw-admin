@@ -163,8 +163,19 @@ export default function MembersPage() {
                 <span className="text-sm text-zinc-500">Role:</span>
                 <Select
                   value={m.role}
-                  onValueChange={v => v && updateMutation.mutate({ id: m.id, data: { role: v } })}
-                  disabled={m.role === 'superadmin'}
+                  onValueChange={v => {
+                    if (!v) return
+                    // ป้องกัน superadmin คนสุดท้ายเปลี่ยน role ตัวเอง
+                    if (m.role === 'superadmin' && v !== 'superadmin') {
+                      const superadminCount = members?.filter(x => x.role === 'superadmin').length ?? 0
+                      if (superadminCount <= 1) {
+                        toast.error('ไม่สามารถเปลี่ยน role ได้ — ต้องมี superadmin อย่างน้อย 1 คน')
+                        return
+                      }
+                    }
+                    updateMutation.mutate({ id: m.id, data: { role: v } })
+                  }}
+                  disabled={m.role === 'superadmin' && (members?.filter(x => x.role === 'superadmin').length ?? 0) <= 1}
                 >
                   <SelectTrigger className="w-36 h-8 text-sm">
                     <SelectValue />

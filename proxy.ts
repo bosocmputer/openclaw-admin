@@ -24,9 +24,7 @@ export async function proxy(req: NextRequest) {
   // role=chat พยายามเข้า route อื่น → redirect /webchat
   if (session?.role === 'chat') {
     const allowed = CHAT_ALLOWED.some(r => path === r || path.startsWith(r + '/'))
-    if (!allowed) {
-      return NextResponse.redirect(new URL('/webchat', req.url))
-    }
+    if (!allowed) return NextResponse.redirect(new URL('/webchat', req.url))
   }
   return NextResponse.next()
 }
