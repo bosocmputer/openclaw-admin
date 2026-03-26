@@ -221,9 +221,8 @@ export default function ChatsPage() {
   })
 
   // โหลด messages จากทุก session ของ agent นั้น
-  const sessionIds = sessions.map(s => s.sessionId)
   const { data: allMessages = [], isLoading: messagesLoading } = useQuery({
-    queryKey: ['all-messages', selectedAgentId, sessionIds.join(',')],
+    queryKey: ['all-messages', selectedAgentId, sessions.length],
     queryFn: async () => {
       const results = await Promise.all(
         sessions.map(s => getSessionMessages(selectedAgentId, s.sessionId))
@@ -299,7 +298,7 @@ export default function ChatsPage() {
       )}
 
       {/* Split layout */}
-      <div className="flex gap-3 h-[600px]">
+      <div className="flex gap-3 h-[calc(100vh-280px)] min-h-[400px]">
         {/* Sender sidebar */}
         <div className="w-56 shrink-0 flex flex-col gap-1 overflow-y-auto border rounded-xl p-2 bg-white dark:bg-zinc-900">
           <p className="text-xs font-semibold text-zinc-500 px-2 py-1">

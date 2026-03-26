@@ -13,9 +13,9 @@ const adminNavItems = [
   { href: '/telegram', label: 'Telegram' },
   { href: '/webchat', label: 'Webchat' },
   { href: '/chats', label: 'Telegram History' },
-  { href: '/logs', label: 'Logs' },
   { href: '/analysis', label: 'Analysis' },
-  { href: '/guide', label: 'คู่มือผู้ใช้' },
+  { href: '/logs', label: 'Logs' },
+  { href: '/guide', label: 'User Guide' },
 ]
 
 const chatNavItems = [
@@ -35,8 +35,9 @@ export default function Sidebar({ role, username, displayName }: SidebarProps) {
   const navItems = role === 'chat'
     ? chatNavItems
     : [
-        ...adminNavItems,
-        ...(role === 'superadmin' ? [{ href: '/members', label: 'สมาชิก' }] : []),
+        ...adminNavItems.slice(0, -1),
+        ...(role === 'superadmin' ? [{ href: '/members', label: 'Members' }] : []),
+        adminNavItems[adminNavItems.length - 1],
       ]
 
   return (

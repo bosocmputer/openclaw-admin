@@ -50,11 +50,13 @@ export default function MembersPage() {
   const qc = useQueryClient()
   const [addDialog, setAddDialog] = useState(false)
   const [resetDialog, setResetDialog] = useState<Member | null>(null)
+  const [deleteDialog, setDeleteDialog] = useState<Member | null>(null)
   const [newUsername, setNewUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [newDisplayName, setNewDisplayName] = useState('')
   const [newRole, setNewRole] = useState('admin')
   const [newResetPassword, setNewResetPassword] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const { data: members = [], isLoading } = useQuery({ queryKey: ['members'], queryFn: getMembers })
 
@@ -95,12 +97,14 @@ export default function MembersPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: deleteMember,
+    mutationFn: (id: string) => { setDeletingId(id); return deleteMember(id) },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['members'] })
       toast.success('ลบสมาชิกสำเร็จ')
+      setDeleteDialog(null)
+      setDeletingId(null)
     },
-    onError: () => toast.error('ลบสมาชิกไม่สำเร็จ'),
+    onError: () => { toast.error('ลบสมาชิกไม่สำเร็จ'); setDeletingId(null) },
   })
 
   if (isLoading) return <p className="text-sm text-zinc-400">Loading...</p>
@@ -109,10 +113,10 @@ export default function MembersPage() {
     <div className="space-y-6 w-full">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">สมาชิก</h1>
+          <h1 className="text-2xl font-bold">Members</h1>
           <p className="text-sm text-zinc-500 mt-1">จัดการผู้ใช้งานระบบ Admin</p>
         </div>
-        <Button onClick={() => setAddDialog(true)}>เพิ่มสมาชิก</Button>
+        <Button onClick={() => setAddDialog(true)}>Add Member</Button>
       </div>
 
       <div className="grid grid-cols-1 gap-4">
@@ -149,8 +153,8 @@ export default function MembersPage() {
                       variant="destructive"
                       size="sm"
                       className="text-xs"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => deleteMutation.mutate(m.id)}
+                      disabled={deletingId === m.id}
+                      onClick={() => setDeleteDialog(m)}
                     >
                       ลบ
                     </Button>
@@ -249,6 +253,30 @@ export default function MembersPage() {
               })}
             >
               {createMutation.isPending ? 'กำลังเพิ่ม...' : 'เพิ่มสมาชิก'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirm Dialog */}
+      <Dialog open={!!deleteDialog} onOpenChange={open => { if (!open) setDeleteDialog(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ลบสมาชิก</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            ต้องการลบ <span className="font-medium">{deleteDialog?.display_name || deleteDialog?.username}</span>{' '}
+            (<span className="font-mono text-xs">{deleteDialog?.username}</span>) ออกจากระบบ?
+          </p>
+          <p className="text-xs text-zinc-500">การกระทำนี้ไม่สามารถย้อนกลับได้</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialog(null)}>ยกเลิก</Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => { if (deleteDialog) deleteMutation.mutate(deleteDialog.id) }}
+            >
+              {deleteMutation.isPending ? 'กำลังลบ...' : 'ลบสมาชิก'}
             </Button>
           </DialogFooter>
         </DialogContent>
