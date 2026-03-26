@@ -243,6 +243,8 @@ POSTGRES_PASSWORD=MyStr0ngP@ss
 SESSION_SECRET=a3f8c2d1e9b4f7a2c5d8e1f4b7c0d3e6f9a2b5c8d1e4f7a0b3c6d9e2f5a8b1
 ```
 
+> **สำคัญ**: `POSTGRES_PASSWORD` ที่ตั้งในไฟล์นี้จะถูกใช้สร้าง PostgreSQL user `openclaw` อัตโนมัติตอน `docker compose up` ครั้งแรก — ต้องตรงกับรหัสผ่านใน `DATABASE_URL` ของ `~/openclaw-api/.env` เสมอ (ขั้นตอนที่ 8.2)
+
 บันทึกไฟล์: กด `Ctrl+X` → `Y` → `Enter`
 
 ### 9.3 รัน Docker
@@ -461,6 +463,19 @@ pm2 logs openclaw-api --lines 30
 2. เช็คว่า Bot ผูก Agent ไว้แล้วใน **Telegram**
 3. เช็คว่า User ID ถูก add ไว้ใน **Agents → Users** แล้ว
 4. ลอง **Restart Gateway** จาก Dashboard
+
+### Webchat สร้างห้องไม่ได้ (error: role "openclaw" does not exist)
+
+PostgreSQL ยังไม่มี user `openclaw` — เกิดจาก `POSTGRES_PASSWORD` ใน `.env` ไม่ถูกต้อง หรือ volume ถูกสร้างก่อนที่จะตั้ง `.env`
+
+```bash
+# ลบ volume เก่าแล้วสร้างใหม่ (ข้อมูลใน PostgreSQL จะหายทั้งหมด)
+cd ~/openclaw-admin
+docker compose down -v
+docker compose up -d
+```
+
+> ใช้ได้เฉพาะตอนติดตั้งใหม่เท่านั้น — ถ้ามีข้อมูลอยู่แล้วให้แจ้ง admin ก่อน
 
 ### Webchat ไม่ตอบ (timeout / 502)
 
