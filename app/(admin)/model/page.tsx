@@ -36,10 +36,11 @@ export default function ModelPage() {
   const savedModelRef = useRef<string>('')
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
-  const { data: orModels, isLoading: modelsLoading } = useQuery({
-    queryKey: ['models'],
-    queryFn: getModels,
-    enabled: selectedProvider.id === 'openrouter',
+  const { data: fetchedModels, isLoading: modelsLoading } = useQuery({
+    queryKey: ['models', selectedProvider.id],
+    queryFn: () => getModels(selectedProvider.id),
+    enabled: !!config,
+    staleTime: 5 * 60 * 1000,
   })
 
   // โหลด current model + api key จาก config
@@ -75,11 +76,9 @@ export default function ModelPage() {
   const fullModel = selectedModelId ? `${selectedProvider.modelPrefix}/${selectedModelId}` : ''
   const current = config?.agents?.defaults?.model?.primary ?? '-'
 
-  // model list สำหรับ provider ปัจจุบัน
+  // model list สำหรับ provider ปัจจุบัน — โหลดจาก API จริงทุก provider
   const modelList: { id: string; name: string; pricing?: { prompt: string; completion: string } }[] =
-    selectedProvider.id === 'openrouter'
-      ? (orModels ?? [])
-      : (selectedProvider.models ?? [])
+    fetchedModels ?? []
 
   const selectedModelInfo = modelList.find(m => m.id === selectedModelId)
 
@@ -267,12 +266,12 @@ export default function ModelPage() {
               <PopoverTrigger
                 role="combobox"
                 aria-expanded={open}
-                disabled={modelsLoading && selectedProvider.id === 'openrouter'}
+                disabled={modelsLoading}
                 onClick={() => setOpen(v => !v)}
                 className="w-full inline-flex items-center justify-between rounded-lg border bg-card px-3 py-2 text-sm font-normal shadow-sm hover:bg-accent disabled:opacity-50"
               >
                 <span className="truncate">
-                  {modelsLoading && selectedProvider.id === 'openrouter'
+                  {modelsLoading
                     ? 'Loading models...'
                     : (selectedModelInfo?.name ?? selectedModelId ?? 'เลือก Model...')}
                 </span>
