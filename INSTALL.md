@@ -550,8 +550,25 @@ docker compose up -d
 
 1. ตรวจสอบ `hooks` ใน `~/.openclaw/openclaw.json` — ต้องมี `enabled:true`, `token`, และ `allowRequestSessionKey:true`
 2. ตรวจสอบ `HOOKS_TOKEN` ใน `~/openclaw-api/.env` ต้องตรงกับ `hooks.token` ใน openclaw.json
-3. Restart gateway: `openclaw gateway restart`
-4. Restart api: `pm2 restart openclaw-api --update-env`
+3. Restart gateway และ api:
+
+```bash
+# ถ้ารันผ่าน systemd
+openclaw gateway restart
+pm2 restart openclaw-api --update-env
+
+# ถ้ารันผ่าน pm2
+pm2 restart openclaw-gateway
+pm2 restart openclaw-api --update-env
+
+# ถ้ารันเป็น process ธรรมดา (nohup)
+kill $(ps aux | grep openclaw-gateway | grep -v grep | awk '{print $2}')
+nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &
+```
+
+1. ตรวจสอบว่า gateway ขึ้นมาแล้ว: `ps aux | grep openclaw-gateway | grep -v grep`
+
+> **หมายเหตุ**: Webchat อาจใช้เวลา 30-60 วินาทีต่อคำถาม เนื่องจาก agent ต้องรัน mcporter เพื่อดึงข้อมูล ERP — นี่คือพฤติกรรมปกติ ไม่ใช่ error
 
 ---
 

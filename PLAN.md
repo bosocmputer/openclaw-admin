@@ -1,6 +1,6 @@
 # OpenClaw Admin — Project Plan
 
-> อัปเดตล่าสุด: 2026-03-24 (รอบ 8)
+> อัปเดตล่าสุด: 2026-03-26 (รอบ 9)
 
 ---
 
@@ -76,18 +76,22 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - **Config Health card** — เช็ค config valid/invalid + ปุ่ม Auto Fix (รัน `openclaw doctor --fix`)
 
 ### 2. Model (`/model`)
-- **Multi-provider**: OpenRouter, Google, Anthropic, OpenAI — เลือก provider ด้วยปุ่ม grid
-- **API Key** ต่อ provider — Show/Hide, Test (ping endpoint), Save
-- Model ที่ใช้อยู่ตอนนี้
-- Model แนะนำ 4 ตัว (OpenRouter only: free / ประหยัด / แนะนำ / ดีสุด)
+- **Multi-provider**: OpenRouter, Google, Anthropic, OpenAI, Azure, Ollama, **Kilo AI** — เลือก provider ด้วยปุ่ม grid
+- **API Key** ต่อ provider — Show/Hide, **Test server-side** (POST /api/models/test), Save
+- Model list โหลดจาก API จริงทุก provider (GET /api/models?provider=xxx)
+- **Smart save** — ปุ่มแสดงเฉพาะสิ่งที่เปลี่ยน (key / model / both)
+- **Restart Gateway** button ปรากฏหลัง save สำเร็จ
+- Per-provider info: desc, keyUrl, keyHint
 - **Combobox search** (shadcn Command+Popover) เลือก model + แสดงราคา
 - โหลด model เดิมที่บันทึกไว้ถูกต้องแม้ switch provider (ใช้ `useRef` guard init)
-- Layout 2 คอลัมน์บนจอกว้าง
 
 ### 3. Agents (`/agents`)
-- รายการ agents ทั้งหมด พร้อม users badge (grid 3 คอลัมน์)
+- รายการ agents ทั้งหมด พร้อม users badge + Telegram bot bindings (grid 3 คอลัมน์)
 - เพิ่ม agent — ระบุ **Agent ID** + **Access Mode** (admin/sales/purchase/stock/general) → server auto-generate `SOUL.md` จาก template ตาม mode
-- ลบ agent — ใช้ **Dialog** (ไม่ใช้ browser confirm)
+- **Guard ลบตัวสุดท้าย** — ต้องมีอย่างน้อย 1 agent
+- **Block duplicate Agent ID**
+- ลบ agent — ใช้ **Dialog** พร้อม warning ถ้า bot ยังผูกอยู่
+- ปุ่ม Delete แยกออกจากปุ่ม Edit (ghost style ด้านล่าง card)
 
 ### 4. Agent Detail (`/agents/[id]`)
 - **ไม่มี Tab** — 2-column layout เห็นทุกส่วนพร้อมกัน
@@ -109,12 +113,12 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - **เพิ่ม Bot ใหม่** — validate ห้ามชื่อซ้ำ/ห้ามชื่อ `default`, default dmPolicy=open, เขียน config โดยตรง (ไม่ใช้ CLI)
 - **Bot cards** แต่ละ account (grid 2 คอลัมน์):
   - ชื่อ bot จริงจาก Telegram API (`getMe`)
-  - Dropdown ผูก Agent + **warning ถ้ายังไม่ได้ผูก** (bot จะ fallback ไป default agent)
-  - Bot Token — Show/Hide, Save
+  - Dropdown ผูก Agent + **warning ถ้ายังไม่ได้ผูก** (bot จะ fallback ไป default agent) — เลือก agent ซ้ำกันได้
+  - Bot Token — Show/Hide, **Save แยกต่อ bot** (แก้ shared isPending bug)
   - DM Policy: **open** (ค่าเริ่มต้น) / **allowlist** เท่านั้น
   - Warning + link นำทาง ถ้าเลือก allowlist แต่ยังไม่มี user
   - Users ที่อนุญาต — read-only badges (กรอง `"*"` ออก), link ไปหน้า Agent
-  - ปุ่ม **Set as Default** → เปิด Dialog (validate ห้ามชื่อซ้ำ/ห้าม `default`)
+  - ปุ่ม **Set as Default** → เปิด Dialog (validate ห้ามชื่อซ้ำ/ห้าม `default`) + **restart gateway**
   - ปุ่ม **Delete Bot** → เปิด Dialog (ซ่อนสำหรับ default), ลบ config โดยตรง (ไม่ใช้ CLI)
 
 ### 7. Telegram Chats History (`/chats`)
@@ -123,6 +127,7 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - Analytics: users, messages, tokens, sessions
 - Sidebar Users แยกตาม sender_id
 - Chat threaded ตาม turn ของ user
+- **โหลดแค่ 20 sessions ล่าสุด** เพื่อประสิทธิภาพ (sort by updatedAt)
 
 ### 8. Logs (`/logs`)
 - Live polling ทุก 3 วินาที
@@ -130,7 +135,8 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - ค้นหา message / subsystem
 - Pause / Resume, Auto scroll
 
-### 9. คู่มือผู้ใช้ (`/guide`)
+### 9. User Guide (`/guide`)
+
 - ขั้นตอน 3 ขั้น: หา User ID → Admin เพิ่มสิทธิ์ → Start bot (พิมพ์คุยได้เลย)
 - ตารางสรุป "สิ่งที่ต้องส่งให้ Admin": Telegram User ID + ชื่อ/แผนก
 - Troubleshoot เบื้องต้น (ไม่มี Pairing code แล้ว — ถูกลบออก)
