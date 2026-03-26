@@ -127,18 +127,57 @@ openclaw onboard --install-daemon
 คำสั่งนี้จะ:
 - สร้างไฟล์ config ที่ `~/.openclaw/openclaw.json`
 - ติดตั้ง `openclaw-gateway` เป็น systemd service
-- เริ่มรัน gateway อัตโนมัติ
 
 > **สำคัญ**: ค่าที่เลือกใน wizard ไม่มีผลถาวร — แก้ได้ทั้งหมดผ่าน Web Admin ในขั้นตอนถัดไป
 > ห้ามกด Ctrl+C กลางคัน เพราะจะทำให้ `openclaw.json` ไม่ถูกสร้าง
 
-ตรวจสอบสถานะ:
+### 7.1 ตรวจสอบ gateway
 
 ```bash
 openclaw gateway status
 ```
 
-> ถ้าเห็น `online` หรือ `running` แสดงว่าสำเร็จ
+ถ้าเห็น `RPC probe: ok` แสดงว่า gateway รันอยู่แล้ว ข้ามไปขั้นตอน 7.2 ได้เลย
+
+ถ้า gateway ไม่รัน (หรือรัน root user ที่ใช้ systemd --user ไม่ได้) ให้รันผ่าน pm2 แทน:
+
+```bash
+pm2 start /usr/lib/node_modules/openclaw/dist/index.js \
+  --name openclaw-gateway \
+  --interpreter node \
+  -- gateway --port 18789
+pm2 save
+pm2 startup
+# copy คำสั่งที่ได้แล้วรัน
+```
+
+> **หมายเหตุ**: ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` แทน `openclaw gateway restart` ทุกครั้ง
+
+### 7.2 ตั้งค่า Hooks สำหรับ Webchat
+
+เปิดไฟล์ config:
+
+```bash
+nano ~/.openclaw/openclaw.json
+```
+
+เพิ่ม section `hooks` ที่ระดับ root (ข้างนอก `gateway` object):
+
+```json
+{
+  "gateway": { ... },
+  "hooks": {
+    "enabled": true,
+    "token": "ค่าเดียวกับ HOOKS_TOKEN ที่จะตั้งในขั้นตอนที่ 9",
+    "allowRequestSessionKey": true
+  }
+}
+```
+
+> **สำคัญ**: `hooks` ต้องอยู่ระดับเดียวกับ `gateway` — ห้ามวางไว้ข้างใน `gateway` จะ error
+> ค่า `token` ต้องตรงกับ `HOOKS_TOKEN` ใน `~/openclaw-api/.env` เสมอ
+
+บันทึกไฟล์: กด `Ctrl+X` → `Y` → `Enter`
 
 ---
 
@@ -373,31 +412,15 @@ password: superadmin
 
 ### 11.8 ตั้งค่า Webchat (ถ้าต้องการให้พนักงานแชทผ่านเว็บ)
 
-**เปิด Hooks ใน openclaw.json:**
+> Hooks ควรตั้งไว้แล้วตั้งแต่ขั้นตอนที่ 7.2 — ถ้ายังไม่ได้ตั้ง ให้ทำตามขั้นตอนที่ 7.2 ก่อน
+
+Restart gateway หลังแก้ config:
 
 ```bash
-nano ~/.openclaw/openclaw.json
-```
+# ถ้ารันผ่าน pm2
+pm2 restart openclaw-gateway
 
-เพิ่ม section `hooks` ลงใน JSON — ต้องอยู่ **ระดับ root** (ไม่ใช่ข้างใน `gateway`):
-
-```json
-{
-  "gateway": { ... },
-  "hooks": {
-    "enabled": true,
-    "token": "ค่าเดียวกับ HOOKS_TOKEN ใน ~/openclaw-api/.env",
-    "allowRequestSessionKey": true
-  },
-  "session": { ... }
-}
-```
-
-> **สำคัญ**: `hooks` ต้องอยู่ระดับเดียวกับ `gateway` — ถ้าวางไว้ข้างใน `gateway` จะ error `Unrecognized key: "hooks"`
-
-บันทึกแล้ว restart gateway:
-
-```bash
+# ถ้ารันผ่าน systemd
 openclaw gateway restart
 ```
 
