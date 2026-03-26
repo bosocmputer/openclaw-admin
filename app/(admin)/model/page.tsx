@@ -127,11 +127,62 @@ export default function ModelPage() {
   const keyChanged = !selectedProvider.noApiKey && apiKey.trim() !== currentKeyInConfig
   const modelChanged = !!fullModel && fullModel !== currentModel
 
+  const PROVIDER_INFO: Record<string, { desc: string; keyUrl?: string; keyHint?: string }> = {
+    openrouter: {
+      desc: 'รองรับ model หลายร้อยตัวจากหลาย provider ในที่เดียว — แนะนำสำหรับผู้เริ่มต้น',
+      keyUrl: 'openrouter.ai/keys',
+      keyHint: 'สมัครฟรี → Settings → API Keys → Create Key',
+    },
+    anthropic: {
+      desc: 'Claude โดย Anthropic — เก่งด้านการวิเคราะห์และภาษาไทย',
+      keyUrl: 'console.anthropic.com/keys',
+      keyHint: 'สมัคร → API Keys → Create Key',
+    },
+    google: {
+      desc: 'Gemini โดย Google — context window ใหญ่ รองรับรูปภาพ',
+      keyUrl: 'aistudio.google.com/apikey',
+      keyHint: 'Login ด้วย Google Account → Create API Key',
+    },
+    openai: {
+      desc: 'GPT-4o และ GPT-4.1 โดย OpenAI — ใช้งานกว้างขวางที่สุด',
+      keyUrl: 'platform.openai.com/api-keys',
+      keyHint: 'สมัคร → API keys → Create new secret key',
+    },
+    mistral: {
+      desc: 'Mistral AI — model ยุโรป ราคาถูก เร็ว',
+      keyUrl: 'console.mistral.ai/api-keys',
+      keyHint: 'สมัคร → API Keys → Create new key',
+    },
+    groq: {
+      desc: 'Groq — inference เร็วมาก ใช้ chip พิเศษ มี free tier',
+      keyUrl: 'console.groq.com/keys',
+      keyHint: 'สมัครฟรี → API Keys → Create API Key',
+    },
+    kilocode: {
+      desc: 'Kilo AI — รวม model ชั้นนำหลายตัว คิดค่าใช้จ่ายตาม usage จริง',
+      keyUrl: 'app.kilo.ai',
+      keyHint: 'Login → Settings → API Keys → Generate Key',
+    },
+  }
+
+  const providerInfo = PROVIDER_INFO[selectedProvider.id]
+
   return (
     <div className="space-y-6 w-full">
       <div>
         <h1 className="text-2xl font-bold">Model</h1>
-        <p className="text-sm text-zinc-500 mt-1">เลือก AI Provider และ Model — บันทึกแล้ว restart gateway เพื่อให้มีผล</p>
+        <p className="text-sm text-zinc-500 mt-1">เลือก AI Provider และ Model สำหรับ bot — หลังบันทึกต้อง Restart Gateway เพื่อให้มีผล</p>
+      </div>
+
+      {/* คำแนะนำภาพรวม */}
+      <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 px-4 py-3 space-y-1">
+        <p className="text-sm font-medium text-blue-800 dark:text-blue-300">วิธีใช้งาน</p>
+        <ol className="text-sm text-blue-700 dark:text-blue-400 space-y-0.5 list-none">
+          <li>① เลือก <strong>AI Provider</strong> ที่ต้องการใช้</li>
+          <li>② ใส่ <strong>API Key</strong> ของ provider นั้น แล้วกด <strong>ทดสอบ</strong> ให้ผ่านก่อน</li>
+          <li>③ เลือก <strong>Model</strong> จากรายการ</li>
+          <li>④ กด <strong>บันทึก</strong> แล้วไปที่ Dashboard → <strong>Restart Gateway</strong></li>
+        </ol>
       </div>
 
       {/* ขั้นตอน 1: เลือก Provider */}
@@ -157,10 +208,12 @@ export default function ModelPage() {
                 }`}
               >
                 {p.label}
-                {p.noApiKey && <span className="block text-xs text-green-600 font-normal">ไม่ต้องใช้ key</span>}
               </button>
             ))}
           </div>
+          {providerInfo && (
+            <p className="text-xs text-zinc-500 pt-1">{providerInfo.desc}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -173,7 +226,12 @@ export default function ModelPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">ขั้นตอนที่ 2 — ใส่ API Key</CardTitle>
-                <p className="text-xs text-zinc-500 font-mono mt-1">{selectedProvider.envKey}</p>
+                {providerInfo?.keyUrl && (
+                  <p className="text-xs text-zinc-500 mt-1">
+                    รับ key ได้ที่ <span className="font-mono text-blue-600 dark:text-blue-400">{providerInfo.keyUrl}</span>
+                    {providerInfo.keyHint && <span className="ml-1">— {providerInfo.keyHint}</span>}
+                  </p>
+                )}
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="flex gap-2">
