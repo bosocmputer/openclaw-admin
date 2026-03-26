@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getConfig, putConfig, getModels, testProvider, PROVIDERS, type ProviderConfig } from '@/lib/api'
+import { getConfig, putConfig, getModels, testProvider, restartGateway, PROVIDERS, type ProviderConfig } from '@/lib/api'
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -98,6 +98,14 @@ export default function ModelPage() {
     }
   }
 
+  const [savedOnce, setSavedOnce] = useState(false)
+
+  const restartMutation = useMutation({
+    mutationFn: restartGateway,
+    onSuccess: () => toast.success('Restart Gateway สำเร็จ'),
+    onError: () => toast.error('Restart Gateway ไม่สำเร็จ'),
+  })
+
   // บันทึก API key + model ในครั้งเดียว
   const saveMutation = useMutation({
     mutationFn: async ({ saveKey, saveModel }: { saveKey: boolean; saveModel: boolean }) => {
@@ -116,6 +124,7 @@ export default function ModelPage() {
     },
     onSuccess: (_, { saveKey, saveModel }) => {
       qc.invalidateQueries({ queryKey: ['config'] })
+      setSavedOnce(true)
       if (saveKey && saveModel) toast.success('บันทึก API Key และ Model แล้ว')
       else if (saveKey) toast.success('บันทึก API Key แล้ว')
       else toast.success('บันทึก Model แล้ว')
@@ -172,17 +181,6 @@ export default function ModelPage() {
       <div>
         <h1 className="text-2xl font-bold">Model</h1>
         <p className="text-sm text-zinc-500 mt-1">เลือก AI Provider และ Model สำหรับ bot — หลังบันทึกต้อง Restart Gateway เพื่อให้มีผล</p>
-      </div>
-
-      {/* คำแนะนำภาพรวม */}
-      <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 px-4 py-3 space-y-1">
-        <p className="text-sm font-medium text-blue-800 dark:text-blue-300">วิธีใช้งาน</p>
-        <ol className="text-sm text-blue-700 dark:text-blue-400 space-y-0.5 list-none">
-          <li>① เลือก <strong>AI Provider</strong> ที่ต้องการใช้</li>
-          <li>② ใส่ <strong>API Key</strong> ของ provider นั้น แล้วกด <strong>ทดสอบ</strong> ให้ผ่านก่อน</li>
-          <li>③ เลือก <strong>Model</strong> จากรายการ</li>
-          <li>④ กด <strong>บันทึก</strong> แล้วไปที่ Dashboard → <strong>Restart Gateway</strong></li>
-        </ol>
       </div>
 
       {/* ขั้นตอน 1: เลือก Provider */}
@@ -429,6 +427,18 @@ export default function ModelPage() {
               {!keyChanged && !modelChanged && (
                 <Button className="w-full" disabled variant="outline">
                   {fullModel ? 'ไม่มีการเปลี่ยนแปลง' : 'เลือก Model ก่อน'}
+                </Button>
+              )}
+
+              {/* Restart Gateway — แสดงหลังจาก save สำเร็จอย่างน้อย 1 ครั้ง */}
+              {savedOnce && (
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => restartMutation.mutate()}
+                  disabled={restartMutation.isPending}
+                >
+                  {restartMutation.isPending ? 'กำลัง Restart...' : '⚡ Restart Gateway เพื่อให้มีผล'}
                 </Button>
               )}
             </div>
