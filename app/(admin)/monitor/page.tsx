@@ -80,96 +80,178 @@ interface Session {
   events: MonitorEvent[]
 }
 
+// ─── Agent Detail Dialog ──────────────────────────────────────────────────────
+function AgentDetailDialog({ agent, channelType, roomName, open, onClose }: {
+  agent: MonitorAgent; channelType: 'webchat' | 'telegram'; roomName?: string; open: boolean; onClose: () => void
+}) {
+  const sessions: Session[] = (channelType === 'webchat' ? agent.channels.webchat : agent.channels.telegram) ?? []
+  const allEvents = sessions.flatMap(s => s.events.map(e => ({ ...e, user: s.user })))
+    .sort((a, b) => b.ts.localeCompare(a.ts))
+  const title = channelType === 'webchat' ? `[${roomName ?? agent.id}]` : `@${agent.id}_bot`
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" style={{ background: '#111', color: '#e0e0e0', border: '1px solid #333' }}>
+        <DialogHeader>
+          <DialogTitle style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 10, color: '#f5c518' }}>
+            {title} — DETAIL
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 font-mono text-xs">
+          {/* Sessions */}
+          <div>
+            <p style={{ color: '#555', fontSize: 9, marginBottom: 8 }}>SESSIONS ({sessions.length})</p>
+            <div className="space-y-3">
+              {sessions.map(s => (
+                <div key={s.sessionKey} className="rounded p-3 space-y-2" style={{ background: '#0a0a0a', border: '1px solid #222' }}>
+                  <div className="flex items-center gap-2">
+                    <SessionDot state={s.state} />
+                    <span style={{ color: '#aaa', fontWeight: 'bold' }}>{s.user}</span>
+                    <span style={{ color: '#555' }} className="ml-auto">{s.state.toUpperCase()}</span>
+                    {s.lastMessageAt && <span style={{ color: '#444' }}>{relativeTime(s.lastMessageAt)}</span>}
+                    {s.cost > 0 && <span style={{ color: '#444' }}>฿{(s.cost * 35).toFixed(4)}</span>}
+                  </div>
+                  {s.lastUserText && (
+                    <div className="rounded p-2" style={{ background: '#141414' }}>
+                      <p style={{ color: '#555', fontSize: 9 }}>USER</p>
+                      <p style={{ color: '#999', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{s.lastUserText}</p>
+                    </div>
+                  )}
+                  {s.lastReplyText && (
+                    <div className="rounded p-2" style={{ background: '#0d1a0d' }}>
+                      <p style={{ color: '#3a8', fontSize: 9 }}>REPLY</p>
+                      <p style={{ color: '#4a9', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{s.lastReplyText}</p>
+                    </div>
+                  )}
+                  {/* Session events */}
+                  {s.events.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t" style={{ borderColor: '#1a1a1a' }}>
+                      {s.events.map((e, i) => (
+                        <div key={i} className="flex gap-2 items-start" style={{ fontSize: 10 }}>
+                          <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
+                          <span className="shrink-0">{eventIcon(e.type)}</span>
+                          <span style={{ color: '#666', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{e.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* All events timeline */}
+          {allEvents.length > 0 && (
+            <div>
+              <p style={{ color: '#555', fontSize: 9, marginBottom: 8 }}>TIMELINE (all sessions)</p>
+              <div className="space-y-1">
+                {allEvents.map((e, i) => (
+                  <div key={i} className="flex gap-2 items-start" style={{ fontSize: 10 }}>
+                    <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
+                    <span style={{ color: '#555' }} className="shrink-0">[{e.user}]</span>
+                    <span className="shrink-0">{eventIcon(e.type)}</span>
+                    <span style={{ color: '#777', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{e.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; channelType: 'webchat' | 'telegram'; roomName?: string }) {
+  const [detailOpen, setDetailOpen] = useState(false)
   const sessions: Session[] = (channelType === 'webchat' ? agent.channels.webchat : agent.channels.telegram) ?? []
   const overallState = sessions.find(s => s.state === 'error')?.state
     ?? sessions.find(s => s.state === 'thinking' || s.state === 'tool_call')?.state
     ?? sessions.find(s => s.state === 'replied')?.state
     ?? 'idle'
   const elapsed = sessions.find(s => s.state === 'thinking')?.elapsed ?? 0
+  const activeSession = sessions.find(s => s.state !== 'idle') ?? sessions[0] ?? null
 
   const borderColors: Record<string, string> = {
     idle: '#222', thinking: '#f5c518', tool_call: '#a855f7', replied: '#22c55e', error: '#ef4444',
   }
 
-  // รวม events ล่าสุดจากทุก session
-  const allEvents = sessions.flatMap(s => s.events.map(e => ({ ...e, user: s.user })))
-    .sort((a, b) => b.ts.localeCompare(a.ts))
-    .slice(0, 6)
-
   return (
-    <div
-      className="rounded border flex flex-col"
-      style={{ background: '#111', borderColor: borderColors[overallState] ?? '#222', minHeight: 280 }}
-    >
-      {/* header */}
-      <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: '#222' }}>
-        <div>
-          <p className="font-mono text-xs font-bold" style={{ color: '#e0e0e0', fontFamily: '"Press Start 2P", monospace', fontSize: 9 }}>
-            {channelType === 'webchat' ? `[${roomName ?? agent.id}]` : `@${agent.id}_bot`}
-          </p>
-          <p className="font-mono text-xs mt-0.5" style={{ color: '#555', fontSize: 9 }}>AGENT: {agent.id}</p>
+    <>
+      <div
+        className="rounded border flex flex-col cursor-pointer transition-opacity hover:opacity-80"
+        style={{ background: '#111', borderColor: borderColors[overallState] ?? '#222', minHeight: 240 }}
+        onClick={() => setDetailOpen(true)}
+      >
+        {/* header */}
+        <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: '#222' }}>
+          <div>
+            <p className="font-mono font-bold" style={{ color: '#e0e0e0', fontFamily: '"Press Start 2P", monospace', fontSize: 9 }}>
+              {channelType === 'webchat' ? `[${roomName ?? agent.id}]` : `@${agent.id}_bot`}
+            </p>
+            <p className="font-mono mt-0.5" style={{ color: '#555', fontSize: 9 }}>AGENT: {agent.id}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-mono" style={{ color: '#555', fontSize: 9 }}>
+              {sessions.length} session{sessions.length !== 1 ? 's' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); setDetailOpen(true) }}
+              className="font-mono px-1.5 py-0.5 rounded border hover:bg-zinc-800 transition-colors"
+              style={{ borderColor: '#333', color: '#666', fontSize: 8, fontFamily: '"Press Start 2P", monospace' }}
+            >
+              DETAIL
+            </button>
+          </div>
         </div>
-        <span className="font-mono text-xs" style={{ color: '#555', fontSize: 9 }}>
-          {sessions.length} session{sessions.length !== 1 ? 's' : ''}
-        </span>
-      </div>
 
-      {/* character */}
-      <div className="flex flex-col items-center py-3">
-        <PixelChar state={overallState} />
-        <ProgressBar state={overallState} elapsed={elapsed} />
-      </div>
+        {/* character */}
+        <div className="flex flex-col items-center py-3">
+          <PixelChar state={overallState} />
+          <ProgressBar state={overallState} elapsed={elapsed} />
+        </div>
 
-      {/* sessions */}
-      {sessions.length > 0 && (
-        <div className="px-3 pb-2 space-y-1.5">
-          <p className="font-mono text-xs mb-1" style={{ color: '#555', fontSize: 9 }}>SESSIONS</p>
-          {sessions.map(s => (
-            <div key={s.sessionKey} className="space-y-0.5 font-mono" style={{ fontSize: 10 }}>
-              <div className="flex items-center gap-1.5">
+        {/* active session summary — 1 session เท่านั้น */}
+        {activeSession && (
+          <div className="px-3 pb-2 space-y-1 font-mono" style={{ fontSize: 10 }}>
+            <p style={{ color: '#555', fontSize: 9 }}>SESSIONS</p>
+            {sessions.map(s => (
+              <div key={s.sessionKey} className="flex items-center gap-1.5">
                 <SessionDot state={s.state} />
-                <span style={{ color: '#aaa' }}>{s.user}</span>
+                <span style={{ color: '#888' }}>{s.user}</span>
                 {s.state === 'idle' && s.lastMessageAt && (
                   <span style={{ color: '#444' }}>last: {relativeTime(s.lastMessageAt)}</span>
                 )}
-                {s.cost > 0 && (
-                  <span style={{ color: '#444' }} className="ml-auto shrink-0">฿{(s.cost * 35).toFixed(3)}</span>
+                {s.state !== 'idle' && s.lastUserText && (
+                  <span style={{ color: '#555' }} className="truncate max-w-[100px]">&quot;{s.lastUserText}&quot;</span>
                 )}
               </div>
-              {s.lastUserText && (
-                <div style={{ color: '#666', paddingLeft: 14 }}>
-                  <span style={{ color: '#555' }}>▶ </span>{s.lastUserText}
-                </div>
-              )}
-              {s.lastReplyText && (
-                <div style={{ color: '#4a9', paddingLeft: 14 }}>
-                  <span style={{ color: '#3a8' }}>◀ </span>{s.lastReplyText}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
 
-      {/* events feed */}
-      <div className="px-3 pb-3 mt-auto">
-        <div className="border-t pt-2 space-y-1" style={{ borderColor: '#1a1a1a' }}>
-          {allEvents.length === 0 && (
-            <p className="font-mono text-xs" style={{ color: '#333', fontSize: 9 }}>no recent activity</p>
-          )}
-          {allEvents.map((e, i) => (
-            <div key={i} className="font-mono" style={{ fontSize: 10 }}>
-              <div className="flex gap-1.5 items-start">
-                <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
-                <span className="shrink-0">{eventIcon(e.type)}</span>
-                <span style={{ color: '#777' }}>{e.text}</span>
+        {/* last event */}
+        <div className="px-3 pb-3 mt-auto">
+          <div className="border-t pt-2" style={{ borderColor: '#1a1a1a' }}>
+            {sessions.flatMap(s => s.events).length === 0 ? (
+              <p className="font-mono" style={{ color: '#333', fontSize: 9 }}>no recent activity</p>
+            ) : (
+              <div className="flex gap-1.5 font-mono items-start" style={{ fontSize: 10 }}>
+                {(() => {
+                  const last = sessions.flatMap(s => s.events.map(e => ({ ...e, user: s.user }))).sort((a, b) => b.ts.localeCompare(a.ts))[0]
+                  return last ? <>
+                    <span style={{ color: '#444' }} className="shrink-0">{last.ts.slice(11, 19)}</span>
+                    <span className="shrink-0">{eventIcon(last.type)}</span>
+                    <span style={{ color: '#666' }} className="truncate">{last.text}</span>
+                  </> : null
+                })()}
               </div>
-            </div>
-          ))}
+            )}
+          </div>
         </div>
       </div>
-    </div>
+      <AgentDetailDialog agent={agent} channelType={channelType} roomName={roomName} open={detailOpen} onClose={() => setDetailOpen(false)} />
+    </>
   )
 }
 
