@@ -16,8 +16,8 @@ function PixelChar({ state }: { state: string }) {
   }
   const c = configs[state] ?? configs.idle
   return (
-    <div className="flex flex-col items-center font-mono text-xs leading-tight select-none" style={{ color: c.color }}>
-      <div className={`text-lg ${c.anim}`} style={{ fontFamily: 'monospace', lineHeight: 1.2 }}>
+    <div className="flex flex-col items-center font-mono text-sm leading-tight select-none" style={{ color: c.color }}>
+      <div className={`text-xl ${c.anim}`} style={{ fontFamily: 'monospace', lineHeight: 1.2 }}>
         <div>▄▀▀▀▄</div>
         <div>█{c.eyes}█ {c.extra}</div>
         <div>█&nbsp;&nbsp;&nbsp;&nbsp;█</div>
@@ -41,7 +41,7 @@ function ProgressBar({ state, elapsed }: { state: string; elapsed: number }) {
   const bars = 20
   const filled = Math.round((c.fill / 100) * bars)
   return (
-    <div className="font-mono text-xs mt-2">
+    <div className="font-mono text-sm mt-2">
       <span style={{ color: c.color }}>
         [{('▓'.repeat(filled) + '░'.repeat(bars - filled))}] {c.label}
       </span>
@@ -93,14 +93,14 @@ function AgentDetailDialog({ agent, channelType, roomName, open, onClose }: {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-5xl sm:max-w-5xl w-[90vw] max-h-[85vh] overflow-y-auto" style={{ background: '#111', color: '#e0e0e0', border: '1px solid #333' }}>
         <DialogHeader>
-          <DialogTitle style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 10, color: '#f5c518' }}>
+          <DialogTitle style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 13, color: '#f5c518' }}>
             {title} — DETAIL
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 font-mono text-xs">
+        <div className="space-y-4 font-mono text-sm">
           {/* Sessions */}
           <div>
-            <p style={{ color: '#555', fontSize: 9, marginBottom: 8 }}>SESSIONS ({sessions.length})</p>
+            <p style={{ color: '#555', fontSize: 12, marginBottom: 8 }}>SESSIONS ({sessions.length})</p>
             <div className="space-y-3">
               {sessions.map(s => (
                 <div key={s.sessionKey} className="rounded p-3 space-y-2" style={{ background: '#0a0a0a', border: '1px solid #222' }}>
@@ -113,21 +113,21 @@ function AgentDetailDialog({ agent, channelType, roomName, open, onClose }: {
                   </div>
                   {s.lastUserText && (
                     <div className="rounded p-2" style={{ background: '#141414' }}>
-                      <p style={{ color: '#555', fontSize: 9 }}>USER</p>
-                      <p style={{ color: '#999', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{s.lastUserText}</p>
+                      <p style={{ color: '#555', fontSize: 11 }}>USER</p>
+                      <p style={{ color: '#999', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13 }}>{s.lastUserText}</p>
                     </div>
                   )}
                   {s.lastReplyText && (
                     <div className="rounded p-2" style={{ background: '#0d1a0d' }}>
-                      <p style={{ color: '#3a8', fontSize: 9 }}>REPLY</p>
-                      <p style={{ color: '#4a9', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{s.lastReplyText}</p>
+                      <p style={{ color: '#3a8', fontSize: 11 }}>REPLY</p>
+                      <p style={{ color: '#4a9', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13 }}>{s.lastReplyText}</p>
                     </div>
                   )}
                   {/* Session events */}
                   {s.events.length > 0 && (
                     <div className="space-y-1 pt-1 border-t" style={{ borderColor: '#1a1a1a' }}>
                       {s.events.map((e, i) => (
-                        <div key={i} className="flex gap-2 items-start" style={{ fontSize: 10 }}>
+                        <div key={i} className="flex gap-2 items-start" style={{ fontSize: 12 }}>
                           <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
                           <span className="shrink-0">{eventIcon(e.type)}</span>
                           <span style={{ color: '#666', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{e.text}</span>
@@ -142,10 +142,10 @@ function AgentDetailDialog({ agent, channelType, roomName, open, onClose }: {
           {/* All events timeline */}
           {allEvents.length > 0 && (
             <div>
-              <p style={{ color: '#555', fontSize: 9, marginBottom: 8 }}>TIMELINE (all sessions)</p>
+              <p style={{ color: '#555', fontSize: 12, marginBottom: 8 }}>TIMELINE (all sessions)</p>
               <div className="space-y-1">
                 {allEvents.map((e, i) => (
-                  <div key={i} className="flex gap-2 items-start" style={{ fontSize: 10 }}>
+                  <div key={i} className="flex gap-2 items-start" style={{ fontSize: 12 }}>
                     <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
                     <span style={{ color: '#555' }} className="shrink-0">[{e.user}]</span>
                     <span className="shrink-0">{eventIcon(e.type)}</span>
@@ -185,20 +185,20 @@ function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; chan
         {/* header */}
         <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: '#222' }}>
           <div>
-            <p className="font-mono font-bold" style={{ color: '#e0e0e0', fontFamily: '"Press Start 2P", monospace', fontSize: 9 }}>
+            <p className="font-mono font-bold" style={{ color: '#e0e0e0', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>
               {channelType === 'webchat' ? `[${roomName ?? agent.id}]` : `@${agent.id}_bot`}
             </p>
-            <p className="font-mono mt-0.5" style={{ color: '#555', fontSize: 9 }}>AGENT: {agent.id}</p>
+            <p className="font-mono mt-0.5" style={{ color: '#555', fontSize: 11 }}>AGENT: {agent.id}</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono" style={{ color: '#555', fontSize: 9 }}>
+            <span className="font-mono" style={{ color: '#555', fontSize: 11 }}>
               {sessions.length} session{sessions.length !== 1 ? 's' : ''}
             </span>
             <button
               type="button"
               onClick={e => { e.stopPropagation(); setDetailOpen(true) }}
               className="font-mono px-1.5 py-0.5 rounded border hover:bg-zinc-800 transition-colors"
-              style={{ borderColor: '#333', color: '#666', fontSize: 8, fontFamily: '"Press Start 2P", monospace' }}
+              style={{ borderColor: '#333', color: '#666', fontSize: 10, fontFamily: '"Press Start 2P", monospace' }}
             >
               DETAIL
             </button>
@@ -211,10 +211,10 @@ function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; chan
           <ProgressBar state={overallState} elapsed={elapsed} />
         </div>
 
-        {/* active session summary — 1 session เท่านั้น */}
+        {/* active session summary */}
         {activeSession && (
-          <div className="px-3 pb-2 space-y-1 font-mono" style={{ fontSize: 10 }}>
-            <p style={{ color: '#555', fontSize: 9 }}>SESSIONS</p>
+          <div className="px-3 pb-2 space-y-1 font-mono" style={{ fontSize: 12 }}>
+            <p style={{ color: '#555', fontSize: 11 }}>SESSIONS</p>
             {sessions.map(s => (
               <div key={s.sessionKey} className="flex items-center gap-1.5">
                 <SessionDot state={s.state} />
@@ -223,7 +223,7 @@ function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; chan
                   <span style={{ color: '#444' }}>last: {relativeTime(s.lastMessageAt)}</span>
                 )}
                 {s.state !== 'idle' && s.lastUserText && (
-                  <span style={{ color: '#555' }} className="truncate max-w-[100px]">&quot;{s.lastUserText}&quot;</span>
+                  <span style={{ color: '#555' }} className="truncate max-w-[120px]">&quot;{s.lastUserText}&quot;</span>
                 )}
               </div>
             ))}
@@ -234,9 +234,9 @@ function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; chan
         <div className="px-3 pb-3 mt-auto">
           <div className="border-t pt-2" style={{ borderColor: '#1a1a1a' }}>
             {sessions.flatMap(s => s.events).length === 0 ? (
-              <p className="font-mono" style={{ color: '#333', fontSize: 9 }}>no recent activity</p>
+              <p className="font-mono" style={{ color: '#333', fontSize: 11 }}>no recent activity</p>
             ) : (
-              <div className="flex gap-1.5 font-mono items-start" style={{ fontSize: 10 }}>
+              <div className="flex gap-1.5 font-mono items-start" style={{ fontSize: 12 }}>
                 {(() => {
                   const last = sessions.flatMap(s => s.events.map(e => ({ ...e, user: s.user }))).sort((a, b) => b.ts.localeCompare(a.ts))[0]
                   return last ? <>
@@ -261,7 +261,7 @@ function InfoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-mono" style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>
+          <DialogTitle className="font-mono" style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 13 }}>
             ░▒▓ MONITOR GUIDE ▓▒░
           </DialogTitle>
         </DialogHeader>
@@ -334,9 +334,7 @@ export default function MonitorPage() {
   const agents = data?.agents ?? []
   const globalEvents = data?.globalEvents ?? []
 
-  // webchat agents = agents ที่มี webchat sessions
   const webchatAgents = agents.filter(a => (a.channels.webchat?.length ?? 0) > 0)
-  // telegram agents = agents ที่มี telegram sessions
   const telegramAgents = agents.filter(a => (a.channels.telegram?.length ?? 0) > 0)
 
   const updatedStr = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH') : '--:--:--'
@@ -355,16 +353,16 @@ export default function MonitorPage() {
         <div className="border rounded px-4 py-3 flex items-center justify-between flex-wrap gap-2"
           style={{ borderColor: '#f5c518', background: '#111' }}>
           <div>
-            <h1 style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 11, color: '#f5c518' }}>
+            <h1 style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 13, color: '#f5c518' }}>
               ░▒▓ OPENCLAW MONITOR ▓▒░
             </h1>
-            <p className="font-mono text-xs mt-1" style={{ color: '#555', fontSize: 9 }}>
+            <p className="font-mono mt-1" style={{ color: '#555', fontSize: 11 }}>
               {updatedStr} · poll 3s
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {stats && (
-              <div className="font-mono text-xs flex gap-4 flex-wrap" style={{ fontSize: 9 }}>
+              <div className="font-mono flex gap-4 flex-wrap" style={{ fontSize: 12 }}>
                 <span style={{ color: '#888' }}>AGENTS:<span style={{ color: '#e0e0e0' }}> {stats.totalAgents}</span></span>
                 <span style={{ color: '#888' }}>ACTIVE:<span style={{ color: '#f5c518' }}> {stats.activeNow}</span></span>
                 <span style={{ color: '#888' }}>TODAY:<span style={{ color: '#e0e0e0' }}> {stats.todayMessages}</span></span>
@@ -377,20 +375,20 @@ export default function MonitorPage() {
               <button
                 type="button"
                 onClick={() => setInfoOpen(true)}
-                className="font-mono text-xs px-2.5 py-1 rounded border transition-colors hover:bg-zinc-800"
-                style={{ borderColor: '#444', color: '#888', fontSize: 9, fontFamily: '"Press Start 2P", monospace' }}
+                className="font-mono px-2.5 py-1 rounded border transition-colors hover:bg-zinc-800"
+                style={{ borderColor: '#444', color: '#888', fontSize: 11, fontFamily: '"Press Start 2P", monospace' }}
               >
                 INFO
               </button>
               <button
                 type="button"
                 onClick={() => setPaused(p => !p)}
-                className="font-mono text-xs px-2.5 py-1 rounded border transition-colors hover:bg-zinc-800"
-                style={{ borderColor: paused ? '#ef4444' : '#444', color: paused ? '#ef4444' : '#888', fontSize: 9, fontFamily: '"Press Start 2P", monospace' }}
+                className="font-mono px-2.5 py-1 rounded border transition-colors hover:bg-zinc-800"
+                style={{ borderColor: paused ? '#ef4444' : '#444', color: paused ? '#ef4444' : '#888', fontSize: 11, fontFamily: '"Press Start 2P", monospace' }}
               >
                 {paused ? '▶ RESUME' : '⏸ PAUSE'}
               </button>
-              <span className="font-mono text-xs flex items-center gap-1" style={{ fontSize: 9 }}>
+              <span className="font-mono flex items-center gap-1" style={{ fontSize: 11 }}>
                 <span className={`inline-block w-2 h-2 rounded-full ${paused ? 'bg-zinc-600' : 'animate-pulse bg-green-500'}`} />
                 <span style={{ color: paused ? '#555' : '#22c55e' }}>{paused ? 'PAUSED' : 'LIVE'}</span>
               </span>
@@ -401,7 +399,7 @@ export default function MonitorPage() {
         {/* ── TELEGRAM section ── */}
         {telegramAgents.length > 0 && (
           <div className="space-y-2">
-            <p className="font-mono text-xs px-1" style={{ color: '#f5c518', fontFamily: '"Press Start 2P", monospace', fontSize: 9 }}>
+            <p className="font-mono px-1" style={{ color: '#f5c518', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>
               ▌TELEGRAM
             </p>
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
@@ -415,7 +413,7 @@ export default function MonitorPage() {
         {/* ── WEBCHAT section ── */}
         {webchatAgents.length > 0 && (
           <div className="space-y-2">
-            <p className="font-mono text-xs px-1" style={{ color: '#3b82f6', fontFamily: '"Press Start 2P", monospace', fontSize: 9 }}>
+            <p className="font-mono px-1" style={{ color: '#3b82f6', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>
               ▌WEBCHAT
             </p>
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
@@ -427,21 +425,21 @@ export default function MonitorPage() {
         )}
 
         {agents.length === 0 && (
-          <div className="text-center py-20 font-mono" style={{ color: '#333', fontFamily: '"Press Start 2P", monospace', fontSize: 10 }}>
+          <div className="text-center py-20 font-mono" style={{ color: '#333', fontFamily: '"Press Start 2P", monospace', fontSize: 12 }}>
             <p>NO AGENTS FOUND</p>
-            <p className="mt-2 text-xs" style={{ fontSize: 8 }}>gateway not running or no sessions yet</p>
+            <p className="mt-2" style={{ fontSize: 10 }}>gateway not running or no sessions yet</p>
           </div>
         )}
 
         {/* ── Global Feed ── */}
         <div className="border rounded" style={{ borderColor: '#222', background: '#111' }}>
           <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: '#1a1a1a' }}>
-            <p className="font-mono" style={{ color: '#888', fontFamily: '"Press Start 2P", monospace', fontSize: 9 }}>▌GLOBAL FEED</p>
-            <span className="font-mono text-xs" style={{ color: '#444', fontSize: 9 }}>last 50 events</span>
+            <p className="font-mono" style={{ color: '#888', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>▌GLOBAL FEED</p>
+            <span className="font-mono" style={{ color: '#444', fontSize: 11 }}>last 50 events</span>
           </div>
-          <div className="p-3 space-y-1 max-h-48 overflow-y-auto font-mono" style={{ fontSize: 11 }}>
+          <div className="p-3 space-y-1 max-h-48 overflow-y-auto font-mono" style={{ fontSize: 12 }}>
             {globalEvents.length === 0 && (
-              <p style={{ color: '#333', fontSize: 9 }}>_ no events yet</p>
+              <p style={{ color: '#333', fontSize: 11 }}>_ no events yet</p>
             )}
             {globalEvents.map((e, i) => (
               <div key={i} className="flex gap-2 items-start">
