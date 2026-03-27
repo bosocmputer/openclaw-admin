@@ -91,7 +91,7 @@ function AgentDetailDialog({ agent, channelType, roomName, open, onClose }: {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl w-[90vw] max-h-[85vh] overflow-y-auto" style={{ background: '#111', color: '#e0e0e0', border: '1px solid #333' }}>
+      <DialogContent className="max-w-5xl sm:max-w-5xl w-[90vw] max-h-[85vh] overflow-y-auto" style={{ background: '#111', color: '#e0e0e0', border: '1px solid #333' }}>
         <DialogHeader>
           <DialogTitle style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 10, color: '#f5c518' }}>
             {title} — DETAIL
