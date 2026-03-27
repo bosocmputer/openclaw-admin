@@ -57,6 +57,16 @@ export interface OpenClawConfig {
       model?: {
         primary?: string
       }
+      compaction?: {
+        mode?: 'default' | 'safeguard'
+        maxHistoryShare?: number
+        keepRecentTokens?: number
+        recentTurnsPreserve?: number
+        memoryFlush?: {
+          softThresholdTokens?: number
+        }
+        [key: string]: unknown
+      }
     }
     list?: { id: string; workspace: string }[]
   }

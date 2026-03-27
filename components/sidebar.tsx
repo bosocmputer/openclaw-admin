@@ -14,6 +14,7 @@ const adminNavItems = [
   { href: '/webchat', label: 'Webchat' },
   { href: '/chats', label: 'Telegram History' },
   { href: '/monitor', label: 'Monitor' },
+  { href: '/compaction', label: 'Compaction' },
   { href: '/analysis', label: 'Analysis' },
   { href: '/logs', label: 'Logs' },
   { href: '/guide', label: 'User Guide' },
