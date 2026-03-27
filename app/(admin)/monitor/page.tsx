@@ -2,256 +2,259 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getMonitorEvents, type MonitorAgent, type MonitorEvent } from '@/lib/api'
+import { getMonitorEvents, type MonitorAgent, type MonitorSession, type MonitorEvent } from '@/lib/api'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
-// ─── 8-bit Character ─────────────────────────────────────────────────────────
-function PixelChar({ state }: { state: string }) {
-  const configs: Record<string, { eyes: string; arms: string; extra: string; color: string; anim: string }> = {
-    idle:      { eyes: '──', arms: '/||\\', extra: 'ZZZ', color: '#555', anim: 'animate-pulse-slow' },
-    thinking:  { eyes: '◉◉', arms: '\\||/', extra: '💭', color: '#f5c518', anim: 'animate-bounce' },
-    tool_call: { eyes: '◉◉', arms: '|██|', extra: '⚡', color: '#a855f7', anim: 'animate-ping-slow' },
-    replied:   { eyes: '★★', arms: '\\||/', extra: '✓', color: '#22c55e', anim: '' },
-    error:     { eyes: '><', arms: '\\/\\/', extra: '✗', color: '#ef4444', anim: 'animate-shake' },
-  }
-  const c = configs[state] ?? configs.idle
-  return (
-    <div className="flex flex-col items-center font-mono text-sm leading-tight select-none" style={{ color: c.color }}>
-      <div className={`text-xl ${c.anim}`} style={{ fontFamily: 'monospace', lineHeight: 1.2 }}>
-        <div>▄▀▀▀▄</div>
-        <div>█{c.eyes}█ {c.extra}</div>
-        <div>█&nbsp;&nbsp;&nbsp;&nbsp;█</div>
-        <div>▀███▀</div>
-        <div>&nbsp;{c.arms}</div>
-      </div>
-    </div>
-  )
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function relativeTime(iso: string): string {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
 }
 
-// ─── Progress Bar ─────────────────────────────────────────────────────────────
-function ProgressBar({ state, elapsed }: { state: string; elapsed: number }) {
-  const configs: Record<string, { color: string; label: string; fill: number }> = {
-    idle:      { color: '#444', label: 'IDLE', fill: 0 },
-    thinking:  { color: '#f5c518', label: `THINKING ${elapsed}s`, fill: Math.min((elapsed / 60) * 100, 90) },
-    tool_call: { color: '#a855f7', label: 'TOOL CALL', fill: 70 },
-    replied:   { color: '#22c55e', label: 'REPLIED ✓', fill: 100 },
-    error:     { color: '#ef4444', label: 'ERROR ✗', fill: 100 },
-  }
-  const c = configs[state] ?? configs.idle
-  const bars = 20
-  const filled = Math.round((c.fill / 100) * bars)
-  return (
-    <div className="font-mono text-sm mt-2">
-      <span style={{ color: c.color }}>
-        [{('▓'.repeat(filled) + '░'.repeat(bars - filled))}] {c.label}
-      </span>
-    </div>
-  )
+/** Parse "HH:MM:SS" into total seconds since midnight */
+function parseTs(ts: string): number {
+  const parts = ts.split(':')
+  if (parts.length < 3) return 0
+  return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2])
 }
 
-// ─── Event Icon ───────────────────────────────────────────────────────────────
-function eventIcon(type: string) {
-  if (type === 'message') return '✉'
+function deltaLabel(prev: string, next: string): string {
+  const diff = Math.abs(parseTs(next) - parseTs(prev))
+  return diff < 1 ? `${(diff * 1000).toFixed(0)}ms` : `${diff.toFixed(1)}s`
+}
+
+// ─── State Config ─────────────────────────────────────────────────────────────
+const STATE_CONFIG: Record<string, { icon: string; color: string; label: string; animClass: string }> = {
+  idle:      { icon: '○', color: '#444',    label: 'IDLE',      animClass: '' },
+  thinking:  { icon: '◉', color: '#f5c518', label: 'THINKING',  animClass: 'thinking-pulse' },
+  tool_call: { icon: '⚡', color: '#a855f7', label: 'TOOL CALL', animClass: 'tool-flash' },
+  replied:   { icon: '✓', color: '#22c55e', label: 'REPLIED',   animClass: '' },
+  error:     { icon: '✗', color: '#ef4444', label: 'ERROR',     animClass: 'error-shake' },
+}
+
+function getStateConfig(state: string) {
+  return STATE_CONFIG[state] ?? STATE_CONFIG.idle
+}
+
+// ─── Event Icon & Color ────────────────────────────────────────────────────────
+function eventIcon(type: string): string {
+  if (type === 'message')  return '✉'
   if (type === 'thinking') return '🧠'
-  if (type === 'tool') return '⚡'
-  if (type === 'reply') return '✅'
-  if (type === 'error') return '❌'
+  if (type === 'tool')     return '⚡'
+  if (type === 'reply')    return '✅'
+  if (type === 'error')    return '❌'
   return '·'
 }
 
-// ─── Session Row ──────────────────────────────────────────────────────────────
-function SessionDot({ state }: { state: string }) {
-  const colors: Record<string, string> = {
-    thinking: '#f5c518', tool_call: '#a855f7', replied: '#22c55e', error: '#ef4444', idle: '#444',
+function eventColor(type: string): string {
+  if (type === 'message')  return '#aaa'
+  if (type === 'thinking') return '#666'
+  if (type === 'tool')     return '#a855f7'
+  if (type === 'reply')    return '#4ade80'
+  if (type === 'error')    return '#ef4444'
+  return '#555'
+}
+
+function eventItalic(type: string): boolean {
+  return type === 'thinking'
+}
+
+// ─── RPG Progress Bar ─────────────────────────────────────────────────────────
+function ProgressBar({ state, elapsed, lastMessageAt }: { state: string; elapsed: number; lastMessageAt: string | null }) {
+  if (state === 'idle') {
+    return (
+      <div className="font-mono" style={{ fontSize: 12, color: '#444' }}>
+        IDLE — last active {lastMessageAt ? relativeTime(lastMessageAt) : 'unknown'}
+      </div>
+    )
   }
-  return <span style={{ color: colors[state] ?? '#444' }}>●</span>
-}
 
-// ─── Agent Card ───────────────────────────────────────────────────────────────
-interface Session {
-  sessionKey: string
-  user: string
-  state: string
-  lastMessageAt: string | null
-  lastUserText: string | null
-  lastReplyText: string | null
-  elapsed: number
-  cost: number
-  events: MonitorEvent[]
-}
+  const cfg = getStateConfig(state)
+  const bars = 24
+  let fillPct = 0
+  let label = cfg.label
 
-// ─── Agent Detail Dialog ──────────────────────────────────────────────────────
-function AgentDetailDialog({ agent, channelType, roomName, open, onClose }: {
-  agent: MonitorAgent; channelType: 'webchat' | 'telegram'; roomName?: string; open: boolean; onClose: () => void
-}) {
-  const sessions: Session[] = (channelType === 'webchat' ? agent.channels.webchat : agent.channels.telegram) ?? []
-  const allEvents = sessions.flatMap(s => s.events.map(e => ({ ...e, user: s.user })))
-    .sort((a, b) => b.ts.localeCompare(a.ts))
-  const title = channelType === 'webchat' ? `[${roomName ?? agent.id}]` : `@${agent.id}_bot`
+  if (state === 'thinking') {
+    fillPct = Math.min((elapsed / 60) * 100, 90)
+    label = `THINKING ${elapsed}s`
+  } else if (state === 'tool_call') {
+    fillPct = 70
+    label = 'TOOL CALL'
+  } else if (state === 'replied') {
+    fillPct = 100
+    label = 'REPLIED ✓'
+  } else if (state === 'error') {
+    fillPct = 100
+    label = 'ERROR ✗'
+  }
+
+  const filled = Math.round((fillPct / 100) * bars)
+  const barStr = '█'.repeat(filled) + '░'.repeat(bars - filled)
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl sm:max-w-5xl w-[90vw] max-h-[85vh] overflow-y-auto" style={{ background: '#111', color: '#e0e0e0', border: '1px solid #333' }}>
-        <DialogHeader>
-          <DialogTitle style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 13, color: '#f5c518' }}>
-            {title} — DETAIL
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 font-mono text-sm">
-          {/* Sessions */}
-          <div>
-            <p style={{ color: '#555', fontSize: 12, marginBottom: 8 }}>SESSIONS ({sessions.length})</p>
-            <div className="space-y-3">
-              {sessions.map(s => (
-                <div key={s.sessionKey} className="rounded p-3 space-y-2" style={{ background: '#0a0a0a', border: '1px solid #222' }}>
-                  <div className="flex items-center gap-2">
-                    <SessionDot state={s.state} />
-                    <span style={{ color: '#aaa', fontWeight: 'bold' }}>{s.user}</span>
-                    <span style={{ color: '#555' }} className="ml-auto">{s.state.toUpperCase()}</span>
-                    {s.lastMessageAt && <span style={{ color: '#444' }}>{relativeTime(s.lastMessageAt)}</span>}
-                    {s.cost > 0 && <span style={{ color: '#444' }}>฿{(s.cost * 35).toFixed(4)}</span>}
-                  </div>
-                  {s.lastUserText && (
-                    <div className="rounded p-2" style={{ background: '#141414' }}>
-                      <p style={{ color: '#555', fontSize: 11 }}>USER</p>
-                      <p style={{ color: '#999', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13 }}>{s.lastUserText}</p>
-                    </div>
-                  )}
-                  {s.lastReplyText && (
-                    <div className="rounded p-2" style={{ background: '#0d1a0d' }}>
-                      <p style={{ color: '#3a8', fontSize: 11 }}>REPLY</p>
-                      <p style={{ color: '#4a9', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13 }}>{s.lastReplyText}</p>
-                    </div>
-                  )}
-                  {/* Session events */}
-                  {s.events.length > 0 && (
-                    <div className="space-y-1 pt-1 border-t" style={{ borderColor: '#1a1a1a' }}>
-                      {s.events.map((e, i) => (
-                        <div key={i} className="flex gap-2 items-start" style={{ fontSize: 12 }}>
-                          <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
-                          <span className="shrink-0">{eventIcon(e.type)}</span>
-                          <span style={{ color: '#666', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{e.text}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-          {/* All events timeline */}
-          {allEvents.length > 0 && (
-            <div>
-              <p style={{ color: '#555', fontSize: 12, marginBottom: 8 }}>TIMELINE (all sessions)</p>
-              <div className="space-y-1">
-                {allEvents.map((e, i) => (
-                  <div key={i} className="flex gap-2 items-start" style={{ fontSize: 12 }}>
-                    <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
-                    <span style={{ color: '#555' }} className="shrink-0">[{e.user}]</span>
-                    <span className="shrink-0">{eventIcon(e.type)}</span>
-                    <span style={{ color: '#777', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{e.text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <div className={`font-mono ${cfg.animClass}`} style={{ fontSize: 12, color: cfg.color }}>
+      [{barStr}] {label}
+    </div>
   )
 }
 
-function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; channelType: 'webchat' | 'telegram'; roomName?: string }) {
-  const [detailOpen, setDetailOpen] = useState(false)
-  const sessions: Session[] = (channelType === 'webchat' ? agent.channels.webchat : agent.channels.telegram) ?? []
-  const overallState = sessions.find(s => s.state === 'error')?.state
-    ?? sessions.find(s => s.state === 'thinking' || s.state === 'tool_call')?.state
-    ?? sessions.find(s => s.state === 'replied')?.state
-    ?? 'idle'
-  const elapsed = sessions.find(s => s.state === 'thinking')?.elapsed ?? 0
-  const activeSession = sessions.find(s => s.state !== 'idle') ?? sessions[0] ?? null
+// ─── State Badge ──────────────────────────────────────────────────────────────
+function StateBadge({ state }: { state: string }) {
+  const cfg = getStateConfig(state)
+  return (
+    <span
+      className={`font-mono ${cfg.animClass}`}
+      style={{
+        fontFamily: '"Press Start 2P", monospace',
+        fontSize: 9,
+        color: cfg.color,
+        border: `1px solid ${cfg.color}`,
+        borderRadius: 9999,
+        padding: '2px 8px',
+        background: `${cfg.color}18`,
+        letterSpacing: 1,
+      }}
+    >
+      {cfg.icon} {cfg.label}
+    </span>
+  )
+}
+
+// ─── Session Timeline ─────────────────────────────────────────────────────────
+function SessionTimeline({ events }: { events: MonitorEvent[] }) {
+  const shown = events.slice(-10)
+  return (
+    <div className="font-mono space-y-0.5" style={{ fontSize: 12 }}>
+      {shown.map((e, i) => {
+        const prev = shown[i - 1]
+        const delta = prev ? deltaLabel(prev.ts, e.ts) : null
+        const tsShort = e.ts.length >= 8 ? e.ts.slice(0, 8) : e.ts
+        return (
+          <div key={i}>
+            {delta && (
+              <div style={{ color: '#444', paddingLeft: 80, lineHeight: 1.4 }}>↓ {delta}</div>
+            )}
+            <div className="flex gap-2 items-start" style={{ lineHeight: 1.6 }}>
+              <span className="shrink-0" style={{ color: '#555', minWidth: 70 }}>{tsShort}</span>
+              <span className="shrink-0" style={{ minWidth: 20 }}>{eventIcon(e.type)}</span>
+              <span
+                style={{
+                  color: eventColor(e.type),
+                  fontStyle: eventItalic(e.type) ? 'italic' : undefined,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {e.text}
+              </span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Flat Session (with agent/channel metadata) ───────────────────────────────
+interface FlatSession extends MonitorSession {
+  agentId: string
+  channel: 'webchat' | 'telegram'
+}
+
+function sortOrder(state: string): number {
+  if (state === 'thinking' || state === 'tool_call') return 0
+  if (state === 'replied') return 1
+  if (state === 'error') return 2
+  return 3 // idle
+}
+
+function flattenSessions(agents: MonitorAgent[]): FlatSession[] {
+  const result: FlatSession[] = []
+  for (const agent of agents) {
+    for (const s of agent.channels.webchat ?? []) {
+      result.push({ ...s, agentId: agent.id, channel: 'webchat' })
+    }
+    for (const s of agent.channels.telegram ?? []) {
+      result.push({ ...s, agentId: agent.id, channel: 'telegram' })
+    }
+  }
+  result.sort((a, b) => {
+    const orderDiff = sortOrder(a.state) - sortOrder(b.state)
+    if (orderDiff !== 0) return orderDiff
+    const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0
+    const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0
+    return tb - ta
+  })
+  return result
+}
+
+// ─── Session Card ─────────────────────────────────────────────────────────────
+function SessionCard({ session }: { session: FlatSession }) {
+  const cfg = getStateConfig(session.state)
+  const isIdle = session.state === 'idle'
+  const channelLabel = session.channel === 'webchat' ? 'webchat' : 'telegram'
 
   const borderColors: Record<string, string> = {
-    idle: '#222', thinking: '#f5c518', tool_call: '#a855f7', replied: '#22c55e', error: '#ef4444',
+    idle: '#1e1e1e', thinking: '#f5c518', tool_call: '#a855f7', replied: '#22c55e', error: '#ef4444',
   }
 
   return (
-    <>
-      <div
-        className="rounded border flex flex-col cursor-pointer transition-opacity hover:opacity-80"
-        style={{ background: '#111', borderColor: borderColors[overallState] ?? '#222', minHeight: 240 }}
-        onClick={() => setDetailOpen(true)}
-      >
-        {/* header */}
-        <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: '#222' }}>
-          <div>
-            <p className="font-mono font-bold" style={{ color: '#e0e0e0', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>
-              {channelType === 'webchat' ? `[${roomName ?? agent.id}]` : `@${agent.id}_bot`}
-            </p>
-            <p className="font-mono mt-0.5" style={{ color: '#555', fontSize: 11 }}>AGENT: {agent.id}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono" style={{ color: '#555', fontSize: 11 }}>
-              {sessions.length} session{sessions.length !== 1 ? 's' : ''}
-            </span>
-            <button
-              type="button"
-              onClick={e => { e.stopPropagation(); setDetailOpen(true) }}
-              className="font-mono px-1.5 py-0.5 rounded border hover:bg-zinc-800 transition-colors"
-              style={{ borderColor: '#333', color: '#666', fontSize: 10, fontFamily: '"Press Start 2P", monospace' }}
-            >
-              DETAIL
-            </button>
-          </div>
+    <div
+      className="rounded border fade-in"
+      style={{
+        background: '#111',
+        borderColor: borderColors[session.state] ?? '#1e1e1e',
+        opacity: isIdle ? 0.5 : 1,
+        padding: '14px 16px',
+        transition: 'opacity 0.3s',
+      }}
+    >
+      {/* ── Card Header ── */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2 font-mono" style={{ fontSize: 13 }}>
+          <span className={cfg.animClass} style={{ color: cfg.color, fontSize: 16, lineHeight: 1 }}>
+            {cfg.icon}
+          </span>
+          <span style={{ color: '#e0e0e0', fontFamily: '"Press Start 2P", monospace', fontSize: 10 }}>
+            {session.agentId}
+          </span>
+          <span style={{ color: '#444' }}>›</span>
+          <span style={{ color: '#888' }}>{channelLabel}</span>
+          <span style={{ color: '#555' }}>|</span>
+          <span style={{ color: '#bbb' }}>{session.user}</span>
         </div>
-
-        {/* character */}
-        <div className="flex flex-col items-center py-3">
-          <PixelChar state={overallState} />
-          <ProgressBar state={overallState} elapsed={elapsed} />
-        </div>
-
-        {/* active session summary */}
-        {activeSession && (
-          <div className="px-3 pb-2 space-y-1 font-mono" style={{ fontSize: 12 }}>
-            <p style={{ color: '#555', fontSize: 11 }}>SESSIONS</p>
-            {sessions.map(s => (
-              <div key={s.sessionKey} className="flex items-center gap-1.5">
-                <SessionDot state={s.state} />
-                <span style={{ color: '#888' }}>{s.user}</span>
-                {s.state === 'idle' && s.lastMessageAt && (
-                  <span style={{ color: '#444' }}>last: {relativeTime(s.lastMessageAt)}</span>
-                )}
-                {s.state !== 'idle' && s.lastUserText && (
-                  <span style={{ color: '#555' }} className="truncate max-w-[120px]">&quot;{s.lastUserText}&quot;</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* last event */}
-        <div className="px-3 pb-3 mt-auto">
-          <div className="border-t pt-2" style={{ borderColor: '#1a1a1a' }}>
-            {sessions.flatMap(s => s.events).length === 0 ? (
-              <p className="font-mono" style={{ color: '#333', fontSize: 11 }}>no recent activity</p>
-            ) : (
-              <div className="flex gap-1.5 font-mono items-start" style={{ fontSize: 12 }}>
-                {(() => {
-                  const last = sessions.flatMap(s => s.events.map(e => ({ ...e, user: s.user }))).sort((a, b) => b.ts.localeCompare(a.ts))[0]
-                  return last ? <>
-                    <span style={{ color: '#444' }} className="shrink-0">{last.ts.slice(11, 19)}</span>
-                    <span className="shrink-0">{eventIcon(last.type)}</span>
-                    <span style={{ color: '#666' }} className="truncate">{last.text}</span>
-                  </> : null
-                })()}
-              </div>
-            )}
-          </div>
-        </div>
+        <StateBadge state={session.state} />
       </div>
-      <AgentDetailDialog agent={agent} channelType={channelType} roomName={roomName} open={detailOpen} onClose={() => setDetailOpen(false)} />
-    </>
+
+      {/* ── Progress Bar ── */}
+      <div className="mb-3">
+        <ProgressBar
+          state={session.state}
+          elapsed={session.elapsed}
+          lastMessageAt={session.lastMessageAt}
+        />
+      </div>
+
+      {/* ── Timeline ── */}
+      {session.events.length > 0 && (
+        <div className="border-t pt-3" style={{ borderColor: '#1a1a1a' }}>
+          <p style={{ color: '#444', fontSize: 11, marginBottom: 6, fontFamily: '"Press Start 2P", monospace' }}>
+            TIMELINE
+          </p>
+          <SessionTimeline events={session.events} />
+        </div>
+      )}
+
+      {/* ── Cost / meta (bottom right) ── */}
+      {(session.cost > 0 || session.lastMessageAt) && (
+        <div className="flex gap-4 mt-3 font-mono" style={{ fontSize: 11, color: '#444' }}>
+          {session.lastMessageAt && <span>{relativeTime(session.lastMessageAt)}</span>}
+          {session.cost > 0 && <span style={{ color: '#555' }}>฿{(session.cost * 35).toFixed(4)}</span>}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -261,19 +264,19 @@ function InfoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-mono" style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 13 }}>
+          <DialogTitle style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 13 }}>
             ░▒▓ MONITOR GUIDE ▓▒░
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 text-sm">
           <div>
-            <p className="font-semibold mb-2">สถานะ Agent (Character)</p>
+            <p className="font-semibold mb-2">สถานะ Session</p>
             <div className="space-y-1.5 font-mono text-xs">
-              <div className="flex items-center gap-3"><span style={{ color: '#555' }}>██ IDLE</span><span className="text-zinc-500">รอ message — ไม่มี activity</span></div>
-              <div className="flex items-center gap-3"><span style={{ color: '#f5c518' }}>██ THINKING</span><span className="text-zinc-500">AI กำลังคิดและประมวลผล</span></div>
-              <div className="flex items-center gap-3"><span style={{ color: '#a855f7' }}>██ TOOL CALL</span><span className="text-zinc-500">เรียก MCP / ค้นข้อมูล ERP</span></div>
-              <div className="flex items-center gap-3"><span style={{ color: '#22c55e' }}>██ REPLIED</span><span className="text-zinc-500">ตอบกลับ user แล้ว</span></div>
-              <div className="flex items-center gap-3"><span style={{ color: '#ef4444' }}>██ ERROR</span><span className="text-zinc-500">เกิดข้อผิดพลาด</span></div>
+              <div className="flex items-center gap-3"><span style={{ color: '#444' }}>○ IDLE</span><span className="text-zinc-500">รอ message — ไม่มี activity</span></div>
+              <div className="flex items-center gap-3"><span style={{ color: '#f5c518' }}>◉ THINKING</span><span className="text-zinc-500">AI กำลังคิดและประมวลผล</span></div>
+              <div className="flex items-center gap-3"><span style={{ color: '#a855f7' }}>⚡ TOOL CALL</span><span className="text-zinc-500">เรียก MCP / ค้นข้อมูล ERP</span></div>
+              <div className="flex items-center gap-3"><span style={{ color: '#22c55e' }}>✓ REPLIED</span><span className="text-zinc-500">ตอบกลับ user แล้ว</span></div>
+              <div className="flex items-center gap-3"><span style={{ color: '#ef4444' }}>✗ ERROR</span><span className="text-zinc-500">เกิดข้อผิดพลาด</span></div>
             </div>
           </div>
           <div>
@@ -287,18 +290,18 @@ function InfoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
             </div>
           </div>
           <div>
-            <p className="font-semibold mb-2">Sessions</p>
+            <p className="font-semibold mb-2">Timeline</p>
             <div className="space-y-1 font-mono text-xs text-zinc-500">
-              <p><span style={{ color: '#f5c518' }}>●</span> สีเหลือง = กำลัง active อยู่</p>
-              <p><span style={{ color: '#22c55e' }}>●</span> สีเขียว = ตอบแล้วล่าสุด</p>
-              <p><span style={{ color: '#ef4444' }}>●</span> สีแดง = มี error</p>
-              <p><span style={{ color: '#444' }}>●</span> สีเทา = idle / ไม่มี activity</p>
+              <p>แสดง max 10 events ล่าสุดต่อ session</p>
+              <p>↓ Xs = เวลาที่ใช้ระหว่าง event</p>
+              <p>sort: active states ก่อน, แล้ว replied, แล้ว idle</p>
             </div>
           </div>
           <div>
             <p className="font-semibold mb-2">Stats Bar</p>
             <div className="space-y-1 font-mono text-xs text-zinc-500">
-              <p>ACTIVE = จำนวน agent ที่มี activity ใน 5 นาทีล่าสุด</p>
+              <p>AGENTS = จำนวน agent ทั้งหมด</p>
+              <p>ACTIVE = session ที่ active ใน 5 นาทีล่าสุด</p>
               <p>TODAY = messages ทั้งหมดวันนี้ (ทุก channel)</p>
               <p>AVG = เวลาตอบเฉลี่ย (วินาที)</p>
               <p>COST = ค่าใช้จ่าย LLM วันนี้ (บาท)</p>
@@ -309,14 +312,6 @@ function InfoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
       </DialogContent>
     </Dialog>
   )
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function relativeTime(iso: string): string {
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (diff < 60) return `${diff}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  return `${Math.floor(diff / 3600)}h ago`
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -332,26 +327,28 @@ export default function MonitorPage() {
 
   const stats = data?.stats
   const agents = data?.agents ?? []
-  const globalEvents = data?.globalEvents ?? []
-
-  const webchatAgents = agents.filter(a => (a.channels.webchat?.length ?? 0) > 0)
-  const telegramAgents = agents.filter(a => (a.channels.telegram?.length ?? 0) > 0)
+  const sessions = flattenSessions(agents)
 
   const updatedStr = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH') : '--:--:--'
 
   return (
     <div className="rounded-lg space-y-4" style={{ background: '#0d0d0d', color: '#e0e0e0', padding: '1rem', position: 'relative' }}>
       {/* scanline overlay */}
-      <div className="absolute inset-0 pointer-events-none rounded-lg" style={{
-        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)',
-        zIndex: 1,
-      }} />
+      <div
+        className="absolute inset-0 pointer-events-none rounded-lg"
+        style={{
+          backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px)',
+          zIndex: 1,
+        }}
+      />
 
       <div className="relative space-y-4" style={{ zIndex: 2 }}>
 
         {/* ── Header ── */}
-        <div className="border rounded px-4 py-3 flex items-center justify-between flex-wrap gap-2"
-          style={{ borderColor: '#f5c518', background: '#111' }}>
+        <div
+          className="border rounded px-4 py-3 flex items-center justify-between flex-wrap gap-3"
+          style={{ borderColor: '#f5c518', background: '#111' }}
+        >
           <div>
             <h1 style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 13, color: '#f5c518' }}>
               ░▒▓ OPENCLAW MONITOR ▓▒░
@@ -360,9 +357,10 @@ export default function MonitorPage() {
               {updatedStr} · poll 3s
             </p>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
+
+          <div className="flex items-center gap-4 flex-wrap">
             {stats && (
-              <div className="font-mono flex gap-4 flex-wrap" style={{ fontSize: 12 }}>
+              <div className="font-mono flex gap-4 flex-wrap items-center" style={{ fontSize: 12 }}>
                 <span style={{ color: '#888' }}>AGENTS:<span style={{ color: '#e0e0e0' }}> {stats.totalAgents}</span></span>
                 <span style={{ color: '#888' }}>ACTIVE:<span style={{ color: '#f5c518' }}> {stats.activeNow}</span></span>
                 <span style={{ color: '#888' }}>TODAY:<span style={{ color: '#e0e0e0' }}> {stats.todayMessages}</span></span>
@@ -371,7 +369,8 @@ export default function MonitorPage() {
                 {stats.errors > 0 && <span style={{ color: '#ef4444' }}>ERR: {stats.errors}</span>}
               </div>
             )}
-            <div className="flex gap-2">
+
+            <div className="flex gap-2 items-center">
               <button
                 type="button"
                 onClick={() => setInfoOpen(true)}
@@ -384,74 +383,49 @@ export default function MonitorPage() {
                 type="button"
                 onClick={() => setPaused(p => !p)}
                 className="font-mono px-2.5 py-1 rounded border transition-colors hover:bg-zinc-800"
-                style={{ borderColor: paused ? '#ef4444' : '#444', color: paused ? '#ef4444' : '#888', fontSize: 11, fontFamily: '"Press Start 2P", monospace' }}
+                style={{
+                  borderColor: paused ? '#ef4444' : '#444',
+                  color: paused ? '#ef4444' : '#888',
+                  fontSize: 11,
+                  fontFamily: '"Press Start 2P", monospace',
+                }}
               >
                 {paused ? '▶ RESUME' : '⏸ PAUSE'}
               </button>
-              <span className="font-mono flex items-center gap-1" style={{ fontSize: 11 }}>
-                <span className={`inline-block w-2 h-2 rounded-full ${paused ? 'bg-zinc-600' : 'animate-pulse bg-green-500'}`} />
+              <span className="font-mono flex items-center gap-1.5" style={{ fontSize: 11 }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: paused ? '#555' : '#22c55e',
+                    animation: paused ? 'none' : 'thinking-pulse 1.5s ease-in-out infinite',
+                  }}
+                />
                 <span style={{ color: paused ? '#555' : '#22c55e' }}>{paused ? 'PAUSED' : 'LIVE'}</span>
               </span>
             </div>
           </div>
         </div>
 
-        {/* ── TELEGRAM section ── */}
-        {telegramAgents.length > 0 && (
-          <div className="space-y-2">
-            <p className="font-mono px-1" style={{ color: '#f5c518', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>
-              ▌TELEGRAM
+        {/* ── Session List ── */}
+        {sessions.length === 0 ? (
+          <div className="text-center py-24 font-mono" style={{ color: '#333' }}>
+            <p style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 14 }}>
+              NO ACTIVE SESSIONS<span className="blink-cursor">_</span>
             </p>
-            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-              {telegramAgents.map(agent => (
-                <AgentCard key={`tg-${agent.id}`} agent={agent} channelType="telegram" />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── WEBCHAT section ── */}
-        {webchatAgents.length > 0 && (
-          <div className="space-y-2">
-            <p className="font-mono px-1" style={{ color: '#3b82f6', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>
-              ▌WEBCHAT
+            <p className="mt-3" style={{ fontSize: 11, color: '#2a2a2a' }}>
+              gateway not running or no sessions yet
             </p>
-            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-              {webchatAgents.map(agent => (
-                <AgentCard key={`wc-${agent.id}`} agent={agent} channelType="webchat" />
-              ))}
-            </div>
           </div>
-        )}
-
-        {agents.length === 0 && (
-          <div className="text-center py-20 font-mono" style={{ color: '#333', fontFamily: '"Press Start 2P", monospace', fontSize: 12 }}>
-            <p>NO AGENTS FOUND</p>
-            <p className="mt-2" style={{ fontSize: 10 }}>gateway not running or no sessions yet</p>
-          </div>
-        )}
-
-        {/* ── Global Feed ── */}
-        <div className="border rounded" style={{ borderColor: '#222', background: '#111' }}>
-          <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: '#1a1a1a' }}>
-            <p className="font-mono" style={{ color: '#888', fontFamily: '"Press Start 2P", monospace', fontSize: 11 }}>▌GLOBAL FEED</p>
-            <span className="font-mono" style={{ color: '#444', fontSize: 11 }}>last 50 events</span>
-          </div>
-          <div className="p-3 space-y-1 max-h-48 overflow-y-auto font-mono" style={{ fontSize: 12 }}>
-            {globalEvents.length === 0 && (
-              <p style={{ color: '#333', fontSize: 11 }}>_ no events yet</p>
-            )}
-            {globalEvents.map((e, i) => (
-              <div key={i} className="flex gap-2 items-start">
-                <span style={{ color: '#444' }} className="shrink-0">{String(e.ts).slice(11, 19)}</span>
-                <span style={{ color: '#555' }} className="shrink-0">[{e.agentId}/{e.channel}]</span>
-                <span className="shrink-0">{eventIcon(e.type)}</span>
-                <span style={{ color: '#777' }} className="truncate">{e.user && <span style={{ color: '#555' }}>{e.user}: </span>}{e.text}</span>
-              </div>
+        ) : (
+          <div className="space-y-3">
+            {sessions.map(session => (
+              <SessionCard key={`${session.agentId}-${session.channel}-${session.sessionKey}`} session={session} />
             ))}
-            <p style={{ color: '#444' }}>_</p>
           </div>
-        </div>
+        )}
 
       </div>
 
@@ -459,12 +433,34 @@ export default function MonitorPage() {
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-        @keyframes pulse-slow { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        @keyframes ping-slow { 0%{opacity:1} 50%{opacity:0.5} 100%{opacity:1} }
-        @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-3px)} 75%{transform:translateX(3px)} }
-        .animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
-        .animate-ping-slow { animation: ping-slow 0.5s ease-in-out infinite; }
-        .animate-shake { animation: shake 0.3s ease-in-out infinite; }
+
+        @keyframes thinking-pulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.4; }
+        }
+        @keyframes tool-flash {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.6; }
+        }
+        @keyframes error-shake {
+          0%, 100%  { transform: translateX(0); }
+          25%       { transform: translateX(-3px); }
+          75%       { transform: translateX(3px); }
+        }
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0; }
+        }
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .thinking-pulse { animation: thinking-pulse 1.5s ease-in-out infinite; }
+        .tool-flash     { animation: tool-flash 0.4s ease-in-out infinite; }
+        .error-shake    { animation: error-shake 0.3s ease-in-out infinite; }
+        .blink-cursor   { animation: blink 1s step-start infinite; }
+        .fade-in        { animation: fade-in 0.35s ease-out both; }
       `}</style>
     </div>
   )
