@@ -73,6 +73,31 @@ export default function GuidePage() {
         </table>
       </div>
 
+      {/* Chat Commands */}
+      <div className="border rounded-xl p-4 space-y-2">
+        <h3 className="text-sm font-semibold">คำสั่งพิเศษ (พิมพ์ในช่องแชท)</h3>
+        <table className="w-full text-sm">
+          <tbody className="text-zinc-600 dark:text-zinc-400">
+            <tr className="border-b border-zinc-100 dark:border-zinc-800">
+              <td className="py-2 font-mono text-xs bg-zinc-100 dark:bg-zinc-800 px-2 rounded w-32">/reset</td>
+              <td className="py-2 pl-3">เริ่มบทสนทนาใหม่ — AI ลืมบทสนทนาก่อนหน้า (ประวัติยังอยู่)</td>
+            </tr>
+            <tr className="border-b border-zinc-100 dark:border-zinc-800">
+              <td className="py-2 font-mono text-xs bg-zinc-100 dark:bg-zinc-800 px-2 rounded">/compact</td>
+              <td className="py-2 pl-3">สรุปบทสนทนาที่ยาว — ช่วยให้ AI ตอบเร็วขึ้นเมื่อคุยนาน</td>
+            </tr>
+            <tr className="border-b border-zinc-100 dark:border-zinc-800">
+              <td className="py-2 font-mono text-xs bg-zinc-100 dark:bg-zinc-800 px-2 rounded">/status</td>
+              <td className="py-2 pl-3">ดูสถานะ session ปัจจุบัน (model, tokens ที่ใช้)</td>
+            </tr>
+            <tr>
+              <td className="py-2 font-mono text-xs bg-zinc-100 dark:bg-zinc-800 px-2 rounded">/usage full</td>
+              <td className="py-2 pl-3">แสดงจำนวน token ท้ายทุก reply</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       {/* Troubleshoot */}
       <div className="border rounded-xl p-4 space-y-2">
         <h3 className="text-sm font-semibold">Bot ไม่ตอบ?</h3>

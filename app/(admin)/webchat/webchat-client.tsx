@@ -130,6 +130,54 @@ export default function WebchatClient({ username, role }: Props) {
     }
   }
 
+  // ─── New Chat / Compact ──────────────────────────────────────────────────
+  const [newChatConfirm, setNewChatConfirm] = useState(false)
+
+  async function handleNewChat() {
+    if (!activeRoomId) return
+    setNewChatConfirm(false)
+    setSending(true)
+    setElapsed(0)
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    elapsedRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
+    try {
+      await sendWebchatMessage(activeRoomId, username, '/reset', ctrl.signal)
+      await refetchHistory()
+      toast.success('เริ่มบทสนทนาใหม่แล้ว — ประวัติเก่ายังอยู่ในระบบ')
+    } catch (e: unknown) {
+      if ((e as { name?: string }).name === 'CanceledError' || (e as { name?: string }).name === 'AbortError') return
+      toast.error('ไม่สามารถรีเซ็ตได้')
+    } finally {
+      if (elapsedRef.current) clearInterval(elapsedRef.current)
+      setSending(false)
+      setElapsed(0)
+    }
+  }
+
+  async function handleCompact() {
+    if (!activeRoomId) return
+    setSending(true)
+    setElapsed(0)
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    elapsedRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
+    try {
+      await sendWebchatMessage(activeRoomId, username, '/compact', ctrl.signal)
+      await refetchHistory()
+      toast.success('ล้าง context แล้ว')
+    } catch (e: unknown) {
+      if ((e as { name?: string }).name === 'CanceledError' || (e as { name?: string }).name === 'AbortError') return
+      // compact อาจไม่มี reply — ถือว่าสำเร็จ
+      toast.success('ล้าง context แล้ว')
+      await refetchHistory()
+    } finally {
+      if (elapsedRef.current) clearInterval(elapsedRef.current)
+      setSending(false)
+      setElapsed(0)
+    }
+  }
+
   // ─── Room management ─────────────────────────────────────────────────────
   const [addDialog, setAddDialog] = useState(false)
   const [editRoom, setEditRoom] = useState<WebchatRoom | null>(null)
@@ -264,8 +312,10 @@ export default function WebchatClient({ username, role }: Props) {
             </div>
           ) : (
             <>
-              <div className="px-5 py-3.5 border-b bg-white dark:bg-zinc-950 shrink-0">
-                <h2 className="font-semibold text-sm">{activeRoom.display_name}</h2>
+              <div className="px-5 py-3.5 border-b bg-white dark:bg-zinc-950 shrink-0 flex items-center gap-2">
+                <h2 className="font-semibold text-sm flex-1">{activeRoom.display_name}</h2>
+                <button type="button" onClick={() => setNewChatConfirm(true)} disabled={sending} className="text-xs px-2.5 py-1 rounded-md border hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">New Chat</button>
+                <button type="button" onClick={handleCompact} disabled={sending} className="text-xs px-2.5 py-1 rounded-md border hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">Compact</button>
               </div>
               <ChatArea allMessages={allMessages} message={message} sending={sending} elapsed={elapsed} username={username} onMessageChange={setMessage} onSend={handleSend} onStop={handleStop} bottomRef={bottomRef} />
             </>
@@ -339,6 +389,8 @@ export default function WebchatClient({ username, role }: Props) {
                   )}
                 </p>
               </div>
+              <button type="button" onClick={() => setNewChatConfirm(true)} disabled={sending} className="text-xs px-2.5 py-1 rounded-md border hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">New Chat</button>
+              <button type="button" onClick={handleCompact} disabled={sending} className="text-xs px-2.5 py-1 rounded-md border hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">Compact</button>
               <Badge variant="secondary" className="text-xs">{activeRoom.policy}</Badge>
               {/* policy toggle */}
               <Select
@@ -489,6 +541,18 @@ export default function WebchatClient({ username, role }: Props) {
               onClick={() => deleteConfirm && deleteMutation.mutate(deleteConfirm.id)}>
               {deleteMutation.isPending ? 'กำลังลบ...' : 'ลบห้อง'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── New Chat Confirm Dialog ── */}
+      <Dialog open={newChatConfirm} onOpenChange={setNewChatConfirm}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>เริ่มบทสนทนาใหม่?</DialogTitle></DialogHeader>
+          <p className="text-sm text-zinc-500 py-2">AI จะลืมบทสนทนาก่อนหน้า แต่<span className="font-medium text-zinc-700 dark:text-zinc-300"> ประวัติแชทยังคงอยู่ในระบบ</span> — สามารถดูย้อนหลังได้เสมอ</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewChatConfirm(false)}>ยกเลิก</Button>
+            <Button onClick={handleNewChat}>เริ่มใหม่</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

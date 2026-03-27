@@ -41,17 +41,24 @@ sudo apt install -y curl git nano
 
 ---
 
-## ขั้นตอนที่ 2 — ติดตั้ง Node.js 22
+## ขั้นตอนที่ 2 — ติดตั้ง Node.js 24 (แนะนำ) หรือ 22.16+
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
+
+> ใช้ Node 22 ได้เช่นกัน (ต้องเป็น 22.16+):
+>
+> ```bash
+> curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+> sudo apt install -y nodejs
+> ```
 
 ตรวจสอบว่าติดตั้งสำเร็จ:
 
 ```bash
-node --version   # ต้องได้ v22.x.x
+node --version   # ต้องได้ v24.x.x หรือ v22.16+
 npm --version    # ต้องได้ 10.x.x ขึ้นไป
 ```
 
