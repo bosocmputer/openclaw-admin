@@ -123,20 +123,29 @@ function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; chan
 
       {/* sessions */}
       {sessions.length > 0 && (
-        <div className="px-3 pb-2 space-y-0.5">
+        <div className="px-3 pb-2 space-y-1.5">
           <p className="font-mono text-xs mb-1" style={{ color: '#555', fontSize: 9 }}>SESSIONS</p>
           {sessions.map(s => (
-            <div key={s.sessionKey} className="flex items-center gap-1.5 font-mono text-xs" style={{ fontSize: 10 }}>
-              <SessionDot state={s.state} />
-              <span style={{ color: '#888' }}>{s.user}</span>
-              {s.lastUserText && s.state !== 'idle' && (
-                <span style={{ color: '#555' }} className="truncate max-w-[120px]">&quot;{s.lastUserText}&quot;</span>
+            <div key={s.sessionKey} className="space-y-0.5 font-mono" style={{ fontSize: 10 }}>
+              <div className="flex items-center gap-1.5">
+                <SessionDot state={s.state} />
+                <span style={{ color: '#aaa' }}>{s.user}</span>
+                {s.state === 'idle' && s.lastMessageAt && (
+                  <span style={{ color: '#444' }}>last: {relativeTime(s.lastMessageAt)}</span>
+                )}
+                {s.cost > 0 && (
+                  <span style={{ color: '#444' }} className="ml-auto shrink-0">฿{(s.cost * 35).toFixed(3)}</span>
+                )}
+              </div>
+              {s.lastUserText && (
+                <div style={{ color: '#666', paddingLeft: 14 }}>
+                  <span style={{ color: '#555' }}>▶ </span>{s.lastUserText}
+                </div>
               )}
-              {s.state === 'idle' && s.lastMessageAt && (
-                <span style={{ color: '#444' }}>last: {relativeTime(s.lastMessageAt)}</span>
-              )}
-              {s.cost > 0 && (
-                <span style={{ color: '#333' }} className="ml-auto shrink-0">฿{(s.cost * 35).toFixed(3)}</span>
+              {s.lastReplyText && (
+                <div style={{ color: '#4a9', paddingLeft: 14 }}>
+                  <span style={{ color: '#3a8' }}>◀ </span>{s.lastReplyText}
+                </div>
               )}
             </div>
           ))}
@@ -145,15 +154,17 @@ function AgentCard({ agent, channelType, roomName }: { agent: MonitorAgent; chan
 
       {/* events feed */}
       <div className="px-3 pb-3 mt-auto">
-        <div className="border-t pt-2 space-y-0.5" style={{ borderColor: '#1a1a1a' }}>
+        <div className="border-t pt-2 space-y-1" style={{ borderColor: '#1a1a1a' }}>
           {allEvents.length === 0 && (
             <p className="font-mono text-xs" style={{ color: '#333', fontSize: 9 }}>no recent activity</p>
           )}
           {allEvents.map((e, i) => (
-            <div key={i} className="flex gap-1.5 font-mono" style={{ fontSize: 10 }}>
-              <span style={{ color: '#444' }}>{e.ts.slice(11, 19)}</span>
-              <span>{eventIcon(e.type)}</span>
-              <span style={{ color: '#666' }} className="truncate">{e.text}</span>
+            <div key={i} className="font-mono" style={{ fontSize: 10 }}>
+              <div className="flex gap-1.5 items-start">
+                <span style={{ color: '#444' }} className="shrink-0">{e.ts.slice(11, 19)}</span>
+                <span className="shrink-0">{eventIcon(e.type)}</span>
+                <span style={{ color: '#777' }}>{e.text}</span>
+              </div>
             </div>
           ))}
         </div>
