@@ -298,7 +298,7 @@ export async function createWebchatRoom(agentId: string, displayName: string, po
   return data
 }
 
-export async function updateWebchatRoom(id: number, fields: { display_name?: string; policy?: string }): Promise<void> {
+export async function updateWebchatRoom(id: number, fields: { display_name?: string; policy?: string; agent_id?: string }): Promise<void> {
   await api.put(`/api/webchat/rooms/${id}`, fields)
 }
 

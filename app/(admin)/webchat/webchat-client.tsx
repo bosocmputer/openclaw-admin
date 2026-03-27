@@ -187,6 +187,7 @@ export default function WebchatClient({ username, role }: Props) {
   const [newPolicy, setNewPolicy] = useState<'open' | 'allowlist'>('open')
   const [editDisplayName, setEditDisplayName] = useState('')
   const [editPolicy, setEditPolicy] = useState<'open' | 'allowlist'>('open')
+  const [editAgentId, setEditAgentId] = useState('')
 
   const duplicateRoomName = newDisplayName.trim() &&
     rooms.some(r => r.display_name.trim().toLowerCase() === newDisplayName.trim().toLowerCase())
@@ -203,7 +204,7 @@ export default function WebchatClient({ username, role }: Props) {
   })
 
   const updateMutation = useMutation({
-    mutationFn: () => updateWebchatRoom(editRoom!.id, { display_name: editDisplayName, policy: editPolicy }),
+    mutationFn: () => updateWebchatRoom(editRoom!.id, { display_name: editDisplayName, policy: editPolicy, agent_id: editAgentId || undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['webchat-rooms'] })
       toast.success('บันทึกสำเร็จ')
@@ -356,7 +357,7 @@ export default function WebchatClient({ username, role }: Props) {
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 mt-0.5" onClick={e => e.stopPropagation()}>
                 <button
                   className={`text-xs px-1.5 py-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 ${activeRoomId === room.id ? 'text-zinc-300' : 'text-zinc-400'}`}
-                  onClick={() => { setEditRoom(room); setEditDisplayName(room.display_name); setEditPolicy(room.policy) }}
+                  onClick={() => { setEditRoom(room); setEditDisplayName(room.display_name); setEditPolicy(room.policy); setEditAgentId(room.agent_id) }}
                   title="แก้ไข"
                 >✎</button>
                 <button
@@ -509,6 +510,13 @@ export default function WebchatClient({ username, role }: Props) {
             <div className="space-y-1">
               <label className="text-sm font-medium">ชื่อห้อง</label>
               <Input value={editDisplayName} onChange={e => setEditDisplayName(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Agent</label>
+              <Select value={editAgentId} onValueChange={v => v && setEditAgentId(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{agents.map(a => <SelectItem key={a.id} value={a.id}>{a.id}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Policy</label>
