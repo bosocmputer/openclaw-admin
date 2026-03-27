@@ -249,14 +249,14 @@ export default function MonitorPage() {
   const updatedStr = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH') : '--:--:--'
 
   return (
-    <div className="min-h-screen" style={{ background: '#0d0d0d', color: '#e0e0e0' }}>
+    <div className="rounded-lg space-y-4" style={{ background: '#0d0d0d', color: '#e0e0e0', padding: '1rem', position: 'relative' }}>
       {/* scanline overlay */}
-      <div className="fixed inset-0 pointer-events-none" style={{
+      <div className="absolute inset-0 pointer-events-none rounded-lg" style={{
         backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)',
-        zIndex: 50,
+        zIndex: 1,
       }} />
 
-      <div className="relative z-10 p-4 space-y-4 max-w-7xl mx-auto">
+      <div className="relative space-y-4" style={{ zIndex: 2 }}>
 
         {/* ── Header ── */}
         <div className="border rounded px-4 py-3 flex items-center justify-between flex-wrap gap-2"
