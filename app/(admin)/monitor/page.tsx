@@ -6,11 +6,20 @@ import { getMonitorEvents, type MonitorAgent, type MonitorSession, type MonitorE
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+const TH_LOCALE = 'th-TH'
+const TH_TZ = 'Asia/Bangkok'
+
 function relativeTime(iso: string): string {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (diff < 60) return `${diff}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 60) return `${diff} วินาทีที่แล้ว`
+  if (diff < 3600) return `${Math.floor(diff / 60)} นาทีที่แล้ว`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} ชั่วโมงที่แล้ว`
+  return new Date(iso).toLocaleDateString(TH_LOCALE, { timeZone: TH_TZ, day: 'numeric', month: 'short' })
+}
+
+/** แปลง ISO timestamp เป็นเวลาไทย HH:MM:SS */
+function isoToThaiTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(TH_LOCALE, { timeZone: TH_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function parseTs(ts: string): number {
@@ -21,7 +30,11 @@ function parseTs(ts: string): number {
 
 function deltaLabel(prev: string, next: string): string {
   const diff = Math.abs(parseTs(next) - parseTs(prev))
-  return diff < 1 ? `${(diff * 1000).toFixed(0)}ms` : `${diff.toFixed(1)}s`
+  // ถ้าข้ามวัน (เช่น 23:59 → 00:01) diff จะใหญ่มาก ให้ใช้ modulo 86400
+  const real = diff > 43200 ? 86400 - diff : diff
+  if (real < 1) return `${(real * 1000).toFixed(0)}ms`
+  if (real < 60) return `${real.toFixed(1)}s`
+  return `${Math.floor(real / 60)}m ${Math.round(real % 60)}s`
 }
 
 // ─── State Config — ใช้ emoji แทน 8-bit ──────────────────────────────────────
@@ -215,7 +228,11 @@ function SessionRow({ session, onClick, isSelected }: {
 
           {/* Bottom row: time + cost */}
           <div className="flex items-center gap-3 text-xs" style={{ color: '#475569' }}>
-            {session.lastMessageAt && <span>{relativeTime(session.lastMessageAt)}</span>}
+            {session.lastMessageAt && (
+              <span title={isoToThaiTime(session.lastMessageAt)}>
+                {relativeTime(session.lastMessageAt)} · {isoToThaiTime(session.lastMessageAt)} น.
+              </span>
+            )}
             {session.cost > 0 && (
               <span style={{ color: '#334155' }}>฿{(session.cost * 35).toFixed(3)}</span>
             )}
@@ -407,7 +424,9 @@ export default function MonitorPage() {
     ? sessions.find(s => `${s.agentId}-${s.channel}-${s.sessionKey}` === selectedKey) ?? null
     : null
 
-  const updatedStr = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH') : '--:--'
+  const updatedStr = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString(TH_LOCALE, { timeZone: TH_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    : '--:--'
 
   function toggleSession(key: string) {
     setSelectedKey(prev => prev === key ? null : key)
