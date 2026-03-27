@@ -365,3 +365,54 @@ export async function getGatewayLogs(lines = 500): Promise<LogEntry[]> {
   const { data } = await api.get('/api/gateway/logs', { params: { lines } })
   return data
 }
+
+// ─── Monitor ──────────────────────────────────────────────────────────────────
+
+export interface MonitorEvent {
+  ts: string
+  type: 'message' | 'thinking' | 'tool' | 'reply' | 'error' | string
+  text: string
+  agentId?: string
+  channel?: string
+  user?: string
+}
+
+export interface MonitorSession {
+  sessionKey: string
+  user: string
+  state: 'idle' | 'thinking' | 'tool_call' | 'replied' | 'error'
+  lastMessageAt: string | null
+  lastUserText: string | null
+  lastReplyText: string | null
+  elapsed: number
+  cost: number
+  events: MonitorEvent[]
+}
+
+export interface MonitorAgent {
+  id: string
+  channels: {
+    webchat?: MonitorSession[]
+    telegram?: MonitorSession[]
+  }
+}
+
+export interface MonitorStats {
+  totalAgents: number
+  activeNow: number
+  todayMessages: number
+  avgResponseTime: number
+  totalCostToday: number
+  errors: number
+}
+
+export interface MonitorData {
+  agents: MonitorAgent[]
+  globalEvents: MonitorEvent[]
+  stats: MonitorStats
+}
+
+export async function getMonitorEvents(): Promise<MonitorData> {
+  const { data } = await api.get('/api/monitor/events')
+  return data
+}
