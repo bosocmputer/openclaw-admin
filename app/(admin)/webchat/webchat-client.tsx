@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useRef, useEffect, useTransition } from 'react'
+import { useState, useRef, useEffect, useTransition, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -74,7 +74,10 @@ export default function WebchatClient({ username, role }: Props) {
   const [optimisticMsgs, setOptimisticMsgs] = useState<OptimisticMessage[]>([])
   const [sending, setSending] = useState(false)
   const [message, setMessage] = useState('')
+  const [elapsed, setElapsed] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // clear optimistic เมื่อ history update
   useEffect(() => {
@@ -85,25 +88,44 @@ export default function WebchatClient({ username, role }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [history, optimisticMsgs])
 
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort()
+    if (elapsedRef.current) clearInterval(elapsedRef.current)
+    setSending(false)
+    setElapsed(0)
+    setOptimisticMsgs([])
+    toast('ยกเลิกแล้ว')
+  }, [])
+
   async function handleSend() {
     if (!message.trim() || !activeRoomId || sending) return
     const text = message.trim()
     setMessage('')
     setSending(true)
+    setElapsed(0)
+
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+
+    // นับเวลา
+    elapsedRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
 
     // แสดง user message ทันที
     const tempId = `opt-${Date.now()}`
     setOptimisticMsgs([{ id: tempId, username, role: 'user', content: text, pending: true }])
 
     try {
-      await sendWebchatMessage(activeRoomId, username, text)
+      await sendWebchatMessage(activeRoomId, username, text, ctrl.signal)
       await refetchHistory()
     } catch (e: unknown) {
+      if ((e as { name?: string }).name === 'CanceledError' || (e as { name?: string }).name === 'AbortError') return
       const err = e as { response?: { data?: { error?: string } }; message?: string }
       toast.error(err?.response?.data?.error || err?.message || 'ส่งข้อความไม่สำเร็จ')
       setOptimisticMsgs([])
     } finally {
+      if (elapsedRef.current) clearInterval(elapsedRef.current)
       setSending(false)
+      setElapsed(0)
     }
   }
 
@@ -244,7 +266,7 @@ export default function WebchatClient({ username, role }: Props) {
               <div className="px-5 py-3.5 border-b bg-white dark:bg-zinc-950 shrink-0">
                 <h2 className="font-semibold text-sm">{activeRoom.display_name}</h2>
               </div>
-              <ChatArea allMessages={allMessages} message={message} sending={sending} username={username} onMessageChange={setMessage} onSend={handleSend} bottomRef={bottomRef} />
+              <ChatArea allMessages={allMessages} message={message} sending={sending} elapsed={elapsed} username={username} onMessageChange={setMessage} onSend={handleSend} onStop={handleStop} bottomRef={bottomRef} />
             </>
           )}
         </div>
@@ -371,9 +393,11 @@ export default function WebchatClient({ username, role }: Props) {
               allMessages={allMessages}
               message={message}
               sending={sending}
+              elapsed={elapsed}
               username={username}
               onMessageChange={setMessage}
               onSend={handleSend}
+              onStop={handleStop}
               bottomRef={bottomRef}
             />
           </>
@@ -476,13 +500,25 @@ interface ChatAreaProps {
   allMessages: (WebchatMessage | OptimisticMessage)[]
   message: string
   sending: boolean
+  elapsed: number
   username: string
   onMessageChange: (v: string) => void
   onSend: () => void
+  onStop: () => void
   bottomRef: React.RefObject<HTMLDivElement | null>
 }
 
-function ChatArea({ allMessages, message, sending, username, onMessageChange, onSend, bottomRef }: ChatAreaProps) {
+function ChatArea({ allMessages, message, sending, elapsed, username, onMessageChange, onSend, onStop, bottomRef }: ChatAreaProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }, [message])
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
@@ -519,19 +555,43 @@ function ChatArea({ allMessages, message, sending, username, onMessageChange, on
         )}
         <div ref={bottomRef} />
       </div>
-      <div className="border-t px-4 py-3 flex gap-2 bg-white dark:bg-zinc-950">
-        <Input
-          value={message}
-          onChange={e => onMessageChange(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() } }}
-          placeholder="พิมพ์ข้อความ แล้วกด Enter..."
-          disabled={sending}
-          className="flex-1"
-          autoFocus
-        />
-        <Button onClick={onSend} disabled={!message.trim() || sending} className="px-5">
-          ส่ง
-        </Button>
+
+      {/* input area */}
+      <div className="border-t px-5 py-4 bg-white dark:bg-zinc-950 space-y-2">
+        {sending && (
+          <div className="flex items-center justify-between text-xs text-zinc-400">
+            <span>AI กำลังคิด... {elapsed > 0 && `(${elapsed}s)`}</span>
+            <button
+              type="button"
+              onClick={onStop}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900 transition-colors font-medium"
+            >
+              <span className="w-2 h-2 rounded-sm bg-red-500 inline-block" />
+              หยุด
+            </button>
+          </div>
+        )}
+        <div className="flex gap-3 items-end">
+          <Textarea
+            ref={textareaRef}
+            value={message}
+            onChange={e => onMessageChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() } }}
+            placeholder="พิมพ์ข้อความ... (Enter ส่ง, Shift+Enter ขึ้นบรรทัด)"
+            disabled={sending}
+            rows={1}
+            className="flex-1 resize-none min-h-[44px] max-h-[160px] py-3 text-sm leading-relaxed"
+            autoFocus
+          />
+          <Button
+            onClick={onSend}
+            disabled={!message.trim() || sending}
+            className="px-5 h-11 shrink-0"
+          >
+            ส่ง
+          </Button>
+        </div>
+        <p className="text-xs text-zinc-400">Shift+Enter เพื่อขึ้นบรรทัดใหม่</p>
       </div>
     </div>
   )

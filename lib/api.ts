@@ -319,8 +319,8 @@ export async function getWebchatHistory(roomId: number, username: string): Promi
   return data
 }
 
-export async function sendWebchatMessage(roomId: number, username: string, message: string): Promise<{ ok: boolean; reply: string }> {
-  const { data } = await api.post('/api/webchat/send', { roomId, username, message })
+export async function sendWebchatMessage(roomId: number, username: string, message: string, signal?: AbortSignal): Promise<{ ok: boolean; reply: string }> {
+  const { data } = await api.post('/api/webchat/send', { roomId, username, message }, { signal })
   return data
 }
 
