@@ -1,414 +1,222 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getMonitorEvents, type MonitorAgent, type MonitorSession, type MonitorEvent } from '@/lib/api'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { getMonitorEvents, type MonitorData, type MonitorAgent, type MonitorEvent } from '@/lib/api'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const TH_LOCALE = 'th-TH'
-const TH_TZ = 'Asia/Bangkok'
+// ─── Time helpers ──────────────────────────────────────────────────────────────
+/** แปลง HH:MM:SS (UTC) → HH:MM:SS (Asia/Bangkok = UTC+7) */
+function tsToThai(ts: string): string {
+  if (!ts) return ''
+  const parts = ts.split(':')
+  if (parts.length < 3) return ts
+  let h = parseInt(parts[0]) + 7
+  const m = parts[1]
+  const s = parts[2].slice(0, 2)
+  if (h >= 24) h -= 24
+  return `${String(h).padStart(2, '0')}:${m}:${s}`
+}
 
 function relativeTime(iso: string): string {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
   if (diff < 60) return `${diff} วินาทีที่แล้ว`
   if (diff < 3600) return `${Math.floor(diff / 60)} นาทีที่แล้ว`
   if (diff < 86400) return `${Math.floor(diff / 3600)} ชั่วโมงที่แล้ว`
-  return new Date(iso).toLocaleDateString(TH_LOCALE, { timeZone: TH_TZ, day: 'numeric', month: 'short' })
+  return new Date(iso).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short' })
 }
 
-/** แปลง ISO timestamp เป็นเวลาไทย HH:MM:SS */
-function isoToThaiTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString(TH_LOCALE, { timeZone: TH_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+/** แปลง HH:MM:SS → seconds (for duration calc) */
+function tsToSec(ts: string): number {
+  const p = ts.split(':')
+  if (p.length < 3) return 0
+  return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60 + parseFloat(p[2])
 }
 
-function parseTs(ts: string): number {
-  const parts = ts.split(':')
-  if (parts.length < 3) return 0
-  return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2])
-}
-
-function deltaLabel(prev: string, next: string): string {
-  const diff = Math.abs(parseTs(next) - parseTs(prev))
-  // ถ้าข้ามวัน (เช่น 23:59 → 00:01) diff จะใหญ่มาก ให้ใช้ modulo 86400
-  const real = diff > 43200 ? 86400 - diff : diff
-  if (real < 1) return `${(real * 1000).toFixed(0)}ms`
-  if (real < 60) return `${real.toFixed(1)}s`
-  return `${Math.floor(real / 60)}m ${Math.round(real % 60)}s`
-}
-
-// ─── State Config — ใช้ emoji แทน 8-bit ──────────────────────────────────────
-// state     = สถานะปัจจุบันของ session
-// icon      = emoji ที่แสดงแทน AI character
-// label     = ชื่อสถานะ (ไทย)
-// sublabel  = คำอธิบายสั้น
-// color     = accent color
-// bg        = พื้นหลัง card
-// border    = ขอบ card
-// animClass = CSS animation class
-const STATE_CONFIG = {
-  idle: {
-    icon: '😴',
-    label: 'รอข้อความ',
-    sublabel: 'ไม่มี activity',
-    color: '#94a3b8',
-    bg: 'hsl(220 14% 10%)',
-    border: 'hsl(220 14% 16%)',
-    animClass: '',
-  },
-  thinking: {
-    icon: '🤔',
-    label: 'กำลังคิด',
-    sublabel: 'AI ประมวลผลคำถาม',
-    color: '#fbbf24',
-    bg: 'hsl(42 30% 8%)',
-    border: 'hsl(42 60% 22%)',
-    animClass: 'anim-think',
-  },
-  tool_call: {
-    icon: '🔍',
-    label: 'ค้นข้อมูล',
-    sublabel: 'เรียก MCP / ERP',
-    color: '#a78bfa',
-    bg: 'hsl(262 30% 8%)',
-    border: 'hsl(262 50% 22%)',
-    animClass: 'anim-search',
-  },
-  replied: {
-    icon: '💬',
-    label: 'ตอบแล้ว',
-    sublabel: 'ส่งคำตอบให้ user',
-    color: '#34d399',
-    bg: 'hsl(158 30% 7%)',
-    border: 'hsl(158 50% 18%)',
-    animClass: '',
-  },
-  error: {
-    icon: '😵',
-    label: 'เกิดข้อผิดพลาด',
-    sublabel: 'ดู logs เพิ่มเติม',
-    color: '#f87171',
-    bg: 'hsl(0 30% 8%)',
-    border: 'hsl(0 60% 22%)',
-    animClass: 'anim-error',
-  },
-} as const
-
-type StateKey = keyof typeof STATE_CONFIG
-
-function getCfg(state: string) {
-  return STATE_CONFIG[(state as StateKey)] ?? STATE_CONFIG.idle
-}
-
-// ─── Event helpers ────────────────────────────────────────────────────────────
-function eventEmoji(type: string): string {
-  if (type === 'message')  return '📩'
-  if (type === 'thinking') return '💭'
-  if (type === 'tool')     return '🔧'
-  if (type === 'reply')    return '✅'
-  if (type === 'error')    return '🚨'
-  return '·'
-}
-
-function eventColor(type: string): string {
-  if (type === 'message')  return '#94a3b8'
-  if (type === 'thinking') return '#64748b'
-  if (type === 'tool')     return '#a78bfa'
-  if (type === 'reply')    return '#34d399'
-  if (type === 'error')    return '#f87171'
-  return '#475569'
-}
-
-// ─── Flat Session ─────────────────────────────────────────────────────────────
-interface FlatSession extends MonitorSession {
+// ─── Types ─────────────────────────────────────────────────────────────────────
+interface FlatEvent {
+  ts: string           // UTC HH:MM:SS (raw จาก server)
+  tsThai: string       // แปลงเป็นไทยแล้ว
+  type: string
+  text: string
   agentId: string
   channel: 'webchat' | 'telegram'
+  user: string
+  sessionKey: string
+  isLive: boolean      // event ล่าสุดของ session ที่ state = thinking/tool_call
+  responseDuration?: number  // วินาทีจาก message → reply (เฉพาะ type='reply')
 }
 
-function sortOrder(state: string): number {
-  if (state === 'thinking' || state === 'tool_call') return 0
-  if (state === 'replied') return 1
-  if (state === 'error') return 2
-  return 3
+interface SessionGroup {
+  sessionKey: string
+  agentId: string
+  channel: 'webchat' | 'telegram'
+  user: string
+  state: string
+  lastMessageAt: string | null
+  events: FlatEvent[]
 }
 
-function flattenSessions(agents: MonitorAgent[]): FlatSession[] {
-  const result: FlatSession[] = []
-  for (const agent of agents) {
-    for (const s of agent.channels.webchat ?? []) result.push({ ...s, agentId: agent.id, channel: 'webchat' })
-    for (const s of agent.channels.telegram ?? []) result.push({ ...s, agentId: agent.id, channel: 'telegram' })
+// ─── Color helpers ─────────────────────────────────────────────────────────────
+const AGENT_COLORS = [
+  'text-blue-400', 'text-emerald-400', 'text-orange-400',
+  'text-pink-400', 'text-cyan-400', 'text-yellow-400',
+]
+
+function buildAgentColorMap(agents: MonitorAgent[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  agents.forEach((a, i) => { map[a.id] = AGENT_COLORS[i % AGENT_COLORS.length] })
+  return map
+}
+
+function durationColor(sec: number): string {
+  if (sec < 5) return 'text-green-400'
+  if (sec < 15) return 'text-yellow-400'
+  return 'text-red-400'
+}
+
+function typeBadge(type: string): { label: string; cls: string } {
+  switch (type) {
+    case 'message':  return { label: '📩 msg',   cls: 'text-zinc-400' }
+    case 'thinking': return { label: '💭 think', cls: 'text-yellow-500' }
+    case 'tool':     return { label: '🔧 tool',  cls: 'text-purple-400' }
+    case 'reply':    return { label: '✅ reply', cls: 'text-green-400' }
+    case 'error':    return { label: '❌ error', cls: 'text-red-400' }
+    default:         return { label: type,       cls: 'text-zinc-500' }
   }
-  result.sort((a, b) => {
-    const d = sortOrder(a.state) - sortOrder(b.state)
+}
+
+function rowBg(type: string, isLive: boolean): string {
+  if (isLive) return 'row-live'
+  switch (type) {
+    case 'thinking': return 'bg-yellow-950/20'
+    case 'tool':     return 'bg-purple-950/20'
+    case 'error':    return 'bg-red-950/30'
+    default:         return ''
+  }
+}
+
+// ─── Data Transform ────────────────────────────────────────────────────────────
+function flattenToGroups(data: MonitorData): SessionGroup[] {
+  const groupMap = new Map<string, SessionGroup>()
+
+  for (const agent of data.agents) {
+    const channels: Array<{ ch: 'webchat' | 'telegram'; sessions: NonNullable<typeof agent.channels.webchat> }> = [
+      { ch: 'webchat', sessions: agent.channels.webchat ?? [] },
+      { ch: 'telegram', sessions: agent.channels.telegram ?? [] },
+    ]
+    for (const { ch, sessions } of channels) {
+      for (const session of sessions) {
+        const isActive = session.state === 'thinking' || session.state === 'tool_call'
+
+        // คำนวณ response duration — จับคู่ message → reply ล่าสุด
+        let lastMsgTs: string | null = null
+        const eventsWithDuration: FlatEvent[] = []
+        const evList = session.events as MonitorEvent[]
+
+        for (let i = 0; i < evList.length; i++) {
+          const e = evList[i]
+          const isLastEvent = i === evList.length - 1
+          let responseDuration: number | undefined
+
+          if (e.type === 'message') {
+            lastMsgTs = e.ts
+          } else if (e.type === 'reply' && lastMsgTs) {
+            const diff = tsToSec(e.ts) - tsToSec(lastMsgTs)
+            const real = diff < 0 ? diff + 86400 : diff  // cross-midnight fix
+            if (real >= 0 && real < 3600) responseDuration = real
+            lastMsgTs = null
+          }
+
+          eventsWithDuration.push({
+            ts: e.ts,
+            tsThai: tsToThai(e.ts),
+            type: e.type,
+            text: e.text,
+            agentId: agent.id,
+            channel: ch,
+            user: session.user,
+            sessionKey: session.sessionKey,
+            isLive: isActive && isLastEvent,
+            responseDuration,
+          })
+        }
+
+        groupMap.set(session.sessionKey, {
+          sessionKey: session.sessionKey,
+          agentId: agent.id,
+          channel: ch,
+          user: session.user,
+          state: session.state,
+          lastMessageAt: session.lastMessageAt,
+          events: eventsWithDuration,
+        })
+      }
+    }
+  }
+
+  // sort: active first, then by lastMessageAt desc
+  return Array.from(groupMap.values()).sort((a, b) => {
+    const order = (s: string) => (s === 'thinking' || s === 'tool_call' ? 0 : s === 'replied' ? 1 : s === 'error' ? 2 : 3)
+    const d = order(a.state) - order(b.state)
     if (d !== 0) return d
-    const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0
-    const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0
-    return tb - ta
+    return (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')
   })
-  return result
 }
 
-// ─── AI Character Widget ──────────────────────────────────────────────────────
-// วงกลม emoji ตัวใหญ่ + ชื่อสถานะ
-function AICharacter({ state, elapsed }: { state: string; elapsed: number }) {
-  const cfg = getCfg(state)
-  return (
-    <div className="flex flex-col items-center justify-center gap-1" style={{ minWidth: 72 }}>
-      <div
-        className={`text-4xl leading-none select-none ${cfg.animClass}`}
-        style={{ filter: state === 'idle' ? 'grayscale(0.6)' : 'none' }}
-        title={cfg.sublabel}
-      >
-        {cfg.icon}
-      </div>
-      <span
-        className="text-xs font-semibold text-center leading-tight"
-        style={{ color: cfg.color, maxWidth: 72 }}
-      >
-        {cfg.label}
-      </span>
-      {(state === 'thinking' || state === 'tool_call') && (
-        <span className="text-xs" style={{ color: '#64748b' }}>{elapsed}s</span>
-      )}
-    </div>
-  )
-}
+// ─── Insight Pills ─────────────────────────────────────────────────────────────
+function InsightPills({ data }: { data: MonitorData }) {
+  const { stats } = data
+  const allGroups = flattenToGroups(data)
 
-// ─── Session Row (compact, clickable) ─────────────────────────────────────────
-function SessionRow({ session, onClick, isSelected }: {
-  session: FlatSession
-  onClick: () => void
-  isSelected: boolean
-}) {
-  const cfg = getCfg(session.state)
-  const isIdle = session.state === 'idle'
-  const channelIcon = session.channel === 'telegram' ? '✈️' : '🌐'
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full text-left rounded-xl border transition-all duration-200 hover:brightness-110"
-      style={{
-        background: cfg.bg,
-        borderColor: isSelected ? cfg.color : cfg.border,
-        opacity: isIdle && !isSelected ? 0.5 : 1,
-        padding: '14px 16px',
-        boxShadow: isSelected ? `0 0 0 1px ${cfg.color}40` : 'none',
-      }}
-    >
-      <div className="flex items-center gap-4">
-        {/* AI Character */}
-        <AICharacter state={session.state} elapsed={session.elapsed} />
-
-        {/* Info block */}
-        <div className="flex-1 min-w-0 space-y-1">
-          {/* Agent + channel + user */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm" style={{ color: '#e2e8f0' }}>
-              {session.agentId}
-            </span>
-            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#1e293b', color: '#64748b' }}>
-              {channelIcon} {session.channel}
-            </span>
-            <span className="text-xs" style={{ color: '#475569' }}>·</span>
-            <span className="text-sm truncate" style={{ color: '#94a3b8', maxWidth: 160 }}>
-              {session.user}
-            </span>
-          </div>
-
-          {/* Last user message */}
-          {session.lastUserText ? (
-            <p className="text-sm truncate" style={{ color: '#64748b' }}>
-              📩 {session.lastUserText}
-            </p>
-          ) : (
-            <p className="text-xs" style={{ color: '#334155' }}>ยังไม่มีข้อความ</p>
-          )}
-
-          {/* Bottom row: time + cost */}
-          <div className="flex items-center gap-3 text-xs" style={{ color: '#475569' }}>
-            {session.lastMessageAt && (
-              <span title={isoToThaiTime(session.lastMessageAt)}>
-                {relativeTime(session.lastMessageAt)} · {isoToThaiTime(session.lastMessageAt)} น.
-              </span>
-            )}
-            {session.cost > 0 && (
-              <span style={{ color: '#334155' }}>฿{(session.cost * 35).toFixed(3)}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Right: event count + chevron */}
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          {session.events.length > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#1e293b', color: '#475569' }}>
-              {session.events.length} events
-            </span>
-          )}
-          <span style={{ color: isSelected ? cfg.color : '#334155', fontSize: 18, lineHeight: 1 }}>
-            {isSelected ? '▾' : '▸'}
-          </span>
-        </div>
-      </div>
-    </button>
-  )
-}
-
-// ─── Timeline Panel ───────────────────────────────────────────────────────────
-function TimelinePanel({ events }: { events: MonitorEvent[] }) {
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [events.length])
-
-  if (events.length === 0) {
-    return (
-      <div className="text-center py-10 text-sm" style={{ color: '#334155' }}>
-        ยังไม่มี events
-      </div>
-    )
+  // longest reply duration
+  let longest = 0
+  let longestLabel = ''
+  for (const g of allGroups) {
+    for (const e of g.events) {
+      if (e.type === 'reply' && e.responseDuration && e.responseDuration > longest) {
+        longest = e.responseDuration
+        longestLabel = `${g.agentId} · ${g.user.slice(-8)}`
+      }
+    }
   }
 
+  const errorCount = allGroups.reduce((n, g) => n + g.events.filter(e => e.type === 'error').length, 0)
+
   return (
-    <div className="space-y-0 font-mono" style={{ fontSize: 13 }}>
-      {events.map((e, i) => {
-        const prev = events[i - 1]
-        const delta = prev ? deltaLabel(prev.ts, e.ts) : null
-        const tsShort = e.ts.length >= 8 ? e.ts.slice(0, 8) : e.ts
-        return (
-          <div key={i}>
-            {delta && (
-              <div className="text-center text-xs py-0.5" style={{ color: '#334155' }}>
-                ↕ {delta}
-              </div>
-            )}
-            <div className="flex gap-3 items-start py-1.5 rounded-lg px-2 hover:bg-white/5 transition-colors">
-              <span className="shrink-0 text-xs pt-0.5" style={{ color: '#475569', minWidth: 64 }}>{tsShort}</span>
-              <span className="shrink-0 text-base leading-none" style={{ minWidth: 22 }}>{eventEmoji(e.type)}</span>
-              <span
-                className="text-sm leading-relaxed"
-                style={{
-                  color: eventColor(e.type),
-                  fontStyle: e.type === 'thinking' ? 'italic' : undefined,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  flex: 1,
-                  fontFamily: 'inherit',
-                }}
-              >
-                {e.text}
-              </span>
-            </div>
-          </div>
-        )
-      })}
-      <div ref={bottomRef} />
-    </div>
-  )
-}
-
-// ─── Timeline Drawer ──────────────────────────────────────────────────────────
-function TimelineDrawer({ session, onClose }: { session: FlatSession; onClose: () => void }) {
-  const cfg = getCfg(session.state)
-  return (
-    <div
-      className="rounded-b-xl border-x border-b overflow-hidden"
-      style={{ borderColor: cfg.border, background: 'hsl(220 20% 6%)' }}
-    >
-      {/* Drawer header */}
-      <div
-        className="flex items-center justify-between px-4 py-2.5 border-b"
-        style={{ borderColor: cfg.border, background: 'hsl(220 20% 8%)' }}
-      >
-        <div className="flex items-center gap-2 text-sm">
-          <span style={{ fontSize: 18 }}>{cfg.icon}</span>
-          <span className="font-medium" style={{ color: cfg.color }}>{cfg.label}</span>
-          <span style={{ color: '#334155' }}>·</span>
-          <span className="text-xs" style={{ color: '#475569' }}>{session.agentId} › {session.channel} | {session.user}</span>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-xs px-3 py-1 rounded-lg border transition-colors hover:bg-white/5"
-          style={{ borderColor: '#1e293b', color: '#475569' }}
-        >
-          ✕ ปิด
-        </button>
-      </div>
-
-      {/* Timeline scroll area */}
-      <div className="px-4 py-3" style={{ maxHeight: 400, overflowY: 'auto' }}>
-        <TimelinePanel events={session.events} />
-      </div>
-
-      {/* Last reply */}
-      {session.lastReplyText && (
-        <div
-          className="mx-4 mb-4 rounded-xl p-3 text-sm"
-          style={{ background: 'hsl(158 30% 5%)', borderLeft: `3px solid ${cfg.color}`, color: '#94a3b8', lineHeight: 1.6 }}
-        >
-          <div className="text-xs mb-1" style={{ color: '#334155' }}>💬 คำตอบล่าสุด</div>
-          {session.lastReplyText.slice(0, 400)}{session.lastReplyText.length > 400 ? '…' : ''}
-        </div>
+    <div className="flex gap-2 flex-wrap text-xs">
+      <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400">
+        💬 {stats.todayMessages} events วันนี้
+      </span>
+      <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-yellow-500">
+        ⚡ {stats.activeNow} active now
+      </span>
+      <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400">
+        ⏱ avg {stats.avgResponseTime.toFixed(1)}s
+      </span>
+      <span className={`px-2.5 py-1 rounded-full bg-zinc-900 ${errorCount > 0 ? 'text-red-400' : 'text-zinc-500'}`}>
+        ❌ {errorCount} errors
+      </span>
+      {longest > 0 && (
+        <span className={`px-2.5 py-1 rounded-full bg-zinc-900 ${durationColor(longest)}`}>
+          🐢 longest {longest.toFixed(1)}s ({longestLabel})
+        </span>
       )}
     </div>
   )
 }
 
-// ─── Info Dialog ──────────────────────────────────────────────────────────────
-function InfoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Monitor — คู่มือการใช้งาน</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 text-sm">
-          <div>
-            <p className="font-semibold mb-2">สถานะ AI</p>
-            <div className="space-y-2">
-              {Object.entries(STATE_CONFIG).map(([key, cfg]) => (
-                <div key={key} className="flex items-center gap-3">
-                  <span className="text-xl">{cfg.icon}</span>
-                  <div>
-                    <span className="font-medium" style={{ color: cfg.color }}>{cfg.label}</span>
-                    <span className="text-zinc-500 ml-2 text-xs">{cfg.sublabel}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="font-semibold mb-2">Event Icons</p>
-            <div className="space-y-1 text-xs text-zinc-500">
-              <div className="flex gap-3"><span>📩</span><span>User ส่ง message เข้ามา</span></div>
-              <div className="flex gap-3"><span>💭</span><span>AI กำลัง thinking (extended)</span></div>
-              <div className="flex gap-3"><span>🔧</span><span>Tool call — เรียก MCP / ERP</span></div>
-              <div className="flex gap-3"><span>✅</span><span>ตอบกลับสำเร็จ</span></div>
-              <div className="flex gap-3"><span>🚨</span><span>Error — ดู logs เพิ่มเติม</span></div>
-            </div>
-          </div>
-          <div>
-            <p className="font-semibold mb-2">หลาย user ในห้องเดียวกัน</p>
-            <p className="text-xs text-zinc-500 leading-relaxed">
-              แต่ละ user มี session แยกกัน — ถ้า 2 user ถามพร้อมกันจะเห็น 2 แถวแยก
-              แต่ละแถวแสดงสถานะ AI ของ user นั้นโดยเฉพาะ ไม่ปะปนกัน
-            </p>
-          </div>
-          <p className="text-xs text-zinc-400">* อัปเดตทุก 3 วินาที · กด session row เพื่อดู timeline</p>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function MonitorPage() {
   const [paused, setPaused] = useState(false)
-  const [infoOpen, setInfoOpen] = useState(false)
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [agentFilter, setAgentFilter] = useState('ALL')
+  const [channelFilter, setChannelFilter] = useState('ALL')
+  const [stateFilter, setStateFilter] = useState('ALL')
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [autoScroll, setAutoScroll] = useState(true)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   const { data, dataUpdatedAt } = useQuery({
     queryKey: ['monitor'],
@@ -416,141 +224,312 @@ export default function MonitorPage() {
     refetchInterval: paused ? false : 3000,
   })
 
-  const stats = data?.stats
-  const agents = data?.agents ?? []
-  const sessions = flattenSessions(agents)
-
-  const selectedSession = selectedKey
-    ? sessions.find(s => `${s.agentId}-${s.channel}-${s.sessionKey}` === selectedKey) ?? null
-    : null
+  // auto scroll
+  useEffect(() => {
+    if (autoScroll && !paused) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [dataUpdatedAt, autoScroll, paused])
 
   const updatedStr = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString(TH_LOCALE, { timeZone: TH_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
     : '--:--'
 
-  function toggleSession(key: string) {
-    setSelectedKey(prev => prev === key ? null : key)
+  const agents = data?.agents ?? []
+  const agentColorMap = buildAgentColorMap(agents)
+  const agentIds = agents.map(a => a.id)
+
+  const groups = data ? flattenToGroups(data) : []
+
+  // filter groups
+  const filteredGroups = groups.map(g => {
+    // agent / channel / state filter at group level
+    if (agentFilter !== 'ALL' && g.agentId !== agentFilter) return null
+    if (channelFilter !== 'ALL' && g.channel !== channelFilter) return null
+    if (stateFilter !== 'ALL') {
+      const typeMap: Record<string, string[]> = {
+        thinking: ['thinking'],
+        tool: ['tool'],
+        replied: ['reply'],
+        error: ['error'],
+      }
+      const allowed = typeMap[stateFilter] ?? []
+      const hasMatch = g.events.some(e => allowed.includes(e.type))
+      if (!hasMatch) return null
+    }
+
+    // search filter on events
+    const q = search.toLowerCase()
+    const filteredEvents = q
+      ? g.events.filter(e =>
+          e.agentId.toLowerCase().includes(q) ||
+          e.user.toLowerCase().includes(q) ||
+          e.text.toLowerCase().includes(q)
+        )
+      : g.events
+
+    if (filteredEvents.length === 0 && q) return null
+    return { ...g, events: filteredEvents }
+  }).filter(Boolean) as SessionGroup[]
+
+  const totalEvents = filteredGroups.reduce((n, g) => n + g.events.length, 0)
+  const totalAll = groups.reduce((n, g) => n + g.events.length, 0)
+
+  function toggleCollapse(key: string) {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  function stateLabel(state: string): string {
+    switch (state) {
+      case 'thinking': return '🤔 thinking'
+      case 'tool_call': return '🔍 tool call'
+      case 'replied': return '✅ replied'
+      case 'error': return '❌ error'
+      default: return '😴 idle'
+    }
+  }
+
+  function stateCls(state: string): string {
+    switch (state) {
+      case 'thinking': return 'text-yellow-500'
+      case 'tool_call': return 'text-purple-400'
+      case 'replied': return 'text-green-400'
+      case 'error': return 'text-red-400'
+      default: return 'text-zinc-500'
+    }
   }
 
   return (
     <div className="space-y-4 w-full">
 
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      {/* ── Title ── */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold">Monitor</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">อัปเดต {updatedStr}</p>
+          <p className="text-sm text-zinc-500 mt-0.5">ดู activity ของ AI แบบ real-time แยกห้อง แยก user</p>
         </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Stats pills */}
-          {stats && (
-            <div className="flex gap-2 flex-wrap text-sm">
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#1e293b', color: '#94a3b8' }}>
-                🤖 {stats.totalAgents} agents
-              </span>
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#1e293b', color: '#fbbf24' }}>
-                ⚡ {stats.activeNow} active
-              </span>
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#1e293b', color: '#94a3b8' }}>
-                💬 {stats.todayMessages} วันนี้
-              </span>
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#1e293b', color: '#94a3b8' }}>
-                ⏱ avg {stats.avgResponseTime.toFixed(1)}s
-              </span>
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#1e293b', color: '#34d399' }}>
-                ฿{(stats.totalCostToday * 35).toFixed(2)}
-              </span>
-              {stats.errors > 0 && (
-                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#450a0a', color: '#f87171' }}>
-                  🚨 {stats.errors} errors
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setInfoOpen(true)}
-              className="text-sm px-3 py-1.5 rounded-lg border transition-colors hover:bg-zinc-800"
-              style={{ borderColor: '#1e293b', color: '#64748b' }}
-            >
-              คู่มือ
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaused(p => !p)}
-              className="text-sm px-3 py-1.5 rounded-lg border transition-colors hover:bg-zinc-800 flex items-center gap-1.5"
-              style={{ borderColor: paused ? '#7f1d1d' : '#1e293b', color: paused ? '#f87171' : '#64748b' }}
-            >
-              {paused ? '▶ Resume' : '⏸ Pause'}
-            </button>
-            <div className="flex items-center gap-1.5 text-sm" style={{ color: paused ? '#475569' : '#34d399' }}>
-              <span
-                className="inline-block rounded-full"
-                style={{
-                  width: 7,
-                  height: 7,
-                  background: paused ? '#334155' : '#34d399',
-                  animation: paused ? 'none' : 'live-pulse 2s ease-in-out infinite',
-                }}
-              />
-              {paused ? 'Paused' : 'Live'}
-            </div>
+        <div className="flex items-center gap-2 text-xs text-zinc-400">
+          <span>อัปเดต {updatedStr}</span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-2 h-2 rounded-full"
+              style={{ background: paused ? '#52525b' : '#22c55e', animation: paused ? 'none' : 'livePulse 2s ease-in-out infinite' }}
+            />
+            <span style={{ color: paused ? '#52525b' : '#22c55e' }}>{paused ? 'Paused' : 'Live'}</span>
           </div>
+          <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
+            {paused ? 'Resume' : 'Pause'}
+          </Button>
         </div>
       </div>
 
-      {/* ── Session List ── */}
-      {sessions.length === 0 ? (
-        <div className="text-center py-24 rounded-2xl border" style={{ borderColor: '#1e293b', background: '#0f172a' }}>
-          <div className="text-5xl mb-4">🤖</div>
-          <p className="text-lg font-medium" style={{ color: '#334155' }}>ยังไม่มี sessions</p>
-          <p className="text-sm mt-1" style={{ color: '#1e293b' }}>gateway ยังไม่รัน หรือยังไม่มีคนคุย</p>
+      {/* ── Filters ── */}
+      <div className="space-y-2">
+        {/* Row 1 */}
+        <div className="flex gap-2 flex-wrap items-center">
+          <Input
+            placeholder="ค้นหา agent, user, ข้อความ..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="max-w-xs text-sm"
+          />
+
+          {/* Agent pills */}
+          <div className="flex gap-1 flex-wrap">
+            {['ALL', ...agentIds].map(id => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setAgentFilter(id)}
+                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                  agentFilter === id
+                    ? 'bg-zinc-900 text-white border-zinc-700'
+                    : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500'
+                }`}
+              >
+                {id === 'ALL' ? 'ทั้งหมด' : <span className={agentColorMap[id]}>{id}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Channel pills */}
+          <div className="flex gap-1">
+            {(['ALL', 'telegram', 'webchat'] as const).map(ch => (
+              <button
+                key={ch}
+                type="button"
+                onClick={() => setChannelFilter(ch)}
+                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                  channelFilter === ch
+                    ? 'bg-zinc-900 text-white border-zinc-700'
+                    : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500'
+                }`}
+              >
+                {ch === 'ALL' ? 'ทุก channel' : ch === 'telegram' ? '✈️ telegram' : '🌐 webchat'}
+              </button>
+            ))}
+          </div>
+
+          {/* State pills */}
+          <div className="flex gap-1 flex-wrap">
+            {[
+              { id: 'ALL', label: 'ทุก state' },
+              { id: 'thinking', label: '🤔 thinking' },
+              { id: 'tool', label: '🔧 tool' },
+              { id: 'replied', label: '✅ replied' },
+              { id: 'error', label: '❌ error' },
+            ].map(s => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setStateFilter(s.id)}
+                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                  stateFilter === s.id
+                    ? 'bg-zinc-900 text-white border-zinc-700'
+                    : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Auto scroll */}
+          <label className="flex items-center gap-1.5 text-xs text-zinc-500 ml-auto cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoScroll}
+              onChange={e => setAutoScroll(e.target.checked)}
+              className="rounded"
+            />
+            Auto scroll
+          </label>
         </div>
-      ) : (
-        <div className="space-y-1.5">
-          {sessions.map(session => {
-            const key = `${session.agentId}-${session.channel}-${session.sessionKey}`
-            const isSelected = selectedKey === key
+
+        {/* Row 2 — insight pills */}
+        {data && <InsightPills data={data} />}
+      </div>
+
+      {/* ── Log Panel ── */}
+      <div className="border rounded-xl bg-zinc-950 text-xs font-mono h-[580px] overflow-y-auto">
+        {filteredGroups.length === 0 ? (
+          <p className="text-zinc-500 py-8 text-center">ไม่มีข้อมูลที่ตรงเงื่อนไข</p>
+        ) : (
+          filteredGroups.map((group, gi) => {
+            const isCollapsed = collapsed.has(group.sessionKey)
+            const agentCls = agentColorMap[group.agentId] ?? 'text-zinc-400'
+            const chLabel = group.channel === 'telegram' ? 'tg' : 'web'
+            const userShort = group.user.replace('direct:', '').slice(0, 14)
+            const eventCount = group.events.length
+
             return (
-              <div key={key}>
-                <SessionRow session={session} onClick={() => toggleSession(key)} isSelected={isSelected} />
-                {isSelected && selectedSession && (
-                  <TimelineDrawer session={selectedSession} onClose={() => setSelectedKey(null)} />
-                )}
+              <div key={group.sessionKey}>
+                {/* separator between groups */}
+                {gi > 0 && <div className="border-t border-zinc-800/50" />}
+
+                {/* ── Group Header ── */}
+                <button
+                  type="button"
+                  onClick={() => toggleCollapse(group.sessionKey)}
+                  className="w-full text-left flex items-center gap-2 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 transition-colors"
+                >
+                  <span className="text-zinc-500">{isCollapsed ? '▶' : '▼'}</span>
+                  <span className={`font-semibold ${agentCls}`}>{group.agentId}</span>
+                  <span className="text-zinc-600">·</span>
+                  <span className="text-zinc-500">{chLabel}</span>
+                  <span className="text-zinc-600">·</span>
+                  <span className="text-zinc-400">{userShort}</span>
+                  <span className={`ml-2 ${stateCls(group.state)}`}>{stateLabel(group.state)}</span>
+                  {group.lastMessageAt && (
+                    <span className="text-zinc-600 ml-1">{relativeTime(group.lastMessageAt)}</span>
+                  )}
+                  <span className="ml-auto text-zinc-600">{eventCount} events</span>
+                </button>
+
+                {/* ── Event Rows ── */}
+                {!isCollapsed && group.events.map((e, ei) => {
+                  const badge = typeBadge(e.type)
+                  const bg = rowBg(e.type, e.isLive)
+                  return (
+                    <div
+                      key={ei}
+                      className={`flex gap-0 items-start px-3 py-0.5 leading-5 hover:bg-zinc-900 transition-colors ${bg}`}
+                    >
+                      {/* time */}
+                      <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
+
+                      {/* agent·channel */}
+                      <span className={`shrink-0 w-24 ${agentCls}`}>
+                        {e.agentId}·{e.channel === 'telegram' ? 'tg' : 'web'}
+                      </span>
+
+                      {/* user */}
+                      <span className="shrink-0 w-28 text-zinc-500 truncate">
+                        {e.user.replace('direct:', '').slice(0, 14)}
+                      </span>
+
+                      {/* type badge */}
+                      <span className={`shrink-0 w-20 ${badge.cls}`}>
+                        {badge.label}{e.isLive ? <span className="thinking-dots" /> : ''}
+                      </span>
+
+                      {/* message */}
+                      <span
+                        className="flex-1 text-zinc-300 truncate"
+                        title={e.text}
+                      >
+                        {e.text}
+                      </span>
+
+                      {/* duration */}
+                      {e.type === 'reply' && e.responseDuration != null && (
+                        <span className={`shrink-0 w-14 text-right ${durationColor(e.responseDuration)}`}>
+                          {e.responseDuration.toFixed(1)}s
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )
-          })}
-        </div>
-      )}
+          })
+        )}
+        <div ref={bottomRef} />
+      </div>
 
-      <InfoDialog open={infoOpen} onClose={() => setInfoOpen(false)} />
+      {/* ── Footer ── */}
+      <p className="text-xs text-zinc-500">
+        แสดง {totalEvents} / {totalAll} events
+        {groups.length > 0 && ` · ${filteredGroups.length} / ${groups.length} sessions`}
+      </p>
 
       <style>{`
-        @keyframes anim-think {
-          0%, 100% { transform: rotate(-8deg) scale(1.0); }
-          50%       { transform: rotate(8deg)  scale(1.1); }
-        }
-        @keyframes anim-search {
-          0%, 100% { transform: scale(1.0) rotate(0deg); }
-          50%       { transform: scale(1.1) rotate(-15deg); }
-        }
-        @keyframes anim-error {
-          0%, 100%  { transform: rotate(0deg); }
-          20%       { transform: rotate(-10deg); }
-          40%       { transform: rotate(10deg); }
-          60%       { transform: rotate(-10deg); }
-          80%       { transform: rotate(10deg); }
-        }
-        @keyframes live-pulse {
+        @keyframes livePulse {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0.3; }
         }
-        .anim-think  { animation: anim-think  1.8s ease-in-out infinite; display: inline-block; }
-        .anim-search { animation: anim-search 1.2s ease-in-out infinite; display: inline-block; }
-        .anim-error  { animation: anim-error  0.5s ease-in-out infinite; display: inline-block; }
+        .row-live {
+          animation: rowGlow 2s ease-in-out infinite;
+        }
+        @keyframes rowGlow {
+          0%, 100% { background-color: rgba(234, 179, 8, 0.06); }
+          50%       { background-color: rgba(234, 179, 8, 0.14); }
+        }
+        .thinking-dots::after {
+          content: '';
+          animation: dots 1.4s infinite;
+        }
+        @keyframes dots {
+          0%   { content: ''; }
+          25%  { content: '.'; }
+          50%  { content: '..'; }
+          75%  { content: '...'; }
+          100% { content: ''; }
+        }
       `}</style>
     </div>
   )
