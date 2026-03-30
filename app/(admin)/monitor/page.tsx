@@ -38,7 +38,7 @@ interface FlatEvent {
   type: string
   text: string
   agentId: string
-  channel: 'webchat' | 'telegram'
+  channel: 'webchat' | 'telegram' | 'line'
   user: string
   sessionKey: string
   isLive: boolean
@@ -48,7 +48,7 @@ interface FlatEvent {
 interface SessionGroup {
   sessionKey: string
   agentId: string
-  channel: 'webchat' | 'telegram'
+  channel: 'webchat' | 'telegram' | 'line'
   user: string
   state: string
   lastMessageAt: string | null
@@ -107,9 +107,10 @@ function buildGroups(data: MonitorData): SessionGroup[] {
   const groups: SessionGroup[] = []
 
   for (const agent of data.agents) {
-    const channels: Array<{ ch: 'webchat' | 'telegram'; sessions: NonNullable<typeof agent.channels.webchat> }> = [
+    const channels: Array<{ ch: 'webchat' | 'telegram' | 'line'; sessions: NonNullable<typeof agent.channels.webchat> }> = [
       { ch: 'webchat',  sessions: agent.channels.webchat  ?? [] },
       { ch: 'telegram', sessions: agent.channels.telegram ?? [] },
+      { ch: 'line',     sessions: agent.channels.line     ?? [] },
     ]
     for (const { ch, sessions } of channels) {
       for (const session of sessions) {
@@ -207,7 +208,7 @@ function OverviewCard({
 
       {/* Channel + user */}
       <div className="text-xs text-zinc-500 mb-1.5 truncate">
-        {group.channel === 'telegram' ? '✈️' : '🌐'} {userShort}
+        {group.channel === 'telegram' ? '✈️' : group.channel === 'line' ? '💚' : '🌐'} {userShort}
       </div>
 
       {/* State label + elapsed */}
@@ -364,7 +365,7 @@ function DetailPanel({
                 {/* agent·ch — only in global mode */}
                 {isGlobal && (
                   <span className={`shrink-0 w-24 ${ac.text} truncate`}>
-                    {e.agentId}·{e.channel === 'telegram' ? 'tg' : 'web'}
+                    {e.agentId}·{e.channel === 'telegram' ? 'tg' : e.channel === 'line' ? 'line' : 'web'}
                   </span>
                 )}
 

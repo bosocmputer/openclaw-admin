@@ -273,8 +273,8 @@ export default function ChatsPage() {
     <div className="space-y-4 w-full">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Telegram Chats History</h1>
-          <p className="text-sm text-zinc-500 mt-1">ดูประวัติแชท Telegram แยกตาม user และ agent</p>
+          <h1 className="text-2xl font-bold">Chat History</h1>
+          <p className="text-sm text-zinc-500 mt-1">ดูประวัติแชทแยกตาม user และ agent (Telegram, LINE, Webchat)</p>
         </div>
 
         {/* Agent selector */}
@@ -328,7 +328,7 @@ export default function ChatsPage() {
           {selectedSender && (
             <div className="border-b px-4 py-2.5 shrink-0">
               <p className="text-sm font-semibold">{selectedSender.name}</p>
-              <p className="text-xs text-zinc-500">Telegram {selectedSender.id} · {selectedSender.messageCount} ข้อความ</p>
+              <p className="text-xs text-zinc-500 font-mono">{selectedSender.id} · {selectedSender.messageCount} ข้อความ</p>
             </div>
           )}
 

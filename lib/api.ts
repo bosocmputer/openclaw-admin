@@ -460,6 +460,7 @@ export interface MonitorAgent {
   channels: {
     webchat?: MonitorSession[]
     telegram?: MonitorSession[]
+    line?: MonitorSession[]
   }
 }
 
