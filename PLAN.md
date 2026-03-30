@@ -9,7 +9,7 @@
 **OpenClaw ERP Chatbot** สำหรับบริษัท SML — Web Admin Panel ให้ config ได้จากหน้าเว็บโดยไม่ต้อง SSH server
 
 - Server: Ubuntu 24.04 LTS (192.168.2.109, user: bosscatdog)
-- OpenClaw: v2026.3.13
+- OpenClaw: v2026.3.28+
 
 ## 3 Services บน Server
 
@@ -121,13 +121,18 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
   - ปุ่ม **Set as Default** → เปิด Dialog (validate ห้ามชื่อซ้ำ/ห้าม `default`) + **restart gateway**
   - ปุ่ม **Delete Bot** → เปิด Dialog (ซ่อนสำหรับ default), ลบ config โดยตรง (ไม่ใช้ CLI)
 
-### 7. Telegram Chats History (`/chats`)
-- ชื่อเมนู "Telegram History" — แสดงประวัติแชท Telegram เท่านั้น
-- เลือก agent (ปุ่ม top)
-- Analytics: users, messages, tokens, sessions
-- Sidebar Users แยกตาม sender_id
-- Chat threaded ตาม turn ของ user
-- **โหลดแค่ 20 sessions ล่าสุด** เพื่อประสิทธิภาพ (sort by updatedAt)
+### 7. LINE Official Account (`/line`)
+
+- **How it works card** — อธิบายขั้นตอน cloudflared + LINE Console
+- **เพิ่ม OA** — ระบุ OA ID, Channel Access Token, Channel Secret, **webhookPath** (เช่น `/line/webhook/sale`)
+- **OA cards** แต่ละ account (grid 2 คอลัมน์):
+  - ชื่อ bot จาก LINE API (`getProfile`)
+  - Dropdown ผูก Agent
+  - แสดง Webhook URL: `<tunnel-url>/line/webhook/<id>` สำหรับตั้งใน LINE Console
+  - DM Policy: **open** (ตอบทุกคน) / **allowlist**
+  - ปุ่ม Delete + QR pairing approve
+- **หมายเหตุ**: ต้องมี cloudflared สำหรับ HTTPS public URL ก่อนตั้ง webhook
+- **webhookPath ต้องไม่ซ้ำกัน** — ถ้าซ้ำ account ที่ start ทีหลังจะ override handler ทำให้ account แรกได้ 401
 
 ### 8. Logs (`/logs`)
 - Live polling ทุก 3 วินาที
@@ -216,8 +221,6 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 | GET | `/api/models` | ดึง model list จาก OpenRouter |
 | POST | `/api/gateway/restart` | รัน `openclaw gateway restart` |
 | GET | `/api/gateway/logs` | อ่าน JSONL log จาก `/tmp/openclaw/` |
-| GET | `/api/agents/:id/sessions` | รายการ sessions ของ agent |
-| GET | `/api/agents/:id/sessions/:sessionId` | messages ใน session |
 | GET | `/api/telegram/botinfo` | ชื่อ bot จริงจาก Telegram API |
 | GET | `/api/telegram/bindings` | route bindings (bot → agent) |
 | PUT | `/api/telegram/bindings` | set route binding |
@@ -225,6 +228,14 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 | DELETE | `/api/telegram/accounts/:id` | ลบ bot account |
 | POST | `/api/telegram/set-default` | สลับ bot ขึ้นเป็น default |
 | POST | `/api/telegram/approve` | approve pairing code (ยังมีใน server แต่ไม่มีใน UI แล้ว) |
+| GET | `/api/line` | อ่าน LINE config (channels.line) |
+| GET | `/api/line/botinfo` | ชื่อ bot จาก LINE API ต่อ account |
+| GET | `/api/line/bindings` | route bindings (OA → agent) |
+| PUT | `/api/line/bindings` | set route binding |
+| POST | `/api/line/accounts` | เพิ่ม LINE OA (accountId, channelAccessToken, channelSecret, webhookPath) |
+| DELETE | `/api/line/accounts/:id` | ลบ LINE OA |
+| GET | `/api/line/pending` | รายการรอ pairing (QR scan) |
+| POST | `/api/line/approve` | approve pairing code (LINE) |
 | GET | `/api/doctor/status` | เช็ค config valid/invalid + ดึง problems |
 | POST | `/api/doctor/fix` | รัน `openclaw doctor --fix` |
 | GET | `/api/members` | รายการ admin_users (ต้องการ DATABASE_URL) |
@@ -244,7 +255,7 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 
 ---
 
-## Config Structure ปัจจุบัน (OpenClaw v2026.3.13)
+## Config Structure ปัจจุบัน (OpenClaw v2026.3.28+)
 
 ```json
 {
@@ -281,6 +292,24 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
           "botToken": "...",
           "dmPolicy": "allowlist",
           "allowFrom": [123456789]
+        }
+      }
+    }
+  },
+  "channels": {
+    "telegram": { "..." : "..." },
+    "line": {
+      "enabled": true,
+      "dmPolicy": "open",
+      "channelAccessToken": "...",
+      "channelSecret": "...",
+      "webhookPath": "/line/webhook/sale",
+      "accounts": {
+        "stock": {
+          "channelAccessToken": "...",
+          "channelSecret": "...",
+          "webhookPath": "/line/webhook/stock",
+          "dmPolicy": "open"
         }
       }
     }
@@ -333,7 +362,12 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - **superadmin default**: `superadmin` / `superadmin` — seed ใน `db/init.sql` (bcrypt cost=12)
 - **Telegram saveMutation**: refetch config ก่อน save เพื่อไม่ overwrite binding ที่เพิ่งเซฟ — `dmPolicy=open` ต้องมี `allowFrom: ['*']` เสมอ
 - **role=chat**: login แล้ว redirect `/webchat` ทันที — proxy.ts กั้น route อื่นทั้งหมด — ไม่มี sidebar เมนู
-- **Sidebar เมนู (admin/superadmin)**: Dashboard, Model, Agents, Telegram, Webchat, Telegram History, **Monitor**, Analysis, Logs, **Compaction**, คู่มือ, สมาชิก
+- **LINE webhookPath ต้องไม่ซ้ำกัน**: `registerPluginHttpRoute` ใน openclaw-gateway ใช้ `replaceExisting:true` — ถ้า 2 OA ใช้ path เดียวกัน OA ที่ start ทีหลัง override handler → OA แรกได้ 401
+- **LINE session key**: `agent:<agentId>:line:direct:<lineUserId>` เช่น `agent:sale:line:direct:u6490df71c89c6db1b51c7084b46055ef`
+- **LINE dmPolicy**: ใช้ `open` เท่านั้น — ไม่ต้อง pairing
+- **cloudflared**: LINE webhook ต้องการ HTTPS public URL — ใช้ cloudflared expose port 18789 (openclaw-gateway) ดู INSTALL.md ขั้นตอน 11.9
+- **LINE Console**: Webhook URL per OA เช่น `https://<tunnel>.trycloudflare.com/line/webhook/sale` — ต้อง verify + enable ใน LINE Console
+- **Sidebar เมนู (admin/superadmin)**: Dashboard, Model, Agents, Telegram, **LINE**, Webchat, **Monitor**, Analysis, Logs, **Compaction**, คู่มือ, สมาชิก
 - **Webchat Hooks**: ต้องเปิด `hooks.enabled=true` + `hooks.token` + `hooks.allowRequestSessionKey=true` ใน `~/.openclaw/openclaw.json` — token เก็บใน `~/openclaw-api/.env` เป็น `HOOKS_TOKEN`
 - **Webchat poll**: HTTP `/sessions/{key}/history` ต้องการ auth แบบอื่น — ใช้วิธีอ่าน `~/.openclaw/agents/{agentId}/sessions/sessions.json` + `.jsonl` โดยตรงแทน
 - **Webchat session key**: gateway สร้าง key เป็น `agent:{agentId}:hook:webchat:{username}` — ต้อง lookup จาก `sessions.json` ด้วย full key

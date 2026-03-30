@@ -467,6 +467,86 @@ openclaw gateway restart
 
 ---
 
+## ขั้นตอนที่ 11.9 — ตั้งค่า LINE OA (ถ้าใช้ LINE Messaging API)
+
+LINE Messaging API ต้องการ **HTTPS webhook URL** — ไม่รับ HTTP หรือ IP ตรงๆ
+ต้องการ OpenClaw v2026.3.28+ และ cloudflared เพื่อ expose port 18789 (gateway) ออกเป็น HTTPS
+
+### ติดตั้ง cloudflared
+
+**วิธีที่ 1 — curl (ใช้ได้ทุก distro):**
+
+```bash
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+chmod +x /usr/local/bin/cloudflared
+```
+
+**วิธีที่ 2 — apt (Debian/Ubuntu):**
+
+```bash
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-archive-keyring.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-archive-keyring.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt update && sudo apt install cloudflared
+```
+
+### รัน Quick Tunnel (ไม่ต้องมี account)
+
+รันทดสอบก่อนเพื่อดู URL ที่ได้:
+
+```bash
+cloudflared tunnel --url http://localhost:18789 --no-autoupdate
+```
+
+URL จะขึ้นมาในรูปแบบ `https://xxxx-xxxx.trycloudflare.com`
+
+### รันเป็น background process (สำหรับ production)
+
+```bash
+nohup cloudflared tunnel --url http://localhost:18789 --no-autoupdate > /tmp/cloudflared.log 2>&1 &
+```
+
+ดู URL ที่ได้:
+
+```bash
+grep trycloudflare /tmp/cloudflared.log
+```
+
+> **หมายเหตุ**: URL จาก trycloudflare.com เปลี่ยนทุกครั้งที่ restart cloudflared
+> ถ้า URL เปลี่ยน ต้องไปอัปเดต Webhook URL ใน LINE Developers Console ทุก OA ด้วย
+> ถ้าต้องการ URL ถาวร ใช้ Named Tunnel (ต้องการ Cloudflare account + domain) — ดู [Cloudflare Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/)
+
+### เพิ่ม LINE OA ผ่าน Web Admin
+
+1. ไปที่เมนู **LINE OA** (`/line`)
+2. กด **เพิ่ม OA ใหม่**
+3. กรอก Account ID (เช่น `sale`, `stock`)
+4. กรอก Webhook Path (เช่น `/line/webhook/sale`) — **แต่ละ OA ต้องต่างกัน**
+5. กรอก Channel Access Token และ Channel Secret จาก LINE Developers Console
+6. กด **Add**
+
+### ตั้ง Webhook URL ใน LINE Developers Console
+
+แต่ละ OA ต้องมี webhook URL ต่างกัน:
+
+```
+https://<tunnel-url>/line/webhook/<accountId>
+```
+
+ตัวอย่าง:
+- `https://abc-def-ghi.trycloudflare.com/line/webhook/sale`
+- `https://abc-def-ghi.trycloudflare.com/line/webhook/stock`
+
+ขั้นตอน:
+1. เปิด [LINE Developers Console](https://developers.line.biz/console/)
+2. เลือก Channel ของ OA
+3. ไปที่ Messaging API → Webhook settings
+4. ใส่ Webhook URL → กด **Verify** → ต้องได้ Success
+5. เปิด **Use webhook**
+
+> **สำคัญ**: แต่ละ OA ต้องมี `webhookPath` ต่างกัน — ถ้าซ้ำกัน gateway จะ overwrite handler → OA ที่ start ทีหลังจะได้ 401 Unauthorized
+
+---
+
 ## ขั้นตอนที่ 12 — ทดสอบ Bot
 
 1. เปิด Telegram

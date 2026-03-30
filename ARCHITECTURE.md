@@ -199,17 +199,28 @@ Save DM Policy / Bot Token:
 
 ---
 
-### 7. Chat Monitor
+### 7. LINE Official Account
 
 ```
-GET /api/agents/:id/sessions
-  → อ่าน log files ใน ~/.openclaw/workspace-{id}/ หรือ /tmp/openclaw/
-  → group by sender_id → return ChatSession[]
+LINE Console → HTTPS webhook → cloudflared tunnel (port 18789) → openclaw-gateway
 
-GET /api/agents/:id/sessions/:sessionId
-  → อ่าน session cMessages → return ChatMessage[]
+แต่ละ OA ต้องมี webhookPath ไม่ซ้ำกัน เช่น:
+  /line/webhook/sale   ← OA sale (default)
+  /line/webhook/stock  ← OA stock (named account)
 
-UI: sidebar users → เลือก user → แสดง chat bubbles threaded by turn
+Root cause ถ้า path ซ้ำ:
+  registerPluginHttpRoute (replaceExisting:true) → OA ที่ start ทีหลัง override handler → OA แรก 401
+
+GET /api/line → อ่าน channels.line จาก openclaw.json
+GET /api/line/botinfo → เรียก LINE API getProfile ต่อ account → return { accountId: { displayName, pictureUrl, basicId } }
+GET /api/line/bindings → กรอง bindings[] type:"route" channel:"line" → [{ accountId, agentId }]
+POST /api/line/accounts { accountId, channelAccessToken, channelSecret, webhookPath }
+  → เพิ่ม accounts[accountId] = { channelAccessToken, channelSecret, webhookPath, dmPolicy:"open" }
+  → PUT /api/config
+DELETE /api/line/accounts/:id → ลบ accounts[id] + bindings ออกจาก config
+
+LINE session key: agent:<agentId>:line:direct:<lineUserId>
+cloudflared: expose port 18789 เป็น HTTPS public URL (ดู INSTALL.md ขั้นตอน 11.9)
 ```
 
 ---
@@ -251,6 +262,10 @@ GET /api/monitor/events
   → กรอง: deleted webchat rooms (query webchat_rooms table), stale sessions (>3 วัน)
   → แปลง ts: new Date(timestamp).toISOString().slice(11,19) = UTC HH:MM:SS
   → stripGatewayMetadata() ตัด Telegram metadata + Webchat SECURITY NOTICE headers
+  → parse channel จาก session key:
+      contains ':telegram:' → channel='telegram'
+      contains ':hook:'     → channel='webchat'
+      contains ':line:'     → channel='line'
   → return MonitorData { agents[], stats, globalEvents[] }
 
 UI: poll ทุก 3 วินาที
@@ -271,9 +286,10 @@ GET /api/webchat/rooms → รายการห้อง + policy + agent info
 GET /api/gateway/logs → นับ ERROR/WARN/INFO/DEBUG + แสดง error ล่าสุด
 
 UI sections:
-  Overview     → 4 cards: Agents, Telegram Users, Members, Webchat Rooms
+  Overview     → 5 cards: Agents, Telegram Users, Members, Webchat Rooms, LINE OA
   Agents       → ต่อ agent: sessions, tokens, top users
   Webchat      → ต่อห้อง: policy, agent, สมาชิก
+  LINE OA      → ต่อ account: displayName, basicId, pictureUrl
   Members      → จัดกลุ่มตาม role (superadmin/admin/chat) + active status
   System Logs  → นับตาม level + ตาราง error ล่าสุด
 ```
@@ -298,7 +314,7 @@ openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 │       │       ├── page.tsx          ← Agent Detail (2-column: SOUL ซ้าย, Users+MCP ขวา)
 │       │       └── chat/page.tsx     ← Chat Monitor
 │       ├── telegram/page.tsx         ← Telegram Bot management
-│       ├── chats/page.tsx            ← Telegram Chats History (เลือก agent)
+│       ├── line/page.tsx             ← LINE OA management (multi-OA, webhookPath, QR pairing)
 │       ├── logs/page.tsx             ← Live logs
 │       ├── mcp/page.tsx              ← MCP (standalone)
 │       ├── guide/page.tsx            ← คู่มือผู้ใช้

@@ -18,12 +18,6 @@ function tsToThai(ts: string): string {
   return `${String(h).padStart(2, '0')}:${m}:${s}`
 }
 
-function relativeTime(iso: string): string {
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (diff < 60) return `${diff}s`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  return `${Math.floor(diff / 3600)}h`
-}
 
 function tsToSec(ts: string): number {
   const p = ts.split(':')
@@ -83,6 +77,28 @@ function stateInfo(state: string): { icon: string; label: string; cls: string; d
     case 'error':     return { icon: '❌', label: 'Error',      cls: 'text-red-400',    dot: 'bg-red-400' }
     default:          return { icon: '💤', label: 'รอ',         cls: 'text-zinc-500',   dot: 'bg-zinc-600' }
   }
+}
+
+function ChannelIcon({ channel }: { channel: 'webchat' | 'telegram' | 'line' }) {
+  if (channel === 'telegram') {
+    return (
+      <svg className="inline-block w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#29B2E8" aria-label="Telegram">
+        <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+      </svg>
+    )
+  }
+  if (channel === 'line') {
+    return (
+      <svg className="inline-block w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#06C755" aria-label="LINE">
+        <path d="M19.365 9.863c.349 0 .63.285.63.63 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.627.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.627-.63.349 0 .631.285.631.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.281.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.070 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/>
+      </svg>
+    )
+  }
+  return (
+    <svg className="inline-block w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#a1a1aa" aria-label="Webchat">
+      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+    </svg>
+  )
 }
 
 function durationColor(sec: number): string {
@@ -169,8 +185,8 @@ function buildGroups(data: MonitorData): SessionGroup[] {
   })
 }
 
-// ─── Overview Card ─────────────────────────────────────────────────────────────
-function OverviewCard({
+// ─── Session Row (compact sidebar item) ─────────────────────────────────────
+function SessionRow({
   group,
   isSelected,
   onClick,
@@ -182,56 +198,23 @@ function OverviewCard({
   const st = stateInfo(group.state)
   const ac = agentColor(group.agentId)
   const isActive = group.state === 'thinking' || group.state === 'tool_call'
-  const userShort = group.user.replace('direct:', '').slice(0, 10)
-  const lastMsg = group.events.filter(e => e.type === 'message').at(-1)
+  const userShort = group.user.replace('direct:', '').slice(0, 13)
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`
-        shrink-0 w-52 text-left rounded-lg border p-3 transition-all duration-200
-        hover:brightness-110 cursor-pointer
-        ${isSelected ? `${ac.border} ${ac.bg}` : 'border-zinc-800 bg-zinc-900'}
+      className={`w-full text-left px-2.5 py-1.5 flex items-center gap-2 rounded-md transition-colors border
+        ${isSelected ? `${ac.bg} ${ac.border}` : 'border-transparent hover:bg-slate-800/50'}
       `}
     >
-      {/* Top: agent name + state dot */}
-      <div className="flex items-center justify-between mb-1.5">
-        <span className={`text-sm font-semibold ${ac.text}`}>{group.agentId}</span>
-        <span className="flex items-center gap-1">
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${st.dot} ${isActive ? 'anim-pulse' : ''}`}
-          />
-          <span className={`text-xs ${st.cls}`}>{st.icon}</span>
-        </span>
-      </div>
-
-      {/* Channel + user */}
-      <div className="text-xs text-zinc-500 mb-1.5 truncate">
-        {group.channel === 'telegram' ? '✈️' : group.channel === 'line' ? '💚' : '🌐'} {userShort}
-      </div>
-
-      {/* State label + elapsed */}
-      <div className={`text-xs font-medium ${st.cls}`}>
-        {st.label}
-        {(group.state === 'thinking' || group.state === 'tool_call') && group.elapsed > 0 && (
-          <span className="text-zinc-500 ml-1">{group.elapsed}s</span>
-        )}
-      </div>
-
-      {/* Last user message preview */}
-      {lastMsg && (
-        <div className="text-xs text-zinc-600 mt-1 truncate">
-          {lastMsg.text.slice(0, 40)}
-        </div>
-      )}
-
-      {/* Time ago */}
-      {group.lastMessageAt && (
-        <div className="text-xs text-zinc-700 mt-1">
-          {relativeTime(group.lastMessageAt)} ago
-        </div>
-      )}
+      <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${st.dot} ${isActive ? 'anim-pulse' : ''}`} />
+      <ChannelIcon channel={group.channel} />
+      <span className={`shrink-0 text-xs font-semibold ${ac.text} w-20 truncate`}>{group.agentId}</span>
+      <span className="flex-1 text-xs text-slate-500 truncate min-w-0">{userShort}</span>
+      <span className={`shrink-0 text-xs ${st.cls} whitespace-nowrap`}>
+        {st.label}{isActive && group.elapsed > 0 ? ` ${group.elapsed}s` : ''}
+      </span>
     </button>
   )
 }
@@ -498,50 +481,67 @@ export default function MonitorPage() {
         </div>
       </div>
 
-      {/* ── Overview bar ── */}
-      <div className="shrink-0">
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {/* Global stream card */}
-          <button
-            type="button"
-            onClick={() => setSelectedKey(null)}
-            className={`shrink-0 w-36 text-left rounded-lg border p-3 transition-all duration-200 hover:brightness-110 ${
-              effectiveKey === null
-                ? 'border-zinc-500 bg-zinc-800'
-                : 'border-zinc-800 bg-zinc-900'
-            }`}
-          >
-            <div className="text-sm font-semibold text-zinc-300 mb-1">📡 ทั้งหมด</div>
-            <div className="text-xs text-zinc-500">{groups.length} sessions</div>
-            <div className="text-xs text-zinc-600 mt-1">
-              {groups.reduce((n, g) => n + g.events.length, 0)} events
-            </div>
-          </button>
+      {/* ── Main content: sidebar + detail ── */}
+      <div className="flex gap-3 flex-1 min-h-0">
 
-          {/* Session cards */}
-          {groups.map(g => (
-            <OverviewCard
-              key={g.sessionKey}
-              group={g}
-              isSelected={effectiveKey === g.sessionKey}
-              onClick={() => setSelectedKey(prev => prev === g.sessionKey ? null : g.sessionKey)}
-            />
-          ))}
+        {/* Session sidebar */}
+        <div className="w-64 shrink-0 flex flex-col rounded-xl border border-slate-700/60 bg-slate-900/50 overflow-hidden">
+
+          {/* Sidebar header */}
+          <div className="px-3 py-2.5 border-b border-slate-700/50 shrink-0 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-300 tracking-wide">Sessions</span>
+            <span className="text-xs text-slate-500 tabular-nums">{groups.length}</span>
+          </div>
+
+          {/* Global all button */}
+          <div className="px-2 pt-2 pb-1.5 shrink-0 border-b border-slate-800/60">
+            <button
+              type="button"
+              onClick={() => setSelectedKey(null)}
+              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors border text-xs
+                ${effectiveKey === null
+                  ? 'bg-slate-700/50 border-slate-600 text-slate-200'
+                  : 'border-transparent text-slate-400 hover:bg-slate-800/60'}
+              `}
+            >
+              <span>📡</span>
+              <span className="font-medium">ทั้งหมด</span>
+              <span className="ml-auto text-slate-500 tabular-nums">
+                {groups.reduce((n, g) => n + g.events.length, 0)}
+              </span>
+            </button>
+          </div>
+
+          {/* Session list */}
+          <div className="flex-1 overflow-y-auto min-h-0 px-2 py-1.5 space-y-0.5">
+            {groups.length === 0 ? (
+              <p className="text-xs text-slate-600 text-center py-10">ไม่มี session</p>
+            ) : (
+              groups.map(g => (
+                <SessionRow
+                  key={g.sessionKey}
+                  group={g}
+                  isSelected={effectiveKey === g.sessionKey}
+                  onClick={() => setSelectedKey(prev => prev === g.sessionKey ? null : g.sessionKey)}
+                />
+              ))
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* ── Detail panel ── */}
-      <DetailPanel
-        groups={groups}
-        selectedKey={effectiveKey}
-        search={search}
-        setSearch={setSearch}
-        stateFilter={stateFilter}
-        setStateFilter={setStateFilter}
-        autoScroll={autoScroll}
-        setAutoScroll={setAutoScroll}
-        bottomRef={bottomRef}
-      />
+        {/* Detail panel */}
+        <DetailPanel
+          groups={groups}
+          selectedKey={effectiveKey}
+          search={search}
+          setSearch={setSearch}
+          stateFilter={stateFilter}
+          setStateFilter={setStateFilter}
+          autoScroll={autoScroll}
+          setAutoScroll={setAutoScroll}
+          bottomRef={bottomRef}
+        />
+      </div>
 
       <style>{`
         @keyframes livePulse {

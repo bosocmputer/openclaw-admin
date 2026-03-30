@@ -73,9 +73,9 @@ Browser → GET /api/proxy/api/status
 | Agent Detail | `/agents/[id]` | แก้ SOUL.md, จัดการ Telegram Users (whitelist), ตั้งค่า MCP (URL + Access Mode + Test) |
 | Agent Chat | `/agents/[id]/chat` | ดู chat history ของ agent นั้นๆ |
 | Telegram | `/telegram` | เพิ่ม/ลบ Bot (พร้อม token format validation) |
+| LINE OA | `/line` | จัดการ LINE Official Account — multi-OA, webhookPath ต่อ OA, QR pairing, agent binding |
 | Webchat | `/webchat` | ใช้งาน webchat ในหน้าเดียว (role: chat ใช้ได้) |
-| Chats | `/chats` | ดู Telegram chat history ทุก session + ข้อความ |
-| Monitor | `/monitor` | Live session event log (auto-refresh) |
+| Monitor | `/monitor` | Live session event log (auto-refresh) — รองรับ Telegram, LINE, Webchat |
 | Compaction | `/compaction` | ตั้งค่า memory compaction (รองรับ fields ใหม่ v2026.3.28) |
 | Analysis | `/analysis` | วิเคราะห์ token usage + สถิติรายงาน per agent |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
@@ -97,8 +97,8 @@ openclaw-admin/
 │   │   │       ├── page.tsx
 │   │   │       └── chat/page.tsx
 │   │   ├── telegram/page.tsx
+│   │   ├── line/page.tsx
 │   │   ├── webchat/page.tsx
-│   │   ├── chats/page.tsx
 │   │   ├── monitor/page.tsx
 │   │   ├── compaction/page.tsx
 │   │   ├── analysis/page.tsx
@@ -140,6 +140,7 @@ openclaw-admin/
 - Docker + Docker Compose
 - **openclaw-api รันด้วย pm2 บน host อยู่แล้ว** (port 4000)
 - **OpenClaw Gateway v2026.3.28+**
+- **cloudflared** — สำหรับ LINE webhook (LINE ต้องการ HTTPS): ดู INSTALL.md ขั้นตอน 11.9
 
 ### 1. ติดตั้ง Docker (ครั้งแรกเท่านั้น)
 
