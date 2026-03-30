@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAgents, getAgentMcp, putAgentMcp, type McpConfig } from '@/lib/api'
+import { getAgents, getAgentMcp, putAgentMcp, testAgentMcp, type McpConfig } from '@/lib/api'
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ function McpAgentForm({ agentId }: { agentId: string }) {
   const [url, setUrl] = useState('')
   const [accessMode, setAccessMode] = useState('open')
   const [testResult, setTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const [testTools, setTestTools] = useState<string[]>([])
   const [testing, setTesting] = useState(false)
 
   const { data: mcp } = useQuery({
@@ -28,7 +29,12 @@ function McpAgentForm({ agentId }: { agentId: string }) {
       const server = Object.values(mcp.mcpServers ?? {})[0]
       if (server) {
         setUrl(server.url ?? '')
-        setAccessMode(server.env?.MCP_ACCESS_MODE ?? 'open')
+        // รองรับทั้ง headers (ใหม่) และ env (เก่า)
+        setAccessMode(
+          server.headers?.['mcp-access-mode'] ??
+          server.env?.MCP_ACCESS_MODE ??
+          'open'
+        )
       }
     }
   }, [mcp])
@@ -42,7 +48,7 @@ function McpAgentForm({ agentId }: { agentId: string }) {
             type: 'http',
             url,
             allowHttp: url.startsWith('http://'),
-            env: { MCP_ACCESS_MODE: accessMode },
+            headers: { 'mcp-access-mode': accessMode },
           },
         },
       }
@@ -56,13 +62,38 @@ function McpAgentForm({ agentId }: { agentId: string }) {
   })
 
   async function testConnection() {
+    if (!url) return
     setTesting(true)
     setTestResult('idle')
+    setTestTools([])
+
+    // บันทึก config ก่อนทดสอบ (server-side test ต้องการ mcporter.json)
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
-      setTestResult(res.status < 500 ? 'ok' : 'fail')
+      const serverName = Object.keys(mcp?.mcpServers ?? {})[0] ?? 'mcp'
+      await putAgentMcp(agentId, {
+        mcpServers: {
+          [serverName]: {
+            type: 'http',
+            url,
+            allowHttp: url.startsWith('http://'),
+            headers: { 'mcp-access-mode': accessMode },
+          },
+        },
+      })
+      qc.invalidateQueries({ queryKey: ['mcp', agentId] })
     } catch {
+      // ถ้า save ไม่ได้ก็ลองทดสอบด้วย config ปัจจุบันก่อน
+    }
+
+    try {
+      const result = await testAgentMcp(agentId, accessMode)
+      setTestResult('ok')
+      setTestTools(result.tools?.map(t => t.name) ?? [])
+      toast.success(`MCP OK — ${result.tools?.length ?? 0} tools (mode: ${result.accessMode})`)
+    } catch (e: unknown) {
       setTestResult('fail')
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Connection failed'
+      toast.error(`MCP Error: ${msg}`)
     } finally {
       setTesting(false)
     }
@@ -87,6 +118,9 @@ function McpAgentForm({ agentId }: { agentId: string }) {
               </Badge>
             )}
           </div>
+          {testResult === 'ok' && testTools.length > 0 && (
+            <p className="text-xs text-zinc-500 mt-1">Tools: {testTools.join(', ')}</p>
+          )}
         </div>
 
         <div className="space-y-1">
