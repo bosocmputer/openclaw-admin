@@ -226,7 +226,7 @@ export default function LinePage() {
                   <div className="flex gap-2 items-center">
                     <Select
                       value={binding?.agentId || '__none__'}
-                      onValueChange={v => bindMutation.mutate(v === '__none__' ? '' : v)}
+                      onValueChange={v => bindMutation.mutate(v === '__none__' ? '' : (v ?? ''))}
                     >
                       <SelectTrigger className="w-44">
                         <SelectValue placeholder="ไม่ได้ผูก agent" />
