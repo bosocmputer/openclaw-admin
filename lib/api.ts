@@ -227,6 +227,55 @@ export async function approvePairing(code: string): Promise<void> {
   await api.post('/api/telegram/approve', { code })
 }
 
+export interface LineBotInfo {
+  displayName: string | null
+  pictureUrl: string | null
+  basicId: string | null
+}
+
+export interface LinePendingItem {
+  code: string
+  senderId: string
+  createdAt: number
+  expiresAt: number
+}
+
+export async function getLineConfig(): Promise<{ line: Record<string, unknown> | null }> {
+  const { data } = await api.get('/api/line')
+  return data
+}
+
+export async function getLineBotInfo(): Promise<LineBotInfo> {
+  const { data } = await api.get('/api/line/botinfo')
+  return data
+}
+
+export async function getLineBinding(): Promise<{ agentId: string | null }> {
+  const { data } = await api.get('/api/line/bindings')
+  return data
+}
+
+export async function setLineBinding(agentId: string): Promise<void> {
+  await api.put('/api/line/bindings', { agentId })
+}
+
+export async function addLineAccount(channelAccessToken: string, channelSecret: string): Promise<void> {
+  await api.post('/api/line/accounts', { channelAccessToken, channelSecret })
+}
+
+export async function deleteLineAccount(): Promise<void> {
+  await api.delete('/api/line/accounts')
+}
+
+export async function getLinePending(): Promise<LinePendingItem[]> {
+  const { data } = await api.get('/api/line/pending')
+  return data
+}
+
+export async function approveLinePairing(code: string): Promise<void> {
+  await api.post('/api/line/approve', { code })
+}
+
 export async function getDoctorStatus(): Promise<{ valid: boolean; problems: string[] }> {
   const { data } = await api.get('/api/doctor/status')
   return data

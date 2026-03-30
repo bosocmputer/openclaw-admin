@@ -37,6 +37,7 @@ const adminGroups: NavGroup[] = [
     items: [
       { href: '/agents', label: 'Agents' },
       { href: '/telegram', label: 'Telegram' },
+      { href: '/line', label: 'LINE OA' },
       { href: '/webchat', label: 'Webchat' },
     ],
   },

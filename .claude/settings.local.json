@@ -10,7 +10,20 @@
       "Read(//usr/**)",
       "Bash(git push:*)",
       "Bash(ls /Users/nontawatwongnuk/dev/openclaw-admin/PLAN* /Users/nontawatwongnuk/dev/openclaw-admin/ARCHITECTURE*)",
-      "Bash(ls /Users/nontawatwongnuk/dev/openclaw-api/PLAN* /Users/nontawatwongnuk/dev/openclaw-api/ARCHITECTURE*)"
+      "Bash(ls /Users/nontawatwongnuk/dev/openclaw-api/PLAN* /Users/nontawatwongnuk/dev/openclaw-api/ARCHITECTURE*)",
+      "Bash(ls -la /Users/nontawatwongnuk/dev/openclaw-admin/app/\\\\\\(admin\\\\\\)/)",
+      "Bash(sshpass -p 'boss123456' ssh -o StrictHostKeyChecking=no bosscatdog@192.168.2.109 'echo \"\"connected\"\" && whoami && ls ~/openclaw-admin/ 2>/dev/null || ls ~/ | head -20')",
+      "Bash(sshpass -p 'boss123456' ssh -o StrictHostKeyChecking=no bosscatdog@192.168.2.109 'cat ~/openclaw-admin/.env 2>/dev/null || cat ~/openclaw-admin/.env.local 2>/dev/null || echo \"\"no env file found\"\"')",
+      "Bash(sshpass -p 'boss123456' ssh -o StrictHostKeyChecking=no bosscatdog@192.168.2.109 'cd ~/openclaw-admin && docker compose ps')",
+      "Bash(sshpass -p 'boss123456' ssh -o StrictHostKeyChecking=no bosscatdog@192.168.2.109 'cd ~/openclaw-admin && git log --oneline -5')",
+      "Bash(sshpass -p:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://192.168.2.109:3000/login)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://192.168.2.109:3000/api/proxy/api/status)",
+      "Bash(grep -E \"^[a-z].*\\\\.ts$\")",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://excel-template-interest-plastics.trycloudflare.com/line/webhook)",
+      "Bash(curl -s -X POST https://excel-template-interest-plastics.trycloudflare.com/line/webhook -H \"Content-Type: application/json\" -H \"x-line-signature: test\" -d '{\"\"destination\"\":\"\"test\"\",\"\"events\"\":[]}' -w \"\\\\nHTTP: %{http_code}\")"
     ]
   }
 }

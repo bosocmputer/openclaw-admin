@@ -23,8 +23,8 @@
 │             PostgreSQL 16 (Docker port 5432)                        │
 │             volume: postgres_data — admin_users table               │
 └──────────────────────────────┬──────────────────────────────────────┘
-                               │ HTTP REST (Bearer token)
-                               │ NEXT_PUBLIC_API_URL = http://192.168.2.109:4000
+                               │ HTTP REST (Bearer token, ผ่าน /api/proxy — ซ่อน token จาก browser)
+                               │ API_URL = http://192.168.2.109:4000  (server-only env)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │             openclaw-api — Express.js (pm2 port 4000)               │
@@ -48,7 +48,7 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
                                                        ▼
                                               ┌─────────────────────┐
                                               │  SML MCP Connect    │
-                                              │  port 3248          │
+                                              │  port 3002 (default)│
                                               │  /call /tools       │
                                               └────────┬────────────┘
                                                        │
@@ -360,9 +360,11 @@ Local UI state → useState (dialog open/close, form inputs, tab)
 ## API Authentication
 
 ```
-Browser → Express API
-  Header: Authorization: Bearer sml-openclaw-2026
-  Config: NEXT_PUBLIC_API_TOKEN ใน .env.local
+Browser → Next.js /api/proxy/* (JWT session cookie)
+  ↓ (server-side เท่านั้น — token ไม่ถูกส่งไป browser)
+Next.js proxy → Express API
+  Header: Authorization: Bearer <API_TOKEN>
+  Config: API_TOKEN ใน .env (server-only, ไม่มี NEXT_PUBLIC_)
 
 Express → Telegram API
   ใช้ botToken จาก openclaw.json โดยตรง
