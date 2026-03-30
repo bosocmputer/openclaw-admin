@@ -2,12 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getMonitorEvents, type MonitorData, type MonitorAgent, type MonitorEvent } from '@/lib/api'
+import { getMonitorEvents, type MonitorData, type MonitorEvent } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 
 // ─── Time helpers ──────────────────────────────────────────────────────────────
-/** แปลง HH:MM:SS (UTC) → HH:MM:SS (Asia/Bangkok = UTC+7) */
 function tsToThai(ts: string): string {
   if (!ts) return ''
   const parts = ts.split(':')
@@ -21,13 +20,11 @@ function tsToThai(ts: string): string {
 
 function relativeTime(iso: string): string {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (diff < 60) return `${diff} วินาทีที่แล้ว`
-  if (diff < 3600) return `${Math.floor(diff / 60)} นาทีที่แล้ว`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} ชั่วโมงที่แล้ว`
-  return new Date(iso).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short' })
+  if (diff < 60) return `${diff}s`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`
+  return `${Math.floor(diff / 3600)}h`
 }
 
-/** แปลง HH:MM:SS → seconds (for duration calc) */
 function tsToSec(ts: string): number {
   const p = ts.split(':')
   if (p.length < 3) return 0
@@ -36,16 +33,16 @@ function tsToSec(ts: string): number {
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 interface FlatEvent {
-  ts: string           // UTC HH:MM:SS (raw จาก server)
-  tsThai: string       // แปลงเป็นไทยแล้ว
+  ts: string
+  tsThai: string
   type: string
   text: string
   agentId: string
   channel: 'webchat' | 'telegram'
   user: string
   sessionKey: string
-  isLive: boolean      // event ล่าสุดของ session ที่ state = thinking/tool_call
-  responseDuration?: number  // วินาทีจาก message → reply (เฉพาะ type='reply')
+  isLive: boolean
+  responseDuration?: number
 }
 
 interface SessionGroup {
@@ -55,19 +52,37 @@ interface SessionGroup {
   user: string
   state: string
   lastMessageAt: string | null
+  elapsed: number
   events: FlatEvent[]
 }
 
-// ─── Color helpers ─────────────────────────────────────────────────────────────
-const AGENT_COLORS = [
-  'text-blue-400', 'text-emerald-400', 'text-orange-400',
-  'text-pink-400', 'text-cyan-400', 'text-yellow-400',
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+const AGENT_COLORS: Record<string, { text: string; bg: string; border: string }> = {}
+const COLOR_POOL = [
+  { text: 'text-blue-400',    bg: 'bg-blue-950/40',    border: 'border-blue-700' },
+  { text: 'text-emerald-400', bg: 'bg-emerald-950/40', border: 'border-emerald-700' },
+  { text: 'text-orange-400',  bg: 'bg-orange-950/40',  border: 'border-orange-700' },
+  { text: 'text-pink-400',    bg: 'bg-pink-950/40',    border: 'border-pink-700' },
+  { text: 'text-cyan-400',    bg: 'bg-cyan-950/40',    border: 'border-cyan-700' },
+  { text: 'text-violet-400',  bg: 'bg-violet-950/40',  border: 'border-violet-700' },
 ]
+let colorIdx = 0
+function agentColor(id: string) {
+  if (!AGENT_COLORS[id]) {
+    AGENT_COLORS[id] = COLOR_POOL[colorIdx % COLOR_POOL.length]
+    colorIdx++
+  }
+  return AGENT_COLORS[id]
+}
 
-function buildAgentColorMap(agents: MonitorAgent[]): Record<string, string> {
-  const map: Record<string, string> = {}
-  agents.forEach((a, i) => { map[a.id] = AGENT_COLORS[i % AGENT_COLORS.length] })
-  return map
+function stateInfo(state: string): { icon: string; label: string; cls: string; dot: string } {
+  switch (state) {
+    case 'thinking':  return { icon: '🤔', label: 'กำลังคิด',   cls: 'text-yellow-400', dot: 'bg-yellow-400' }
+    case 'tool_call': return { icon: '🔍', label: 'ค้นข้อมูล', cls: 'text-purple-400', dot: 'bg-purple-400' }
+    case 'replied':   return { icon: '✅', label: 'ตอบแล้ว',   cls: 'text-green-400',  dot: 'bg-green-400' }
+    case 'error':     return { icon: '❌', label: 'Error',      cls: 'text-red-400',    dot: 'bg-red-400' }
+    default:          return { icon: '💤', label: 'รอ',         cls: 'text-zinc-500',   dot: 'bg-zinc-600' }
+  }
 }
 
 function durationColor(sec: number): string {
@@ -76,60 +91,48 @@ function durationColor(sec: number): string {
   return 'text-red-400'
 }
 
-function typeBadge(type: string): { label: string; cls: string } {
+function typeBadge(type: string) {
   switch (type) {
-    case 'message':  return { label: '📩 msg',   cls: 'text-zinc-400' }
-    case 'thinking': return { label: '💭 think', cls: 'text-yellow-500' }
-    case 'tool':     return { label: '🔧 tool',  cls: 'text-purple-400' }
-    case 'reply':    return { label: '✅ reply', cls: 'text-green-400' }
-    case 'error':    return { label: '❌ error', cls: 'text-red-400' }
-    default:         return { label: type,       cls: 'text-zinc-500' }
+    case 'message':  return { icon: '📩', cls: 'text-zinc-400' }
+    case 'thinking': return { icon: '💭', cls: 'text-yellow-500' }
+    case 'tool':     return { icon: '🔧', cls: 'text-purple-400' }
+    case 'reply':    return { icon: '✅', cls: 'text-green-400' }
+    case 'error':    return { icon: '❌', cls: 'text-red-400' }
+    default:         return { icon: '·',  cls: 'text-zinc-600' }
   }
 }
 
-function rowBg(type: string, isLive: boolean): string {
-  if (isLive) return 'row-live'
-  switch (type) {
-    case 'thinking': return 'bg-yellow-950/20'
-    case 'tool':     return 'bg-purple-950/20'
-    case 'error':    return 'bg-red-950/30'
-    default:         return ''
-  }
-}
-
-// ─── Data Transform ────────────────────────────────────────────────────────────
-function flattenToGroups(data: MonitorData): SessionGroup[] {
-  const groupMap = new Map<string, SessionGroup>()
+// ─── Data transform ────────────────────────────────────────────────────────────
+function buildGroups(data: MonitorData): SessionGroup[] {
+  const groups: SessionGroup[] = []
 
   for (const agent of data.agents) {
     const channels: Array<{ ch: 'webchat' | 'telegram'; sessions: NonNullable<typeof agent.channels.webchat> }> = [
-      { ch: 'webchat', sessions: agent.channels.webchat ?? [] },
+      { ch: 'webchat',  sessions: agent.channels.webchat  ?? [] },
       { ch: 'telegram', sessions: agent.channels.telegram ?? [] },
     ]
     for (const { ch, sessions } of channels) {
       for (const session of sessions) {
         const isActive = session.state === 'thinking' || session.state === 'tool_call'
-
-        // คำนวณ response duration — จับคู่ message → reply ล่าสุด
         let lastMsgTs: string | null = null
-        const eventsWithDuration: FlatEvent[] = []
-        const evList = session.events as MonitorEvent[]
+        const events: FlatEvent[] = []
 
+        const evList = session.events as MonitorEvent[]
         for (let i = 0; i < evList.length; i++) {
           const e = evList[i]
-          const isLastEvent = i === evList.length - 1
+          const isLast = i === evList.length - 1
           let responseDuration: number | undefined
 
           if (e.type === 'message') {
             lastMsgTs = e.ts
           } else if (e.type === 'reply' && lastMsgTs) {
             const diff = tsToSec(e.ts) - tsToSec(lastMsgTs)
-            const real = diff < 0 ? diff + 86400 : diff  // cross-midnight fix
+            const real = diff < 0 ? diff + 86400 : diff
             if (real >= 0 && real < 3600) responseDuration = real
             lastMsgTs = null
           }
 
-          eventsWithDuration.push({
+          events.push({
             ts: e.ts,
             tsThai: tsToThai(e.ts),
             type: e.type,
@@ -138,71 +141,266 @@ function flattenToGroups(data: MonitorData): SessionGroup[] {
             channel: ch,
             user: session.user,
             sessionKey: session.sessionKey,
-            isLive: isActive && isLastEvent,
+            isLive: isActive && isLast,
             responseDuration,
           })
         }
 
-        groupMap.set(session.sessionKey, {
+        groups.push({
           sessionKey: session.sessionKey,
           agentId: agent.id,
           channel: ch,
           user: session.user,
           state: session.state,
           lastMessageAt: session.lastMessageAt,
-          events: eventsWithDuration,
+          elapsed: session.elapsed ?? 0,
+          events,
         })
       }
     }
   }
 
-  // sort: active first, then by lastMessageAt desc
-  return Array.from(groupMap.values()).sort((a, b) => {
-    const order = (s: string) => (s === 'thinking' || s === 'tool_call' ? 0 : s === 'replied' ? 1 : s === 'error' ? 2 : 3)
-    const d = order(a.state) - order(b.state)
+  return groups.sort((a, b) => {
+    const o = (s: string) => (s === 'thinking' || s === 'tool_call' ? 0 : s === 'replied' ? 1 : s === 'error' ? 2 : 3)
+    const d = o(a.state) - o(b.state)
     if (d !== 0) return d
     return (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')
   })
 }
 
-// ─── Insight Pills ─────────────────────────────────────────────────────────────
-function InsightPills({ data }: { data: MonitorData }) {
-  const { stats } = data
-  const allGroups = flattenToGroups(data)
+// ─── Overview Card ─────────────────────────────────────────────────────────────
+function OverviewCard({
+  group,
+  isSelected,
+  onClick,
+}: {
+  group: SessionGroup
+  isSelected: boolean
+  onClick: () => void
+}) {
+  const st = stateInfo(group.state)
+  const ac = agentColor(group.agentId)
+  const isActive = group.state === 'thinking' || group.state === 'tool_call'
+  const userShort = group.user.replace('direct:', '').slice(0, 10)
+  const lastMsg = group.events.filter(e => e.type === 'message').at(-1)
 
-  // longest reply duration
-  let longest = 0
-  let longestLabel = ''
-  for (const g of allGroups) {
-    for (const e of g.events) {
-      if (e.type === 'reply' && e.responseDuration && e.responseDuration > longest) {
-        longest = e.responseDuration
-        longestLabel = `${g.agentId} · ${g.user.slice(-8)}`
-      }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`
+        shrink-0 w-52 text-left rounded-lg border p-3 transition-all duration-200
+        hover:brightness-110 cursor-pointer
+        ${isSelected ? `${ac.border} ${ac.bg}` : 'border-zinc-800 bg-zinc-900'}
+      `}
+    >
+      {/* Top: agent name + state dot */}
+      <div className="flex items-center justify-between mb-1.5">
+        <span className={`text-sm font-semibold ${ac.text}`}>{group.agentId}</span>
+        <span className="flex items-center gap-1">
+          <span
+            className={`inline-block w-2 h-2 rounded-full ${st.dot} ${isActive ? 'anim-pulse' : ''}`}
+          />
+          <span className={`text-xs ${st.cls}`}>{st.icon}</span>
+        </span>
+      </div>
+
+      {/* Channel + user */}
+      <div className="text-xs text-zinc-500 mb-1.5 truncate">
+        {group.channel === 'telegram' ? '✈️' : '🌐'} {userShort}
+      </div>
+
+      {/* State label + elapsed */}
+      <div className={`text-xs font-medium ${st.cls}`}>
+        {st.label}
+        {(group.state === 'thinking' || group.state === 'tool_call') && group.elapsed > 0 && (
+          <span className="text-zinc-500 ml-1">{group.elapsed}s</span>
+        )}
+      </div>
+
+      {/* Last user message preview */}
+      {lastMsg && (
+        <div className="text-xs text-zinc-600 mt-1 truncate">
+          {lastMsg.text.slice(0, 40)}
+        </div>
+      )}
+
+      {/* Time ago */}
+      {group.lastMessageAt && (
+        <div className="text-xs text-zinc-700 mt-1">
+          {relativeTime(group.lastMessageAt)} ago
+        </div>
+      )}
+    </button>
+  )
+}
+
+// ─── Detail Panel ──────────────────────────────────────────────────────────────
+function DetailPanel({
+  groups,
+  selectedKey,
+  search,
+  setSearch,
+  stateFilter,
+  setStateFilter,
+  autoScroll,
+  setAutoScroll,
+  bottomRef,
+}: {
+  groups: SessionGroup[]
+  selectedKey: string | null
+  search: string
+  setSearch: (v: string) => void
+  stateFilter: string
+  setStateFilter: (v: string) => void
+  autoScroll: boolean
+  setAutoScroll: (v: boolean) => void
+  bottomRef: React.RefObject<HTMLDivElement | null>
+}) {
+  // ถ้าเลือก session → แสดงเฉพาะ session นั้น
+  // ถ้าไม่เลือก → แสดง global stream (ทุก event รวมกัน เรียงตามเวลา)
+  const isGlobal = selectedKey === null
+
+  let events: FlatEvent[] = []
+  let panelTitle = 'Global stream — ทุก session'
+
+  if (isGlobal) {
+    // รวม events ทุก session เรียงตาม ts
+    events = groups.flatMap(g => g.events)
+    events.sort((a, b) => a.ts.localeCompare(b.ts))
+  } else {
+    const g = groups.find(g => g.sessionKey === selectedKey)
+    if (g) {
+      const ac = agentColor(g.agentId)
+      const st = stateInfo(g.state)
+      panelTitle = `${g.agentId} · ${g.channel} · ${g.user.replace('direct:', '')}  ${st.icon} ${st.label}`
+      events = g.events
+      void ac
     }
   }
 
-  const errorCount = allGroups.reduce((n, g) => n + g.events.filter(e => e.type === 'error').length, 0)
+  // filter
+  const q = search.toLowerCase()
+  const filtered = events.filter(e => {
+    if (stateFilter !== 'ALL') {
+      const typeMap: Record<string, string[]> = {
+        thinking: ['thinking'], tool: ['tool'], replied: ['reply'], error: ['error'], message: ['message'],
+      }
+      if (!(typeMap[stateFilter] ?? []).includes(e.type)) return false
+    }
+    if (q) return e.text.toLowerCase().includes(q) || e.agentId.includes(q) || e.user.includes(q)
+    return true
+  })
 
   return (
-    <div className="flex gap-2 flex-wrap text-xs">
-      <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400">
-        💬 {stats.todayMessages} events วันนี้
-      </span>
-      <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-yellow-500">
-        ⚡ {stats.activeNow} active now
-      </span>
-      <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400">
-        ⏱ avg {stats.avgResponseTime.toFixed(1)}s
-      </span>
-      <span className={`px-2.5 py-1 rounded-full bg-zinc-900 ${errorCount > 0 ? 'text-red-400' : 'text-zinc-500'}`}>
-        ❌ {errorCount} errors
-      </span>
-      {longest > 0 && (
-        <span className={`px-2.5 py-1 rounded-full bg-zinc-900 ${durationColor(longest)}`}>
-          🐢 longest {longest.toFixed(1)}s ({longestLabel})
+    <div className="flex flex-col gap-2 flex-1 min-h-0">
+      {/* Panel header */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-sm font-medium text-zinc-300 font-mono truncate flex-1">
+          {isGlobal ? (
+            <span className="text-zinc-500">📡 {panelTitle}</span>
+          ) : (
+            <span>{panelTitle}</span>
+          )}
         </span>
-      )}
+
+        {/* State filter pills */}
+        <div className="flex gap-1 flex-wrap">
+          {[
+            { id: 'ALL',      label: 'ทั้งหมด' },
+            { id: 'message',  label: '📩 msg' },
+            { id: 'thinking', label: '💭 think' },
+            { id: 'tool',     label: '🔧 tool' },
+            { id: 'replied',  label: '✅ reply' },
+            { id: 'error',    label: '❌ error' },
+          ].map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setStateFilter(s.id)}
+              className={`px-2 py-0.5 rounded text-xs border transition-colors ${
+                stateFilter === s.id
+                  ? 'bg-zinc-700 text-white border-zinc-600'
+                  : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <Input
+          placeholder="ค้นหา..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-36 h-7 text-xs"
+        />
+
+        <label className="flex items-center gap-1.5 text-xs text-zinc-500 cursor-pointer whitespace-nowrap">
+          <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
+          Auto scroll
+        </label>
+      </div>
+
+      {/* Log area */}
+      <div className="border rounded-xl bg-zinc-950 font-mono text-xs flex-1 overflow-y-auto min-h-0">
+        {filtered.length === 0 ? (
+          <p className="text-zinc-600 text-center py-12">ไม่มีข้อมูล</p>
+        ) : (
+          filtered.map((e, i) => {
+            const badge = typeBadge(e.type)
+            const ac = agentColor(e.agentId)
+            let rowCls = 'hover:bg-zinc-900'
+            if (e.isLive) rowCls = 'row-live'
+            else if (e.type === 'thinking') rowCls = 'bg-yellow-950/15 hover:bg-yellow-950/25'
+            else if (e.type === 'tool')     rowCls = 'bg-purple-950/15 hover:bg-purple-950/25'
+            else if (e.type === 'error')    rowCls = 'bg-red-950/20 hover:bg-red-950/30'
+
+            return (
+              <div key={i} className={`flex items-start gap-0 px-3 py-0.5 leading-5 transition-colors ${rowCls}`}>
+                {/* time */}
+                <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
+
+                {/* agent·ch — only in global mode */}
+                {isGlobal && (
+                  <span className={`shrink-0 w-24 ${ac.text} truncate`}>
+                    {e.agentId}·{e.channel === 'telegram' ? 'tg' : 'web'}
+                  </span>
+                )}
+
+                {/* user — only in global mode */}
+                {isGlobal && (
+                  <span className="shrink-0 w-24 text-zinc-600 truncate">
+                    {e.user.replace('direct:', '').slice(0, 12)}
+                  </span>
+                )}
+
+                {/* type icon */}
+                <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
+
+                {/* message */}
+                <span
+                  className="flex-1 text-zinc-300 truncate"
+                  title={e.text}
+                >
+                  {e.text}
+                  {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-500" />}
+                </span>
+
+                {/* duration */}
+                {e.type === 'reply' && e.responseDuration != null && (
+                  <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
+                    {e.responseDuration.toFixed(1)}s
+                  </span>
+                )}
+              </div>
+            )
+          })
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <p className="text-xs text-zinc-600">{filtered.length} events{filtered.length !== events.length ? ` (กรองจาก ${events.length})` : ''}</p>
     </div>
   )
 }
@@ -210,11 +408,9 @@ function InsightPills({ data }: { data: MonitorData }) {
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function MonitorPage() {
   const [paused, setPaused] = useState(false)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [agentFilter, setAgentFilter] = useState('ALL')
-  const [channelFilter, setChannelFilter] = useState('ALL')
   const [stateFilter, setStateFilter] = useState('ALL')
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [autoScroll, setAutoScroll] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -224,7 +420,6 @@ export default function MonitorPage() {
     refetchInterval: paused ? false : 3000,
   })
 
-  // auto scroll
   useEffect(() => {
     if (autoScroll && !paused) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -232,292 +427,135 @@ export default function MonitorPage() {
   }, [dataUpdatedAt, autoScroll, paused])
 
   const updatedStr = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH', {
+        timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      })
     : '--:--'
 
-  const agents = data?.agents ?? []
-  const agentColorMap = buildAgentColorMap(agents)
-  const agentIds = agents.map(a => a.id)
+  const groups = data ? buildGroups(data) : []
+  const stats = data?.stats
 
-  const groups = data ? flattenToGroups(data) : []
+  // ถ้า selectedKey หายไป (session expired) → reset to global
+  const selectedGroup = groups.find(g => g.sessionKey === selectedKey) ?? null
+  const effectiveKey = selectedGroup ? selectedKey : null
 
-  // filter groups
-  const filteredGroups = groups.map(g => {
-    // agent / channel / state filter at group level
-    if (agentFilter !== 'ALL' && g.agentId !== agentFilter) return null
-    if (channelFilter !== 'ALL' && g.channel !== channelFilter) return null
-    if (stateFilter !== 'ALL') {
-      const typeMap: Record<string, string[]> = {
-        thinking: ['thinking'],
-        tool: ['tool'],
-        replied: ['reply'],
-        error: ['error'],
+  // longest + errors สำหรับ insight
+  let longestDur = 0
+  let longestLabel = ''
+  let errorCount = 0
+  for (const g of groups) {
+    for (const e of g.events) {
+      if (e.type === 'error') errorCount++
+      if (e.type === 'reply' && e.responseDuration && e.responseDuration > longestDur) {
+        longestDur = e.responseDuration
+        longestLabel = `${g.agentId}·${g.user.replace('direct:', '').slice(-6)}`
       }
-      const allowed = typeMap[stateFilter] ?? []
-      const hasMatch = g.events.some(e => allowed.includes(e.type))
-      if (!hasMatch) return null
-    }
-
-    // search filter on events
-    const q = search.toLowerCase()
-    const filteredEvents = q
-      ? g.events.filter(e =>
-          e.agentId.toLowerCase().includes(q) ||
-          e.user.toLowerCase().includes(q) ||
-          e.text.toLowerCase().includes(q)
-        )
-      : g.events
-
-    if (filteredEvents.length === 0 && q) return null
-    return { ...g, events: filteredEvents }
-  }).filter(Boolean) as SessionGroup[]
-
-  const totalEvents = filteredGroups.reduce((n, g) => n + g.events.length, 0)
-  const totalAll = groups.reduce((n, g) => n + g.events.length, 0)
-
-  function toggleCollapse(key: string) {
-    setCollapsed(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
-  }
-
-  function stateLabel(state: string): string {
-    switch (state) {
-      case 'thinking': return '🤔 thinking'
-      case 'tool_call': return '🔍 tool call'
-      case 'replied': return '✅ replied'
-      case 'error': return '❌ error'
-      default: return '😴 idle'
-    }
-  }
-
-  function stateCls(state: string): string {
-    switch (state) {
-      case 'thinking': return 'text-yellow-500'
-      case 'tool_call': return 'text-purple-400'
-      case 'replied': return 'text-green-400'
-      case 'error': return 'text-red-400'
-      default: return 'text-zinc-500'
     }
   }
 
   return (
-    <div className="space-y-4 w-full">
+    <div className="flex flex-col gap-4 h-[calc(100vh-120px)] w-full">
 
-      {/* ── Title ── */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      {/* ── Title bar ── */}
+      <div className="flex items-center justify-between flex-wrap gap-2 shrink-0">
         <div>
           <h1 className="text-2xl font-bold">Monitor</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">ดู activity ของ AI แบบ real-time แยกห้อง แยก user</p>
+          <p className="text-sm text-zinc-500 mt-0.5">อัปเดต {updatedStr}</p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-zinc-400">
-          <span>อัปเดต {updatedStr}</span>
-          <div className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2 h-2 rounded-full"
-              style={{ background: paused ? '#52525b' : '#22c55e', animation: paused ? 'none' : 'livePulse 2s ease-in-out infinite' }}
+
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Insight pills */}
+          {stats && (
+            <div className="flex gap-1.5 flex-wrap text-xs">
+              <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400">🤖 {stats.totalAgents} agents</span>
+              <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-yellow-400">⚡ {stats.activeNow} active</span>
+              <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400">💬 {stats.todayMessages} วันนี้</span>
+              <span className="px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400">⏱ avg {stats.avgResponseTime.toFixed(1)}s</span>
+              {longestDur > 0 && (
+                <span className={`px-2.5 py-1 rounded-full bg-zinc-900 ${durationColor(longestDur)}`}>
+                  🐢 {longestDur.toFixed(1)}s ({longestLabel})
+                </span>
+              )}
+              {errorCount > 0 && (
+                <span className="px-2.5 py-1 rounded-full bg-red-950 text-red-400">❌ {errorCount} errors</span>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-xs" style={{ color: paused ? '#52525b' : '#22c55e' }}>
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ background: paused ? '#52525b' : '#22c55e', animation: paused ? 'none' : 'livePulse 2s ease-in-out infinite' }}
+              />
+              {paused ? 'Paused' : 'Live'}
+            </span>
+            <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
+              {paused ? 'Resume' : 'Pause'}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Overview bar ── */}
+      <div className="shrink-0">
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {/* Global stream card */}
+          <button
+            type="button"
+            onClick={() => setSelectedKey(null)}
+            className={`shrink-0 w-36 text-left rounded-lg border p-3 transition-all duration-200 hover:brightness-110 ${
+              effectiveKey === null
+                ? 'border-zinc-500 bg-zinc-800'
+                : 'border-zinc-800 bg-zinc-900'
+            }`}
+          >
+            <div className="text-sm font-semibold text-zinc-300 mb-1">📡 ทั้งหมด</div>
+            <div className="text-xs text-zinc-500">{groups.length} sessions</div>
+            <div className="text-xs text-zinc-600 mt-1">
+              {groups.reduce((n, g) => n + g.events.length, 0)} events
+            </div>
+          </button>
+
+          {/* Session cards */}
+          {groups.map(g => (
+            <OverviewCard
+              key={g.sessionKey}
+              group={g}
+              isSelected={effectiveKey === g.sessionKey}
+              onClick={() => setSelectedKey(prev => prev === g.sessionKey ? null : g.sessionKey)}
             />
-            <span style={{ color: paused ? '#52525b' : '#22c55e' }}>{paused ? 'Paused' : 'Live'}</span>
-          </div>
-          <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
-            {paused ? 'Resume' : 'Pause'}
-          </Button>
+          ))}
         </div>
       </div>
 
-      {/* ── Filters ── */}
-      <div className="space-y-2">
-        {/* Row 1 */}
-        <div className="flex gap-2 flex-wrap items-center">
-          <Input
-            placeholder="ค้นหา agent, user, ข้อความ..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="max-w-xs text-sm"
-          />
-
-          {/* Agent pills */}
-          <div className="flex gap-1 flex-wrap">
-            {['ALL', ...agentIds].map(id => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setAgentFilter(id)}
-                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
-                  agentFilter === id
-                    ? 'bg-zinc-900 text-white border-zinc-700'
-                    : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500'
-                }`}
-              >
-                {id === 'ALL' ? 'ทั้งหมด' : <span className={agentColorMap[id]}>{id}</span>}
-              </button>
-            ))}
-          </div>
-
-          {/* Channel pills */}
-          <div className="flex gap-1">
-            {(['ALL', 'telegram', 'webchat'] as const).map(ch => (
-              <button
-                key={ch}
-                type="button"
-                onClick={() => setChannelFilter(ch)}
-                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
-                  channelFilter === ch
-                    ? 'bg-zinc-900 text-white border-zinc-700'
-                    : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500'
-                }`}
-              >
-                {ch === 'ALL' ? 'ทุก channel' : ch === 'telegram' ? '✈️ telegram' : '🌐 webchat'}
-              </button>
-            ))}
-          </div>
-
-          {/* State pills */}
-          <div className="flex gap-1 flex-wrap">
-            {[
-              { id: 'ALL', label: 'ทุก state' },
-              { id: 'thinking', label: '🤔 thinking' },
-              { id: 'tool', label: '🔧 tool' },
-              { id: 'replied', label: '✅ replied' },
-              { id: 'error', label: '❌ error' },
-            ].map(s => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setStateFilter(s.id)}
-                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
-                  stateFilter === s.id
-                    ? 'bg-zinc-900 text-white border-zinc-700'
-                    : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Auto scroll */}
-          <label className="flex items-center gap-1.5 text-xs text-zinc-500 ml-auto cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoScroll}
-              onChange={e => setAutoScroll(e.target.checked)}
-              className="rounded"
-            />
-            Auto scroll
-          </label>
-        </div>
-
-        {/* Row 2 — insight pills */}
-        {data && <InsightPills data={data} />}
-      </div>
-
-      {/* ── Log Panel ── */}
-      <div className="border rounded-xl bg-zinc-950 text-xs font-mono h-[580px] overflow-y-auto">
-        {filteredGroups.length === 0 ? (
-          <p className="text-zinc-500 py-8 text-center">ไม่มีข้อมูลที่ตรงเงื่อนไข</p>
-        ) : (
-          filteredGroups.map((group, gi) => {
-            const isCollapsed = collapsed.has(group.sessionKey)
-            const agentCls = agentColorMap[group.agentId] ?? 'text-zinc-400'
-            const chLabel = group.channel === 'telegram' ? 'tg' : 'web'
-            const userShort = group.user.replace('direct:', '').slice(0, 14)
-            const eventCount = group.events.length
-
-            return (
-              <div key={group.sessionKey}>
-                {/* separator between groups */}
-                {gi > 0 && <div className="border-t border-zinc-800/50" />}
-
-                {/* ── Group Header ── */}
-                <button
-                  type="button"
-                  onClick={() => toggleCollapse(group.sessionKey)}
-                  className="w-full text-left flex items-center gap-2 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 transition-colors"
-                >
-                  <span className="text-zinc-500">{isCollapsed ? '▶' : '▼'}</span>
-                  <span className={`font-semibold ${agentCls}`}>{group.agentId}</span>
-                  <span className="text-zinc-600">·</span>
-                  <span className="text-zinc-500">{chLabel}</span>
-                  <span className="text-zinc-600">·</span>
-                  <span className="text-zinc-400">{userShort}</span>
-                  <span className={`ml-2 ${stateCls(group.state)}`}>{stateLabel(group.state)}</span>
-                  {group.lastMessageAt && (
-                    <span className="text-zinc-600 ml-1">{relativeTime(group.lastMessageAt)}</span>
-                  )}
-                  <span className="ml-auto text-zinc-600">{eventCount} events</span>
-                </button>
-
-                {/* ── Event Rows ── */}
-                {!isCollapsed && group.events.map((e, ei) => {
-                  const badge = typeBadge(e.type)
-                  const bg = rowBg(e.type, e.isLive)
-                  return (
-                    <div
-                      key={ei}
-                      className={`flex gap-0 items-start px-3 py-0.5 leading-5 hover:bg-zinc-900 transition-colors ${bg}`}
-                    >
-                      {/* time */}
-                      <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
-
-                      {/* agent·channel */}
-                      <span className={`shrink-0 w-24 ${agentCls}`}>
-                        {e.agentId}·{e.channel === 'telegram' ? 'tg' : 'web'}
-                      </span>
-
-                      {/* user */}
-                      <span className="shrink-0 w-28 text-zinc-500 truncate">
-                        {e.user.replace('direct:', '').slice(0, 14)}
-                      </span>
-
-                      {/* type badge */}
-                      <span className={`shrink-0 w-20 ${badge.cls}`}>
-                        {badge.label}{e.isLive ? <span className="thinking-dots" /> : ''}
-                      </span>
-
-                      {/* message */}
-                      <span
-                        className="flex-1 text-zinc-300 truncate"
-                        title={e.text}
-                      >
-                        {e.text}
-                      </span>
-
-                      {/* duration */}
-                      {e.type === 'reply' && e.responseDuration != null && (
-                        <span className={`shrink-0 w-14 text-right ${durationColor(e.responseDuration)}`}>
-                          {e.responseDuration.toFixed(1)}s
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* ── Footer ── */}
-      <p className="text-xs text-zinc-500">
-        แสดง {totalEvents} / {totalAll} events
-        {groups.length > 0 && ` · ${filteredGroups.length} / ${groups.length} sessions`}
-      </p>
+      {/* ── Detail panel ── */}
+      <DetailPanel
+        groups={groups}
+        selectedKey={effectiveKey}
+        search={search}
+        setSearch={setSearch}
+        stateFilter={stateFilter}
+        setStateFilter={setStateFilter}
+        autoScroll={autoScroll}
+        setAutoScroll={setAutoScroll}
+        bottomRef={bottomRef}
+      />
 
       <style>{`
         @keyframes livePulse {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0.3; }
         }
+        .anim-pulse {
+          animation: livePulse 1.5s ease-in-out infinite;
+        }
         .row-live {
           animation: rowGlow 2s ease-in-out infinite;
         }
         @keyframes rowGlow {
-          0%, 100% { background-color: rgba(234, 179, 8, 0.06); }
-          50%       { background-color: rgba(234, 179, 8, 0.14); }
+          0%, 100% { background-color: rgba(234,179,8,0.07); }
+          50%       { background-color: rgba(234,179,8,0.16); }
         }
         .thinking-dots::after {
           content: '';
