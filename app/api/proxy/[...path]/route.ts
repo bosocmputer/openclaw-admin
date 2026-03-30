@@ -12,7 +12,8 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
   }
 
   const { path } = await params
-  const upstream = `${API_URL}/api/${path.join('/')}${req.nextUrl.search}`
+  // path[0] is "api" (from /api/status → ["api","status"]) — pass through as-is
+  const upstream = `${API_URL}/${path.join('/')}${req.nextUrl.search}`
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${API_TOKEN}`,
