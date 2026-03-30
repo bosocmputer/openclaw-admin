@@ -12,6 +12,7 @@ Browser (port 3000)
     ▼
 openclaw-admin  ← Next.js 16 (Docker container)
     │ HTTP REST — Bearer token — port 4000
+    │ (ผ่าน /api/proxy — token ไม่หลุดไป browser)
     ▼
 openclaw-api    ← Express.js (pm2 บน host)
     │
@@ -23,11 +24,24 @@ openclaw-api    ← Express.js (pm2 บน host)
 openclaw-gateway ← systemd service (แยกต่างหาก)
 
 PostgreSQL 16  ← Docker container (port 5432)
-    └── admin_users, webchat_rooms, webchat_messages
+    └── admin_users, webchat_rooms, webchat_messages, audit_logs
 ```
 
 > **openclaw-api** รันบน host ด้วย pm2 (ไม่ใช่ Docker) เพราะต้องการ systemd สำหรับ `openclaw gateway restart`
 > ดูที่ repo แยก: [bosocmputer/openclaw-api](https://github.com/bosocmputer/openclaw-api)
+
+## Security Architecture
+
+API token **ไม่เคยส่งไป browser** — ทุก request จาก client ผ่าน Next.js server proxy:
+
+```text
+Browser → GET /api/proxy/api/status
+              ↓ (server-side, ใส่ Bearer token ที่นี่)
+          fetch http://openclaw-api:4000/api/status
+```
+
+- `API_TOKEN` และ `API_URL` เป็น server-only env var (ไม่มี `NEXT_PUBLIC_`)
+- Proxy route ตรวจ session ก่อนทุก request — ถ้าไม่มี session ตอบ 401 ทันที
 
 ## Stack
 
@@ -36,8 +50,9 @@ PostgreSQL 16  ← Docker container (port 5432)
 | Framework | Next.js 16.2 + TypeScript |
 | UI | shadcn/ui + Tailwind CSS v4 |
 | Data Fetching | TanStack Query v5 |
-| HTTP | axios |
-| Auth | JWT HttpOnly Cookie + PostgreSQL 16 |
+| HTTP | axios (baseURL: `/api/proxy`) |
+| Auth | JWT HttpOnly Cookie (8h) + bcrypt + rate limiting |
+| Audit | audit_logs table — บันทึก login/logout/failed |
 | Deploy | Docker Compose (2 containers) |
 
 ## Roles
@@ -92,6 +107,8 @@ openclaw-admin/
 │   │   └── members/
 │   │       ├── page.tsx            ← Server component (ส่ง currentUserId)
 │   │       └── members-content.tsx ← Client component
+│   ├── api/
+│   │   └── proxy/[...path]/route.ts ← Server-side API proxy (ซ่อน token)
 │   ├── actions/auth.ts             ← login / logout server actions
 │   └── login/page.tsx
 │
@@ -101,15 +118,16 @@ openclaw-admin/
 │   └── ui/                         ← shadcn/ui components
 │
 ├── lib/
-│   ├── api.ts                      ← axios + types + API functions
-│   ├── db.ts                       ← postgres client
-│   ├── session.ts                  ← JWT cookie helpers
+│   ├── api.ts                      ← axios client (baseURL: /api/proxy)
+│   ├── audit.ts                    ← Audit log helper
+│   ├── db.ts                       ← postgres client (pool: 20)
+│   ├── rate-limit.ts               ← Login rate limiter (in-memory)
+│   ├── session.ts                  ← JWT cookie (8h + sliding window)
 │   └── utils.ts
 │
-├── db/init.sql                     ← PostgreSQL schema
+├── db/init.sql                     ← PostgreSQL schema + indexes
 ├── Dockerfile
 ├── docker-compose.yml
-├── proxy.ts                        ← Next.js middleware (auth guard)
 └── next.config.ts
 ```
 
@@ -148,11 +166,14 @@ nano .env
 ค่าที่ต้องแก้ใน `.env`:
 
 ```env
-API_TOKEN=your-api-token           # ต้องตรงกับ openclaw-api
 SERVER_IP=192.168.2.109            # IP ของ server นี้
+API_TOKEN=your-api-token           # ต้องตรงกับ openclaw-api
+API_URL=http://192.168.2.109:4000  # URL ของ openclaw-api (server-to-server)
 POSTGRES_PASSWORD=your-db-password
-SESSION_SECRET=your-random-secret  # สุ่ม string ยาวๆ
+SESSION_SECRET=your-random-secret  # สร้างด้วย: openssl rand -base64 32
 ```
+
+> ⚠️ ไม่มี `NEXT_PUBLIC_API_TOKEN` อีกต่อไป — ใช้ `API_TOKEN` (server-only) แทน
 
 ### 4. รัน
 
@@ -162,8 +183,7 @@ docker compose up -d --build
 
 เข้าใช้งานได้ที่ `http://<SERVER_IP>:3000`
 
-> ระบบสร้าง PostgreSQL และตาราง `admin_users` ให้อัตโนมัติ
-> ต้องสร้าง superadmin user แรกผ่าน `docker exec` หรือ `psql` โดยตรง
+> ระบบสร้าง PostgreSQL และตาราง `admin_users` ให้อัตโนมัติตอน container แรกขึ้น
 
 ### อัปเดต (ครั้งถัดไป)
 
@@ -173,17 +193,38 @@ git pull
 docker compose up -d --build
 ```
 
+### Migration (ถ้า DB มีข้อมูลอยู่แล้ว)
+
+`init.sql` จะไม่รันซ้ำบน DB ที่มีข้อมูลอยู่แล้ว ถ้า schema มีการเปลี่ยนแปลงต้องรันเอง:
+
+```bash
+docker compose exec postgres psql -U openclaw -d openclaw_admin -f /docker-entrypoint-initdb.d/init.sql
+# หรือรัน SQL ตรงๆ เช่น เพิ่ม audit_logs:
+docker compose exec postgres psql -U openclaw -d openclaw_admin -c "
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGSERIAL PRIMARY KEY, actor VARCHAR(50) NOT NULL,
+  action VARCHAR(60) NOT NULL, target TEXT, detail TEXT,
+  ip VARCHAR(45), created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);"
+```
+
 ---
 
 ## Development (Local)
 
 ```bash
 cp .env.example .env.local
-# แก้ค่า NEXT_PUBLIC_API_URL, NEXT_PUBLIC_API_TOKEN, DATABASE_URL, SESSION_SECRET
+# แก้ค่าใน .env.local:
+#   API_URL=http://<server-ip>:4000
+#   API_TOKEN=your-api-token
+#   DATABASE_URL=postgresql://...
+#   SESSION_SECRET=...
 
 npm install
 npm run dev
 ```
+
+> ไม่ต้องตั้ง `NEXT_PUBLIC_*` อีกต่อไป — proxy route จัดการทั้งหมด
 
 ---
 
