@@ -44,7 +44,6 @@ const adminGroups: NavGroup[] = [
   {
     label: 'Conversations',
     items: [
-      { href: '/chats', label: 'Chat History' },
       { href: '/monitor', label: 'Live Sessions' },
     ],
   },

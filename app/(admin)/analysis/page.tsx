@@ -3,7 +3,8 @@
 import { useQuery, useQueries } from '@tanstack/react-query'
 import {
   getAgents, getMembers, getWebchatRooms, getGatewayLogs, getAgentSessions,
-  type Agent, type Member, type WebchatRoom, type LogEntry, type ChatSession,
+  getLineConfig, getLineBotInfo,
+  type Agent, type Member, type WebchatRoom, type LogEntry, type ChatSession, type LineBotInfo,
 } from '@/lib/api'
 import { useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -78,16 +79,17 @@ function AgentCard({ agent, sessions }: { agent: Agent, sessions: ChatSession[] 
   )
 }
 
-function OverviewSection({ agents, members, webchatRooms }: { agents: Agent[], members: Member[], webchatRooms: WebchatRoom[] }) {
+function OverviewSection({ agents, members, webchatRooms, lineAccountCount }: { agents: Agent[], members: Member[], webchatRooms: WebchatRoom[], lineAccountCount: number }) {
   const totalTelegramUsers = agents.reduce((s, a) => s + (a.users?.length ?? 0), 0)
   const stats = [
     { label: 'Total Agents', value: agents.length },
     { label: 'Telegram Users', value: totalTelegramUsers },
     { label: 'Members', value: members.length },
     { label: 'Webchat Rooms', value: webchatRooms.length },
+    { label: 'LINE OA', value: lineAccountCount },
   ]
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
       {stats.map(s => (
         <Card key={s.label}>
           <CardHeader className="pb-2">
@@ -257,6 +259,34 @@ function SystemSection({ logs }: { logs: LogEntry[] }) {
   )
 }
 
+function LineSection({ accounts }: { accounts: { accountId: string; botInfo: LineBotInfo | null }[] }) {
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">LINE OA</h2>
+      {accounts.length === 0 ? (
+        <p className="text-sm text-zinc-400">ยังไม่มี LINE OA</p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {accounts.map(({ accountId, botInfo }) => (
+            <Card key={accountId}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-sm font-medium">{botInfo?.displayName ?? accountId}</CardTitle>
+                  <Badge variant="outline" className="text-xs font-mono">{accountId}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="text-xs text-zinc-500 space-y-1">
+                {botInfo?.basicId && <p>@{botInfo.basicId}</p>}
+                <p className="text-zinc-400">dmPolicy: open</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AnalysisPage() {
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: getAgents })
   const { data: members = [] } = useQuery({ queryKey: ['members'], queryFn: getMembers })
@@ -264,6 +294,14 @@ export default function AnalysisPage() {
   const { data: logs = [], isLoading: logsLoading } = useQuery({
     queryKey: ['gateway-logs'],
     queryFn: () => getGatewayLogs(1000),
+  })
+
+  const { data: lineConfig } = useQuery({ queryKey: ['line-config'], queryFn: getLineConfig })
+  const { data: lineBotInfo } = useQuery({
+    queryKey: ['line-botinfo'],
+    queryFn: getLineBotInfo,
+    enabled: !!lineConfig?.line,
+    retry: false,
   })
 
   // โหลด sessions ทุก agent พร้อมกันใน parent — ไม่ให้แต่ละ AgentCard เรียก API เอง
@@ -283,6 +321,17 @@ export default function AnalysisPage() {
     return map
   }, [agents, sessionResults])
 
+  const lineAccounts = useMemo(() => {
+    const lineConfigLine = lineConfig?.line as any
+    const namedAccounts = Object.keys(lineConfigLine?.accounts ?? {})
+    const topLevelToken = lineConfigLine?.channelAccessToken
+    const accountIds = namedAccounts.length > 0 ? namedAccounts : (topLevelToken ? ['default'] : [])
+    return accountIds.map(accountId => ({
+      accountId,
+      botInfo: lineBotInfo?.[accountId] ?? null,
+    }))
+  }, [lineConfig, lineBotInfo])
+
   return (
     <div className="space-y-8 w-full">
       <div>
@@ -290,9 +339,11 @@ export default function AnalysisPage() {
         <p className="text-sm text-zinc-500 mt-1">ภาพรวมระบบทั้งหมด</p>
       </div>
 
-      <OverviewSection agents={agents} members={members} webchatRooms={webchatRooms} />
+      <OverviewSection agents={agents} members={members} webchatRooms={webchatRooms} lineAccountCount={lineAccounts.length} />
 
       <AgentsSection agents={agents} sessionsByAgent={sessionsByAgent} />
+
+      <LineSection accounts={lineAccounts} />
 
       <WebchatSection rooms={webchatRooms} />
 

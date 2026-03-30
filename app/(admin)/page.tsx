@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getStatus, getAgents, getConfig, restartGateway, getDoctorStatus, runDoctorFix,
-  getMembers, getWebchatRooms, getChatUsers,
+  getMembers, getWebchatRooms, getChatUsers, getLineConfig, getLineBotInfo,
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -47,6 +47,18 @@ export default function DashboardPage() {
     queryFn: getChatUsers,
   })
 
+  const { data: lineConfig } = useQuery({
+    queryKey: ['line-config'],
+    queryFn: getLineConfig,
+  })
+
+  const { data: lineBotInfo } = useQuery({
+    queryKey: ['line-botinfo'],
+    queryFn: getLineBotInfo,
+    enabled: !!lineConfig?.line,
+    retry: false,
+  })
+
   const restart = useMutation({
     mutationFn: restartGateway,
     onSuccess: () => {
@@ -82,6 +94,13 @@ export default function DashboardPage() {
   const adminCount = members?.filter(m => m.role === 'admin').length ?? 0
   const chatCount = members?.filter(m => m.role === 'chat').length ?? 0
 
+  const lineAccounts = Object.keys((lineConfig?.line as any)?.accounts ?? {})
+  const lineTopLevelToken = (lineConfig?.line as any)?.channelAccessToken
+  const lineCount = lineAccounts.length + (lineTopLevelToken && !lineAccounts.length ? 1 : 0)
+  const lineNames = lineBotInfo
+    ? Object.values(lineBotInfo).map(b => b.displayName).filter(Boolean).join(', ')
+    : ''
+
   return (
     <div className="space-y-6 w-full">
       <div>
@@ -89,7 +108,7 @@ export default function DashboardPage() {
         <p className="text-sm text-zinc-500 mt-1">OpenClaw ERP Chatbot Admin</p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-500">Gateway Status</CardTitle>
@@ -149,6 +168,16 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p className="text-xs font-mono break-all text-zinc-700 dark:text-zinc-300">{model}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-zinc-500">LINE OA</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{lineCount || '-'}</p>
+            <p className="text-xs text-zinc-500">{lineNames || (lineCount ? `${lineCount} OA configured` : 'No OA configured')}</p>
           </CardContent>
         </Card>
       </div>
