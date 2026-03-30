@@ -259,8 +259,8 @@ export async function setLineBinding(accountId: string, agentId: string): Promis
   await api.put('/api/line/bindings', { accountId, agentId })
 }
 
-export async function addLineAccount(accountId: string, channelAccessToken: string, channelSecret: string): Promise<void> {
-  await api.post('/api/line/accounts', { accountId, channelAccessToken, channelSecret })
+export async function addLineAccount(accountId: string, channelAccessToken: string, channelSecret: string, webhookPath?: string): Promise<void> {
+  await api.post('/api/line/accounts', { accountId, channelAccessToken, channelSecret, webhookPath })
 }
 
 export async function deleteLineAccount(accountId: string): Promise<void> {

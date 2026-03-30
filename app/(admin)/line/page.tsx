@@ -29,6 +29,7 @@ function AccountCard({
   accountId,
   botInfo,
   boundAgentId,
+  webhookPath,
   agents,
   onBindAgent,
   bindingSaving,
@@ -38,6 +39,7 @@ function AccountCard({
   accountId: string
   botInfo: LineBotInfo | null
   boundAgentId: string
+  webhookPath?: string
   agents: { id: string }[]
   onBindAgent: (agentId: string) => void
   bindingSaving: boolean
@@ -108,6 +110,19 @@ function AccountCard({
 
         <Separator />
 
+        {/* Webhook Path */}
+        {webhookPath && (
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Webhook URL</p>
+            <p className="text-xs text-zinc-500">ตั้งค่าใน LINE Developers Console → Messaging API</p>
+            <p className="text-xs font-mono bg-zinc-100 dark:bg-zinc-800 rounded px-2 py-1 break-all">
+              {'<tunnel-url>'}{webhookPath}
+            </p>
+          </div>
+        )}
+
+        {webhookPath && <Separator />}
+
         {/* QR Code */}
         <div className="space-y-2">
           <p className="text-sm font-medium">QR Code</p>
@@ -150,6 +165,7 @@ export default function LinePage() {
   const [newAccountId, setNewAccountId] = useState('')
   const [newToken, setNewToken] = useState('')
   const [newSecret, setNewSecret] = useState('')
+  const [newWebhookPath, setNewWebhookPath] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
   const [deleteDialog, setDeleteDialog] = useState<string | null>(null)
@@ -170,21 +186,28 @@ export default function LinePage() {
   })
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: getAgents })
 
-  // รวบรวม account IDs จาก config
+  // รวบรวม account IDs และ webhookPath จาก config
   const line = lineConfig?.line as Record<string, unknown> | null
   const accountIds: string[] = []
+  const webhookPaths: Record<string, string> = {}
   if (line) {
     const accounts = line.accounts as Record<string, unknown> | undefined
     if (accounts) {
-      accountIds.push(...Object.keys(accounts))
-    } else if (line.channelAccessToken) {
-      // format เก่า — top-level token
-      accountIds.push('default')
+      for (const [id, acc] of Object.entries(accounts)) {
+        accountIds.push(id)
+        const wp = (acc as Record<string, unknown>)?.webhookPath
+        if (typeof wp === 'string') webhookPaths[id] = wp
+      }
+    }
+    if (line.channelAccessToken) {
+      if (!accountIds.includes('default')) accountIds.push('default')
+      const wp = line.webhookPath
+      if (typeof wp === 'string') webhookPaths['default'] = wp
     }
   }
 
   const addMutation = useMutation({
-    mutationFn: () => addLineAccount(newAccountId.trim() || 'default', newToken.trim(), newSecret.trim()),
+    mutationFn: () => addLineAccount(newAccountId.trim() || 'default', newToken.trim(), newSecret.trim(), newWebhookPath.trim() || undefined),
     onSuccess: async () => {
       toast.loading('Restarting gateway...', { id: 'restart' })
       try { await restartGateway() } catch {}
@@ -194,6 +217,7 @@ export default function LinePage() {
       setNewAccountId('')
       setNewToken('')
       setNewSecret('')
+      setNewWebhookPath('')
     },
     onError: (e: unknown) => {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
@@ -252,7 +276,7 @@ export default function LinePage() {
         <CardContent className="space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
           <p className="font-medium text-zinc-800 dark:text-zinc-200">วิธีใช้งาน</p>
           <p>1. <span className="font-medium">เพิ่ม LINE OA</span> — กรอก Account ID (เช่น <span className="font-mono">sale</span>, <span className="font-mono">stock</span>) + Channel Access Token + Channel Secret</p>
-          <p>2. <span className="font-medium">ตั้ง Webhook URL</span> — ไปที่ LINE Developers Console → Messaging API → Webhook URL (ใช้ URL เดิมทุก OA)</p>
+          <p>2. <span className="font-medium">ตั้ง Webhook URL</span> — ไปที่ LINE Developers Console → Messaging API → Webhook URL (แต่ละ OA ใช้ path ต่างกัน เช่น <span className="font-mono">/line/webhook/sale</span>)</p>
           <p>3. <span className="font-medium">ผูก Agent</span> — เลือก Agent ที่ OA นั้นจะ route ข้อความไป</p>
           <p>4. <span className="font-medium">แชร์ QR</span> — ให้พนักงาน Add Friend แล้วส่ง pairing code → approve อัตโนมัติ</p>
         </CardContent>
@@ -271,6 +295,12 @@ export default function LinePage() {
               value={newAccountId}
               onChange={e => setNewAccountId(e.target.value)}
               className={`w-36 ${addIdError ? 'border-red-400' : ''}`}
+            />
+            <Input
+              placeholder="Webhook path เช่น /line/webhook/sale"
+              value={newWebhookPath}
+              onChange={e => setNewWebhookPath(e.target.value)}
+              className="w-56 font-mono"
             />
             <div className="flex gap-2 flex-1 min-w-0">
               <Input
@@ -304,7 +334,7 @@ export default function LinePage() {
             </Button>
           </div>
           {addIdError && <p className="text-xs text-red-500">{addIdError}</p>}
-          <p className="text-xs text-zinc-400">Account ID ใช้ตั้งชื่อสั้นๆ เช่น <span className="font-mono">sale</span> — ถ้าไม่ใส่จะใช้ <span className="font-mono">default</span></p>
+          <p className="text-xs text-zinc-400">Account ID ใช้ตั้งชื่อสั้นๆ เช่น <span className="font-mono">sale</span> — Webhook path ควรไม่ซ้ำกันในแต่ละ OA เช่น <span className="font-mono">/line/webhook/sale</span></p>
         </CardContent>
       </Card>
 
@@ -322,6 +352,7 @@ export default function LinePage() {
             accountId={id}
             botInfo={botInfoMap[id] ?? null}
             boundAgentId={bindings.find(b => b.accountId === id)?.agentId ?? ''}
+            webhookPath={webhookPaths[id]}
             agents={agents}
             onBindAgent={agentId => bindMutation.mutate({ accountId: id, agentId })}
             bindingSaving={bindMutation.isPending}
