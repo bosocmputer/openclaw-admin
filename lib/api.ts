@@ -245,26 +245,26 @@ export async function getLineConfig(): Promise<{ line: Record<string, unknown> |
   return data
 }
 
-export async function getLineBotInfo(): Promise<LineBotInfo> {
+export async function getLineBotInfo(): Promise<Record<string, LineBotInfo>> {
   const { data } = await api.get('/api/line/botinfo')
   return data
 }
 
-export async function getLineBinding(): Promise<{ agentId: string | null }> {
+export async function getLineBindings(): Promise<{ accountId: string; agentId: string }[]> {
   const { data } = await api.get('/api/line/bindings')
   return data
 }
 
-export async function setLineBinding(agentId: string): Promise<void> {
-  await api.put('/api/line/bindings', { agentId })
+export async function setLineBinding(accountId: string, agentId: string): Promise<void> {
+  await api.put('/api/line/bindings', { accountId, agentId })
 }
 
-export async function addLineAccount(channelAccessToken: string, channelSecret: string): Promise<void> {
-  await api.post('/api/line/accounts', { channelAccessToken, channelSecret })
+export async function addLineAccount(accountId: string, channelAccessToken: string, channelSecret: string): Promise<void> {
+  await api.post('/api/line/accounts', { accountId, channelAccessToken, channelSecret })
 }
 
-export async function deleteLineAccount(): Promise<void> {
-  await api.delete('/api/line/accounts')
+export async function deleteLineAccount(accountId: string): Promise<void> {
+  await api.delete(`/api/line/accounts/${accountId}`)
 }
 
 export async function getLinePending(): Promise<LinePendingItem[]> {
