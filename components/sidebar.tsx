@@ -38,7 +38,6 @@ const adminGroups: NavGroup[] = [
       { href: '/agents', label: 'Agents' },
       { href: '/telegram', label: 'Telegram' },
       { href: '/webchat', label: 'Webchat' },
-      { href: '/mcp', label: 'MCP' },
     ],
   },
   {

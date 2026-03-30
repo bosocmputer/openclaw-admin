@@ -55,7 +55,7 @@ PostgreSQL 16  ← Docker container (port 5432)
 | Dashboard | `/` | สถานะ Gateway, Doctor, สรุปจำนวน Agent/Member, ปุ่ม Restart |
 | Model | `/model` | ตั้งค่า API Key (OpenRouter, Anthropic, OpenAI, Gemini, Mistral, Groq) + ทดสอบ connection |
 | Agents | `/agents` | จัดการ Agent — เพิ่ม/ลบ, ตั้ง Access Mode |
-| Agent Detail | `/agents/[id]` | แก้ SOUL.md, จัดการ Telegram Users (whitelist), ดู MCP |
+| Agent Detail | `/agents/[id]` | แก้ SOUL.md, จัดการ Telegram Users (whitelist), ตั้งค่า MCP (URL + Access Mode + Test) |
 | Agent Chat | `/agents/[id]/chat` | ดู chat history ของ agent นั้นๆ |
 | Telegram | `/telegram` | เพิ่ม/ลบ Bot (พร้อม token format validation) |
 | Webchat | `/webchat` | ใช้งาน webchat ในหน้าเดียว (role: chat ใช้ได้) |
@@ -64,7 +64,6 @@ PostgreSQL 16  ← Docker container (port 5432)
 | Compaction | `/compaction` | ตั้งค่า memory compaction (รองรับ fields ใหม่ v2026.3.28) |
 | Analysis | `/analysis` | วิเคราะห์ token usage + สถิติรายงาน per agent |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
-| MCP | `/mcp` | ตั้งค่า MCP server per agent |
 | Guide | `/guide` | คู่มือผู้ใช้ (แสดง bot name จริงจาก config) |
 | Members | `/members` | จัดการผู้ใช้ระบบ (superadmin เท่านั้น) |
 
@@ -89,7 +88,6 @@ openclaw-admin/
 │   │   ├── compaction/page.tsx
 │   │   ├── analysis/page.tsx
 │   │   ├── logs/page.tsx
-│   │   ├── mcp/page.tsx
 │   │   ├── guide/page.tsx
 │   │   └── members/
 │   │       ├── page.tsx            ← Server component (ส่ง currentUserId)
