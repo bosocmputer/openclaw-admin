@@ -246,32 +246,32 @@ export default function MonitorPage() {
   })
 
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-120px)] w-full">
+    <div className="space-y-6 w-full">
 
-      {/* ── Title bar ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3 shrink-0">
+      {/* ── Title + controls ──────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold">Monitor</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">อัปเดต {updatedStr}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">อัปเดต {updatedStr}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {stats && (
             <>
-              <Badge variant="secondary">🤖 {stats.totalAgents} agents</Badge>
+              <Badge variant="secondary">{stats.totalAgents} agents</Badge>
               {activeCount > 0
-                ? <Badge variant="outline" className="text-yellow-400 border-yellow-600">⚡ {activeCount} active</Badge>
-                : <Badge variant="secondary">⚡ 0 active</Badge>
+                ? <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30 dark:text-yellow-400">⚡ {activeCount} active</Badge>
+                : <Badge variant="secondary">0 active</Badge>
               }
               <Badge variant="secondary">💬 {stats.todayMessages} วันนี้</Badge>
-              <Badge variant="secondary">⏱ avg {stats.avgResponseTime.toFixed(1)}s</Badge>
+              <Badge variant="secondary">avg {stats.avgResponseTime.toFixed(1)}s</Badge>
               {longestDur > 0 && (
                 <Badge variant="outline" className={durationColor(longestDur)}>🐢 {longestDur.toFixed(1)}s</Badge>
               )}
-              {errorCount > 0 && <Badge variant="destructive">❌ {errorCount} errors</Badge>}
+              {errorCount > 0 && <Badge variant="destructive">{errorCount} errors</Badge>}
             </>
           )}
-          <div className="flex items-center gap-2 ml-1">
-            <span className={`text-xs ${paused ? 'text-zinc-500' : 'text-green-400'}`}>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-medium ${paused ? 'text-muted-foreground' : 'text-green-500'}`}>
               ● {paused ? 'Paused' : 'Live'}
             </span>
             <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
@@ -282,29 +282,39 @@ export default function MonitorPage() {
       </div>
 
       {/* ── Sessions ──────────────────────────────────────────────────────── */}
-      <Card className="shrink-0">
-        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-2 px-4 border-b border-zinc-800">
-          <CardTitle className="text-sm font-semibold">
-            Sessions
-            <span className="ml-2 text-xs font-normal text-zinc-500">{groups.length} ทั้งหมด</span>
-            {activeCount > 0 && (
-              <span className="ml-2 text-xs font-medium text-yellow-400 anim-pulse">· {activeCount} active</span>
-            )}
-          </CardTitle>
-          <Button
-            size="sm"
-            variant={effectiveKey === null ? 'secondary' : 'ghost'}
-            className="h-6 px-2 text-xs shrink-0"
-            onClick={() => setSelectedKey(null)}
-          >
-            📡 ทั้งหมด
-          </Button>
+      <Card>
+        <CardHeader className="pb-0">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">
+              Sessions
+              <span className="ml-2 text-sm font-normal text-muted-foreground">{groups.length} รายการ</span>
+              {activeCount > 0 && (
+                <span className="ml-2 text-sm font-medium text-yellow-500">· {activeCount} active</span>
+              )}
+            </CardTitle>
+            <Button
+              size="sm"
+              variant={effectiveKey === null ? 'secondary' : 'ghost'}
+              onClick={() => setSelectedKey(null)}
+            >
+              ทั้งหมด
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="pt-3 px-0 pb-0">
           {groups.length === 0 ? (
-            <p className="text-xs text-zinc-500 text-center py-4">ไม่มี session</p>
+            <p className="text-sm text-muted-foreground text-center py-8">ไม่มี session</p>
           ) : (
-            <div className="max-h-48 overflow-y-auto">
+            <div className="max-h-52 overflow-y-auto">
+              {/* header row */}
+              <div className="flex items-center gap-3 px-4 pb-1 text-xs font-medium text-muted-foreground border-b">
+                <span className="w-2" />
+                <span className="w-4" />
+                <span className="w-28">Agent</span>
+                <span className="w-36">User</span>
+                <span className="flex-1">สถานะ</span>
+                <span className="w-12 text-right">เมื่อ</span>
+              </div>
               {groups.map(g => {
                 const st = stateInfo(g.state)
                 const isActive = g.state === 'thinking' || g.state === 'tool_call'
@@ -314,18 +324,20 @@ export default function MonitorPage() {
                     key={g.sessionKey}
                     type="button"
                     onClick={() => setSelectedKey(prev => prev === g.sessionKey ? null : g.sessionKey)}
-                    className={`w-full flex items-center gap-3 px-4 py-1.5 text-left text-xs transition-colors border-b border-zinc-900 last:border-0
-                      ${isSelected ? 'bg-zinc-800' : 'hover:bg-zinc-900/60'}`}
+                    className={`w-full flex items-center gap-3 px-4 py-2 text-left text-xs transition-colors border-b last:border-0
+                      ${isSelected ? 'bg-muted' : 'hover:bg-muted/50'}`}
                   >
-                    <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${st.dot} ${isActive ? 'anim-pulse' : ''}`} />
-                    <ChannelIcon channel={g.channel} />
-                    <span className={`shrink-0 w-28 truncate font-medium ${agentColor(g.agentId)}`}>{g.agentId}</span>
-                    <span className="shrink-0 w-36 truncate text-zinc-400">{g.user.replace('direct:', '')}</span>
-                    <span className={`shrink-0 ${st.cls}`}>
+                    <span className={`shrink-0 w-2 h-2 rounded-full ${st.dot} ${isActive ? 'anim-pulse' : ''}`} />
+                    <span className="shrink-0 w-4 flex justify-center"><ChannelIcon channel={g.channel} /></span>
+                    <span className={`shrink-0 w-28 truncate font-mono font-medium ${agentColor(g.agentId)}`}>{g.agentId}</span>
+                    <span className="shrink-0 w-36 truncate text-muted-foreground">{g.user.replace('direct:', '')}</span>
+                    <span className={`flex-1 ${st.cls}`}>
                       {st.label}{isActive && g.elapsed > 0 ? ` ${g.elapsed}s` : ''}
                     </span>
                     {g.lastMessageAt && (
-                      <span className="ml-auto shrink-0 text-zinc-600 tabular-nums">{relativeTime(g.lastMessageAt)}</span>
+                      <span className="shrink-0 w-12 text-right text-muted-foreground tabular-nums">
+                        {relativeTime(g.lastMessageAt)}
+                      </span>
                     )}
                   </button>
                 )
@@ -335,18 +347,18 @@ export default function MonitorPage() {
         </CardContent>
       </Card>
 
-      {/* ── Event stream ──────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-2 flex-1 min-h-0">
+      {/* ── Event log ─────────────────────────────────────────────────────── */}
+      <div className="space-y-3">
 
-        {/* Filters row */}
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          <span className="text-sm font-medium text-zinc-300 truncate flex-1 min-w-0">
+        {/* Toolbar */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-medium flex-1 min-w-0 truncate">
             {isGlobal
-              ? <span className="text-zinc-500 font-normal">📡 {panelTitle}</span>
+              ? <span className="text-muted-foreground">📡 {panelTitle}</span>
               : panelTitle
             }
-          </span>
-          <div className="flex gap-1 flex-wrap shrink-0">
+          </p>
+          <div className="flex gap-1 flex-wrap">
             {[
               { id: 'ALL',      label: 'ทั้งหมด' },
               { id: 'message',  label: '📩 msg' },
@@ -359,10 +371,10 @@ export default function MonitorPage() {
                 key={s.id}
                 type="button"
                 onClick={() => setStateFilter(s.id)}
-                className={`px-2 py-0.5 rounded text-xs border transition-colors ${
+                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
                   stateFilter === s.id
-                    ? 'bg-zinc-700 text-white border-zinc-600'
-                    : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'
+                    ? 'bg-foreground text-background border-foreground dark:bg-white dark:text-zinc-900'
+                    : 'border-input text-muted-foreground hover:border-foreground/40'
                 }`}
               >
                 {s.label}
@@ -373,29 +385,29 @@ export default function MonitorPage() {
             placeholder="ค้นหา..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-32 h-7 text-xs shrink-0"
+            className="w-36 h-8 text-xs"
           />
-          <label className="flex items-center gap-1.5 text-xs text-zinc-500 cursor-pointer whitespace-nowrap shrink-0">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
             <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
             Auto scroll
           </label>
         </div>
 
-        {/* Log panel — matches logs/page.tsx pattern */}
-        <div className="border rounded-xl bg-zinc-950 font-mono text-xs flex-1 overflow-y-auto min-h-0">
+        {/* Log panel */}
+        <div className="border rounded-xl bg-zinc-950 font-mono text-xs h-[480px] overflow-y-auto p-1">
           {filtered.length === 0 ? (
             <p className="text-zinc-600 text-center py-12">ไม่มีข้อมูล</p>
           ) : (
             filtered.map((e, i) => {
               const badge = typeBadge(e.type)
               let rowCls = 'hover:bg-zinc-900'
-              if (e.isLive)                rowCls = 'row-live'
+              if (e.isLive)                   rowCls = 'row-live'
               else if (e.type === 'thinking') rowCls = 'bg-yellow-950/15 hover:bg-yellow-950/25'
               else if (e.type === 'tool')     rowCls = 'bg-purple-950/15 hover:bg-purple-950/25'
               else if (e.type === 'error')    rowCls = 'bg-red-950/20 hover:bg-red-950/30'
 
               return (
-                <div key={i} className={`flex items-start px-3 py-0.5 leading-5 transition-colors ${rowCls}`}>
+                <div key={i} className={`flex items-start px-2 py-0.5 leading-5 rounded transition-colors ${rowCls}`}>
                   <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
                   {isGlobal && (
                     <span className={`shrink-0 w-24 truncate ${agentColor(e.agentId)}`}>
@@ -410,7 +422,7 @@ export default function MonitorPage() {
                   <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
                   <span className="flex-1 text-zinc-300 truncate" title={e.text}>
                     {e.text}
-                    {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-500" />}
+                    {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
                   </span>
                   {e.type === 'reply' && e.responseDuration != null && (
                     <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
@@ -424,7 +436,7 @@ export default function MonitorPage() {
           <div ref={bottomRef} />
         </div>
 
-        <p className="text-xs text-zinc-500 shrink-0">
+        <p className="text-xs text-muted-foreground">
           {filtered.length} events{filtered.length !== events.length ? ` (กรองจาก ${events.length})` : ''}
         </p>
       </div>
