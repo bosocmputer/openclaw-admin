@@ -252,8 +252,8 @@ function McpPanel({ agentId }: { agentId: string }) {
   async function testConnection() {
     setTesting(true); setTestResult('idle')
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
-      setTestResult(res.status < 500 ? 'ok' : 'fail')
+      await testAgentMcp(agentId, accessMode)
+      setTestResult('ok')
     } catch { setTestResult('fail') }
     finally { setTesting(false) }
   }
