@@ -175,11 +175,14 @@ export default function LinePage() {
                       <Image src={qrUrl} alt="LINE QR Code" width={200} height={200} unoptimized />
                     </div>
                     {addFriendUrl && (
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={addFriendUrl} target="_blank" rel="noopener noreferrer">
-                          Copy Add Friend Link
-                        </a>
-                      </Button>
+                      <a
+                        href={addFriendUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                      >
+                        Copy Add Friend Link
+                      </a>
                     )}
                   </>
                 ) : (
