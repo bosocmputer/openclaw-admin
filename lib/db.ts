@@ -1,9 +1,6 @@
 import postgres from 'postgres'
 
-const dbUrl = process.env.DATABASE_URL
-if (!dbUrl) throw new Error('DATABASE_URL env var is required')
-
-const sql = postgres(dbUrl, {
+const sql = postgres(process.env.DATABASE_URL!, {
   max: 20,
   idle_timeout: 30,
   connect_timeout: 10,

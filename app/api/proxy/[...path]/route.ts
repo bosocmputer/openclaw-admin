@@ -1,15 +1,15 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 
-const API_URL   = process.env.API_URL!
-const API_TOKEN = process.env.API_TOKEN!
-
-if (!API_URL)   throw new Error('API_URL env var is required')
-if (!API_TOKEN) throw new Error('API_TOKEN env var is required')
-
 async function handler(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const API_URL   = process.env.API_URL
+  const API_TOKEN = process.env.API_TOKEN
+  if (!API_URL || !API_TOKEN) {
+    return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 })
+  }
 
   const { path } = await params
   const upstream = `${API_URL}/api/${path.join('/')}${req.nextUrl.search}`
