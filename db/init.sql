@@ -34,6 +34,24 @@ CREATE TABLE IF NOT EXISTS webchat_messages (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id         BIGSERIAL PRIMARY KEY,
+  actor      VARCHAR(50) NOT NULL,
+  action     VARCHAR(60) NOT NULL,
+  target     TEXT,
+  detail     TEXT,
+  ip         VARCHAR(45),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_actor     ON audit_logs(actor);
+CREATE INDEX IF NOT EXISTS idx_audit_created   ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_action    ON audit_logs(action);
+
+-- Webchat performance indexes
+CREATE INDEX IF NOT EXISTS idx_webchat_messages_room_created ON webchat_messages(room_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_users_username          ON admin_users(username);
+
 INSERT INTO admin_users (username, password, role, display_name)
 VALUES (
   'superadmin',

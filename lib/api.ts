@@ -1,15 +1,22 @@
-import axios from 'axios'
+import axios, { type AxiosError } from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL!
-const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN!
-
+// All requests go through /api/proxy — token never leaves the server
 export const api = axios.create({
-  baseURL: API_URL,
-  headers: {
-    Authorization: `Bearer ${API_TOKEN}`,
-    'Content-Type': 'application/json',
-  },
+  baseURL: '/api/proxy',
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 30_000,
 })
+
+// 401 → redirect to login
+api.interceptors.response.use(
+  res => res,
+  (err: AxiosError) => {
+    if (err.response?.status === 401 && typeof window !== 'undefined') {
+      window.location.href = '/login'
+    }
+    return Promise.reject(err)
+  }
+)
 
 // Types
 export interface GatewayStatus {

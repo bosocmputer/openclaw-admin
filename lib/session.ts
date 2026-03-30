@@ -1,9 +1,10 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 
-const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET!)
+const SECRET      = new TextEncoder().encode(process.env.SESSION_SECRET!)
 const COOKIE_NAME = 'session'
-const EXPIRES_IN = 7 * 24 * 60 * 60 * 1000 // 7 days
+const MAX_AGE_SEC = 8 * 60 * 60          // 8 hours absolute max
+const RENEW_AFTER = 30 * 60              // renew cookie if < 30 min remaining
 
 export interface SessionPayload {
   userId: string
@@ -16,7 +17,7 @@ export async function encrypt(payload: SessionPayload) {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('7d')
+    .setExpirationTime(`${MAX_AGE_SEC}s`)
     .sign(SECRET)
 }
 
@@ -37,7 +38,7 @@ export async function createSession(payload: SessionPayload) {
     httpOnly: true,
     secure: process.env.COOKIE_SECURE === 'true',
     sameSite: 'lax',
-    maxAge: EXPIRES_IN / 1000,
+    maxAge: MAX_AGE_SEC,
     path: '/',
   })
 }
@@ -50,5 +51,23 @@ export async function deleteSession() {
 export async function getSession(): Promise<SessionPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_NAME)?.value
-  return decrypt(token)
+  if (!token) return null
+
+  const payload = await decrypt(token)
+  if (!payload) return null
+
+  // Sliding window: renew cookie if token is close to expiry
+  try {
+    const { payload: raw } = await jwtVerify(token, SECRET)
+    const exp = raw.exp as number
+    const secondsLeft = exp - Math.floor(Date.now() / 1000)
+    if (secondsLeft > 0 && secondsLeft < RENEW_AFTER) {
+      // re-issue silently
+      await createSession(payload)
+    }
+  } catch {
+    // ignore renewal error — session still valid
+  }
+
+  return payload
 }
