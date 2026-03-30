@@ -116,8 +116,8 @@ export const PROVIDERS: ProviderConfig[] = [
   { id: 'kilocode',   label: 'Kilo AI',       envKey: 'KILOCODE_API_KEY',   modelPrefix: 'kilocode' },
 ]
 
-export async function testProvider(provider: string, apiKey: string): Promise<boolean> {
-  const { data } = await api.post('/api/models/test', { provider, apiKey })
+export async function testProvider(provider: string, apiKey: string, signal?: AbortSignal): Promise<boolean> {
+  const { data } = await api.post('/api/models/test', { provider, apiKey }, { signal })
   return !!data.ok
 }
 

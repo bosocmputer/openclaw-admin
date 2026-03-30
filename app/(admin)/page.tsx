@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getStatus, getAgents, getConfig, restartGateway, getDoctorStatus, runDoctorFix,
@@ -8,10 +9,12 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 
 export default function DashboardPage() {
   const qc = useQueryClient()
+  const [restartDialog, setRestartDialog] = useState(false)
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],
@@ -102,7 +105,7 @@ export default function DashboardPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => restart.mutate()}
+              onClick={() => setRestartDialog(true)}
               disabled={restart.isPending}
             >
               {restart.isPending ? 'Restarting...' : 'Restart'}
@@ -217,6 +220,27 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Restart Confirmation Dialog */}
+      <Dialog open={restartDialog} onOpenChange={setRestartDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Restart Gateway</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            ต้องการ Restart OpenClaw Gateway? Bot จะหยุดตอบสนองชั่วคราวประมาณ 5–15 วินาที
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestartDialog(false)}>ยกเลิก</Button>
+            <Button
+              variant="destructive"
+              onClick={() => { setRestartDialog(false); restart.mutate() }}
+            >
+              Restart
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

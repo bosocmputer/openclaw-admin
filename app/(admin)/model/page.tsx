@@ -88,12 +88,15 @@ export default function ModelPage() {
   async function handleTest() {
     setTesting(true)
     setTestResult('idle')
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
     try {
-      const ok = await testProvider(selectedProvider.id, apiKey.trim())
+      const ok = await testProvider(selectedProvider.id, apiKey.trim(), controller.signal)
       setTestResult(ok ? 'ok' : 'fail')
     } catch {
       setTestResult('fail')
     } finally {
+      clearTimeout(timer)
       setTesting(false)
     }
   }

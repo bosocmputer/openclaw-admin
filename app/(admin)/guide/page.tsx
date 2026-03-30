@@ -1,4 +1,18 @@
-export default function GuidePage() {
+import { api } from '@/lib/api'
+
+async function getBotNames(): Promise<string[]> {
+  try {
+    const { data } = await api.get('/api/telegram/botinfo')
+    const names = Object.values(data as Record<string, string>).filter(Boolean)
+    return names
+  } catch {
+    return []
+  }
+}
+
+export default async function GuidePage() {
+  const botNames = await getBotNames()
+
   return (
     <div className="space-y-8 w-full max-w-3xl">
       <div>
@@ -43,9 +57,21 @@ export default function GuidePage() {
         </div>
         <div className="ml-11 space-y-2">
           <div className="border rounded-xl p-4 bg-zinc-50 dark:bg-zinc-900 space-y-2">
-            <p className="text-sm">1. เปิด Telegram ค้นหาชื่อ Bot ที่ Admin แจ้ง เช่น <span className="font-mono bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 rounded text-xs">@sml_sale_bot</span></p>
+            <p className="text-sm">1. เปิด Telegram ค้นหาชื่อ Bot ที่ Admin แจ้ง
+              {botNames.length > 0 ? (
+                <span className="ml-1">
+                  {botNames.slice(0, 3).map(name => (
+                    <span key={name} className="font-mono bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 rounded text-xs mx-0.5">
+                      @{name.replace(/^@/, '')}
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                <span className="ml-1 text-zinc-400">(Admin จะแจ้งชื่อ bot)</span>
+              )}
+            </p>
             <p className="text-sm">2. กด <span className="font-semibold">Start</span></p>
-            <p className="text-sm">3. พิมพ์ข้อความถามได้เลย — Bot จะตอบทันที</p>
+            <p className="text-sm">3. พิมพ์ข้อความถามได้เลย — Bot จะตอบทันที / ตัวอย่างสั้น: &quot;สินค้ารหัส A001 มีกี่ชิ้น&quot;</p>
           </div>
         </div>
       </div>

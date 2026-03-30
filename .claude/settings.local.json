@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat app/\\\\\\(admin\\\\\\)/members/page.tsx)",
+      "Bash(ls /Users/nontawatwongnuk/dev/openclaw-admin/app/\\\\\\(admin\\\\\\)/)",
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(openclaw --version)",
+      "Read(//usr/**)",
+      "Bash(git push:*)",
+      "Bash(ls /Users/nontawatwongnuk/dev/openclaw-admin/PLAN* /Users/nontawatwongnuk/dev/openclaw-admin/ARCHITECTURE*)",
+      "Bash(ls /Users/nontawatwongnuk/dev/openclaw-api/PLAN* /Users/nontawatwongnuk/dev/openclaw-api/ARCHITECTURE*)"
+    ]
+  }
+}

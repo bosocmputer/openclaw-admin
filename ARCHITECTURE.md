@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-03-26 (รอบ 9)
+> อัปเดต: 2026-03-30 (รอบ 10)
 
 ---
 
@@ -48,7 +48,7 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
                                                        ▼
                                               ┌─────────────────────┐
                                               │  SML MCP Connect    │
-                                              │  port 3002          │
+                                              │  port 3248          │
                                               │  /call /tools       │
                                               └────────┬────────────┘
                                                        │
@@ -243,7 +243,25 @@ Multi-provider: OpenRouter / Google / Anthropic / OpenAI
 
 ---
 
-### 10. Analysis
+### 10. Monitor
+
+```
+GET /api/monitor/events
+  → อ่าน ~/.openclaw/agents/*/sessions/ .jsonl files (last 50 lines ต่อ session)
+  → กรอง: deleted webchat rooms (query webchat_rooms table), stale sessions (>3 วัน)
+  → แปลง ts: new Date(timestamp).toISOString().slice(11,19) = UTC HH:MM:SS
+  → stripGatewayMetadata() ตัด Telegram metadata + Webchat SECURITY NOTICE headers
+  → return MonitorData { agents[], stats, globalEvents[] }
+
+UI: poll ทุก 3 วินาที
+  Overview bar → session cards เรียงแนวนอน (thinking/tool_call ก่อน)
+  Detail panel → global stream หรือ session ที่เลือก
+  tsToThai(): UTC HH:MM:SS + 7h = เวลาไทย
+```
+
+---
+
+### 11. Analysis
 
 ```
 GET /api/agents → จำนวน agents
@@ -286,6 +304,8 @@ openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 │       ├── guide/page.tsx            ← คู่มือผู้ใช้
 │       ├── members/page.tsx          ← จัดการสมาชิก (superadmin only)
 │       ├── analysis/page.tsx         ← วิเคราะห์ข้อมูล (agents/sessions/tokens/members/logs)
+│       ├── monitor/page.tsx          ← real-time AI activity monitor (2-zone: overview bar + detail panel)
+│       ├── compaction/page.tsx       ← ตั้งค่า Auto-compact (mode/maxHistoryShare/keepRecentTokens ฯลฯ)
 │       └── webchat/
 │           ├── page.tsx              ← Server Component — ส่ง session ลง client
 │           └── webchat-client.tsx    ← Chat UI (2-column admin / minimal chat user)
@@ -328,7 +348,8 @@ TanStack Query (React Query v5)
   ├── queryKey: ['doctor-status']  → refetchInterval: 60s
   ├── queryKey: ['models']         → on-demand
   ├── queryKey: ['sessions', id]   → on-demand
-  └── queryKey: ['logs']           → polling manual ทุก 3s
+  ├── queryKey: ['logs']           → polling manual ทุก 3s
+  └── queryKey: ['monitor']       → refetchInterval: 3s
 
 Mutations → invalidateQueries หลัง success
 Local UI state → useState (dialog open/close, form inputs, tab)

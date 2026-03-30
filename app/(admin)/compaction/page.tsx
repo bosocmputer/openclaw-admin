@@ -14,6 +14,10 @@ interface CompactionForm {
   keepRecentTokens: number      // token ที่เก็บหลัง compact
   recentTurnsPreserve: number   // turn ล่าสุดที่ไม่ compress (0–12)
   softThresholdTokens: number   // เริ่ม compact เมื่อเกินค่านี้ (0 = ปิด)
+  truncateAfterCompaction: boolean  // ตัด .jsonl เก่าออกหลัง compact
+  model: string                     // override model สำหรับ compact
+  timeoutSeconds: number            // timeout ต่อ compaction (0 = ค่า default)
+  customInstructions: string        // คำสั่งพิเศษสำหรับ compaction
 }
 
 const DEFAULTS: CompactionForm = {
@@ -22,6 +26,10 @@ const DEFAULTS: CompactionForm = {
   keepRecentTokens: 10000,
   recentTurnsPreserve: 3,
   softThresholdTokens: 0,
+  truncateAfterCompaction: false,
+  model: '',
+  timeoutSeconds: 0,
+  customInstructions: '',
 }
 
 export default function CompactionPage() {
@@ -42,6 +50,10 @@ export default function CompactionPage() {
       keepRecentTokens: typeof c.keepRecentTokens === 'number' ? c.keepRecentTokens : 10000,
       recentTurnsPreserve: typeof c.recentTurnsPreserve === 'number' ? c.recentTurnsPreserve : 3,
       softThresholdTokens: c.memoryFlush?.softThresholdTokens ?? 0,
+      truncateAfterCompaction: (c as Record<string, unknown>).truncateAfterCompaction === true,
+      model: typeof (c as Record<string, unknown>).model === 'string' ? (c as Record<string, unknown>).model as string : '',
+      timeoutSeconds: typeof (c as Record<string, unknown>).timeoutSeconds === 'number' ? (c as Record<string, unknown>).timeoutSeconds as number : 0,
+      customInstructions: typeof (c as Record<string, unknown>).customInstructions === 'string' ? (c as Record<string, unknown>).customInstructions as string : '',
     })
   }, [config])
 
@@ -56,6 +68,18 @@ export default function CompactionPage() {
       }
       if (form.softThresholdTokens > 0) {
         compaction.memoryFlush = { softThresholdTokens: form.softThresholdTokens }
+      }
+      if (form.truncateAfterCompaction) {
+        compaction.truncateAfterCompaction = true
+      }
+      if (form.model.trim()) {
+        compaction.model = form.model.trim()
+      }
+      if (form.timeoutSeconds > 0) {
+        compaction.timeoutSeconds = form.timeoutSeconds
+      }
+      if (form.customInstructions.trim()) {
+        compaction.customInstructions = form.customInstructions.trim()
       }
       // ลบ key ที่เป็น undefined ออก
       Object.keys(compaction).forEach(k => compaction[k] === undefined && delete compaction[k])
@@ -266,6 +290,78 @@ export default function CompactionPage() {
               </p>
             </div>
 
+            {/* truncateAfterCompaction */}
+            <div className="flex items-center justify-between border rounded-md px-4 py-3">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">Truncate After Compaction</p>
+                <p className="text-xs text-zinc-500">ตัด session history เก่าออกจากไฟล์หลัง compact — ป้องกัน .jsonl โตไม่หยุด (แนะนำ: เปิด)</p>
+              </div>
+              <button
+                type="button"
+                aria-label={`Truncate After Compaction: ${form.truncateAfterCompaction ? 'เปิด' : 'ปิด'}`}
+                onClick={() => setForm(f => ({ ...f, truncateAfterCompaction: !f.truncateAfterCompaction }))}
+                className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                  form.truncateAfterCompaction ? 'bg-zinc-900 dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-700'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white dark:bg-zinc-900 transition-transform ${
+                  form.truncateAfterCompaction ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
+            </div>
+
+            {/* model override */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Model Override <span className="text-zinc-400 font-normal">(ไม่บังคับ)</span></label>
+              <Input
+                value={form.model}
+                onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
+                placeholder="เช่น openrouter/qwen/qwen3.5-flash-02-23"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-zinc-500 bg-zinc-50 dark:bg-zinc-900 rounded px-3 py-2">
+                ระบุ model ที่ต้องการใช้สำหรับ compaction โดยเฉพาะ — เว้นว่างเพื่อใช้ default model เดิม (ประหยัดค่าใช้จ่าย: ใส่ model ราคาถูก)
+              </p>
+            </div>
+
+            {/* timeoutSeconds */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Timeout Seconds <span className="text-zinc-400 font-normal">(ไม่บังคับ)</span></label>
+                <span className="font-mono text-sm text-zinc-600 dark:text-zinc-400">
+                  {form.timeoutSeconds > 0 ? `${form.timeoutSeconds}s` : 'default'}
+                </span>
+              </div>
+              <Input
+                type="number"
+                min={0}
+                max={300}
+                step={10}
+                value={form.timeoutSeconds}
+                onChange={e => setForm(f => ({ ...f, timeoutSeconds: Number(e.target.value) }))}
+                placeholder="0 = ใช้ค่า default"
+                className="font-mono"
+              />
+              <p className="text-xs text-zinc-500 bg-zinc-50 dark:bg-zinc-900 rounded px-3 py-2">
+                จำกัดเวลาต่อ compaction operation — ใส่ 0 เพื่อใช้ค่า default ของ OpenClaw
+              </p>
+            </div>
+
+            {/* customInstructions */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Custom Instructions <span className="text-zinc-400 font-normal">(ไม่บังคับ)</span></label>
+              <textarea
+                value={form.customInstructions}
+                onChange={e => setForm(f => ({ ...f, customInstructions: e.target.value }))}
+                placeholder="คำสั่งพิเศษสำหรับ compaction เช่น 'เน้นบันทึกข้อมูลสินค้า ราคา และชื่อลูกค้า'"
+                rows={3}
+                className="w-full border rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-zinc-400 bg-background resize-none"
+              />
+              <p className="text-xs text-zinc-500 bg-zinc-50 dark:bg-zinc-900 rounded px-3 py-2">
+                คำสั่งให้ AI ใช้ขณะสรุปประวัติ — เช่น บอกให้เน้นบันทึกข้อมูล domain เฉพาะของธุรกิจ
+              </p>
+            </div>
+
           </CardContent>
         </Card>
       )}
@@ -283,6 +379,10 @@ export default function CompactionPage() {
               {form.softThresholdTokens > 0 && (
                 <li>compact ทันทีเมื่อเกิน <strong>{form.softThresholdTokens.toLocaleString()} token</strong></li>
               )}
+              {form.truncateAfterCompaction && <li>ตัด history เก่าออกหลัง compact (truncate)</li>}
+              {form.model.trim() && <li>model สำหรับ compact: <strong className="font-mono">{form.model.trim()}</strong></li>}
+              {form.timeoutSeconds > 0 && <li>timeout: <strong>{form.timeoutSeconds}s</strong></li>}
+              {form.customInstructions.trim() && <li>custom instructions: เปิดใช้งาน</li>}
             </ul>
           </CardContent>
         </Card>

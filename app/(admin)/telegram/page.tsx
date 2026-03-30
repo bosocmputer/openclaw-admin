@@ -382,6 +382,9 @@ export default function TelegramPage() {
     : existingAccountIds.includes(newAccountId.trim()) && newAccountId.trim()
     ? 'Account ID นี้มีอยู่แล้ว'
     : ''
+  const tokenFormatError = newToken.trim() && !/^\d+:[A-Za-z0-9_-]+$/.test(newToken.trim())
+    ? 'Token format ไม่ถูกต้อง — ต้องเป็น 1234567890:AAAA...'
+    : ''
 
   const telegramEnabled = config?.channels?.telegram?.enabled ?? false
 
@@ -454,12 +457,13 @@ export default function TelegramPage() {
             />
             <Button
               onClick={() => addAccountMutation.mutate()}
-              disabled={addAccountMutation.isPending || !newAccountId.trim() || !newToken.trim() || !!addIdError}
+              disabled={addAccountMutation.isPending || !newAccountId.trim() || !newToken.trim() || !!addIdError || !!tokenFormatError}
             >
               {addAccountMutation.isPending ? 'Adding...' : 'Add Bot'}
             </Button>
           </div>
           {addIdError && <p className="text-xs text-red-500">{addIdError}</p>}
+          {tokenFormatError && <p className="text-xs text-red-500">{tokenFormatError}</p>}
         </CardContent>
       </Card>
 

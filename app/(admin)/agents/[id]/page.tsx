@@ -135,8 +135,10 @@ function UsersPanel({ agentId }: { agentId: string }) {
   })
 
   function addUser() {
-    if (!newId || !/^\d+$/.test(newId.trim())) { toast.error('User ID ต้องเป็นตัวเลขเท่านั้น เช่น 123456789'); return }
-    if (users.find(u => u.id === newId.trim())) { toast.error('User already added'); return }
+    const trimmed = newId.trim()
+    if (!trimmed || !/^\d+$/.test(trimmed)) { toast.error('User ID ต้องเป็นตัวเลขเท่านั้น เช่น 1234567890'); return }
+    if (trimmed.length < 5) { toast.error('Telegram User ID ต้องมีอย่างน้อย 5 หลัก'); return }
+    if (users.find(u => u.id === trimmed)) { toast.error('User already added'); return }
     add.mutate()
   }
 

@@ -13,8 +13,8 @@ interface LogEntry {
   msg: string
 }
 
-async function fetchLogs(): Promise<LogEntry[]> {
-  const { data } = await api.get('/api/gateway/logs?lines=300')
+async function fetchLogs(lines: number): Promise<LogEntry[]> {
+  const { data } = await api.get(`/api/gateway/logs?lines=${lines}`)
   return data
 }
 
@@ -42,11 +42,12 @@ export default function LogsPage() {
   const [levelFilter, setLevelFilter] = useState<string>('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
   const [paused, setPaused] = useState(false)
+  const [lines, setLines] = useState(300)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { data: logs = [], dataUpdatedAt } = useQuery({
-    queryKey: ['gateway-logs'],
-    queryFn: fetchLogs,
+    queryKey: ['gateway-logs', lines],
+    queryFn: () => fetchLogs(lines),
     refetchInterval: paused ? false : 3000,
   })
 
@@ -113,7 +114,24 @@ export default function LogsPage() {
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-zinc-500 ml-auto cursor-pointer">
+        <div className="flex gap-1 ml-auto items-center">
+          <span className="text-xs text-zinc-400 mr-1">บรรทัด:</span>
+          {[100, 300, 1000].map(n => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setLines(n)}
+              className={`px-2 py-1 rounded text-xs font-medium border transition-colors ${
+                lines === n
+                  ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-white dark:text-zinc-900'
+                  : 'border-zinc-200 text-zinc-500 hover:border-zinc-400'
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-zinc-500 cursor-pointer">
           <input
             type="checkbox"
             checked={autoScroll}
