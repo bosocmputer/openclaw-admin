@@ -6,7 +6,6 @@ import { getMonitorEvents, type MonitorData, type MonitorEvent } from '@/lib/api
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 // ─── Time helpers ──────────────────────────────────────────────────────────────
 function tsToThai(ts: string): string {
@@ -247,227 +246,165 @@ export default function MonitorPage() {
   })
 
   return (
-    <div className="space-y-6 w-full">
+    <div className="flex flex-col h-full gap-3">
 
-      {/* ── Title + controls ──────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Monitor</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">อัปเดต {updatedStr}</p>
+      {/* ── Row 1: Title + stats + live/pause ─────────────────────────────── */}
+      <div className="shrink-0 flex items-center gap-2 flex-wrap">
+        <div className="mr-1">
+          <h1 className="text-xl font-bold leading-none">Monitor</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">อัปเดต {updatedStr}</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {stats && (
-            <>
-              <Badge variant="secondary">{stats.totalAgents} agents</Badge>
-              {activeCount > 0
-                ? <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30 dark:text-yellow-400">⚡ {activeCount} active</Badge>
-                : <Badge variant="secondary">0 active</Badge>
-              }
-              <Badge variant="secondary">💬 {stats.todayMessages} วันนี้</Badge>
-              <Badge variant="secondary">avg {stats.avgResponseTime.toFixed(1)}s</Badge>
-              {longestDur > 0 && (
-                <Badge variant="outline" className={durationColor(longestDur)}>🐢 {longestDur.toFixed(1)}s</Badge>
-              )}
-              {errorCount > 0 && <Badge variant="destructive">{errorCount} errors</Badge>}
-            </>
-          )}
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-medium ${paused ? 'text-muted-foreground' : 'text-green-500'}`}>
-              ● {paused ? 'Paused' : 'Live'}
-            </span>
-            <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
-              {paused ? 'Resume' : 'Pause'}
-            </Button>
-          </div>
-        </div>
+        {stats && (
+          <>
+            <Badge variant="secondary">{stats.totalAgents} agents</Badge>
+            {activeCount > 0
+              ? <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30 dark:text-yellow-400">⚡ {activeCount} active</Badge>
+              : <Badge variant="secondary">0 active</Badge>
+            }
+            <Badge variant="secondary">💬 {stats.todayMessages} วันนี้</Badge>
+            <Badge variant="secondary">avg {stats.avgResponseTime.toFixed(1)}s</Badge>
+            {longestDur > 0 && (
+              <Badge variant="outline" className={durationColor(longestDur)}>🐢 {longestDur.toFixed(1)}s</Badge>
+            )}
+            {errorCount > 0 && <Badge variant="destructive">{errorCount} errors</Badge>}
+          </>
+        )}
+        <div className="flex-1" />
+        <span className={`text-xs font-medium ${paused ? 'text-muted-foreground' : 'text-green-500'}`}>
+          ● {paused ? 'Paused' : 'Live'}
+        </span>
+        <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
+          {paused ? 'Resume' : 'Pause'}
+        </Button>
       </div>
 
-      {/* ── Sessions ──────────────────────────────────────────────────────── */}
-      <Card>
-        <CardHeader className="pb-0">
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">
-              Sessions
-              <span className="ml-2 text-sm font-normal text-muted-foreground">{groups.length} รายการ</span>
-              {activeCount > 0 && (
-                <span className="ml-2 text-sm font-medium text-yellow-500">· {activeCount} active</span>
-              )}
-            </CardTitle>
-            <Button
-              size="sm"
-              variant={effectiveKey === null ? 'secondary' : 'ghost'}
-              onClick={() => setSelectedKey(null)}
+      {/* ── Row 2: Session dropdown + filters + search + autoscroll ──────── */}
+      <div className="shrink-0 flex items-center gap-2 flex-wrap">
+        {/* Session dropdown */}
+        <select
+          value={selectedKey ?? ''}
+          onChange={e => { setSelectedKey(e.target.value || null); setExpandedIdx(null) }}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring min-w-0 max-w-[260px] truncate"
+        >
+          <option value="">📡 ทุก session ({groups.length})</option>
+          {groups.map(g => {
+            const st = stateInfo(g.state)
+            const ch = g.channel === 'telegram' ? 'tg' : g.channel === 'line' ? 'line' : 'web'
+            const elapsed = (g.state === 'thinking' || g.state === 'tool_call') && g.elapsed > 0 ? ` ${g.elapsed}s` : ''
+            return (
+              <option key={g.sessionKey} value={g.sessionKey}>
+                {st.label}{elapsed} · {g.agentId} · {ch} · {g.user.replace('direct:', '')}
+              </option>
+            )
+          })}
+        </select>
+
+        {/* Filter pills */}
+        <div className="flex gap-1 flex-wrap">
+          {[
+            { id: 'ALL',      label: 'ทั้งหมด' },
+            { id: 'message',  label: '📩 msg' },
+            { id: 'thinking', label: '💭 think' },
+            { id: 'tool',     label: '🔧 tool' },
+            { id: 'replied',  label: '✅ reply' },
+            { id: 'error',    label: '❌ error' },
+          ].map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setStateFilter(s.id)}
+              className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                stateFilter === s.id
+                  ? 'bg-foreground text-background border-foreground dark:bg-white dark:text-zinc-900'
+                  : 'border-input text-muted-foreground hover:border-foreground/40'
+              }`}
             >
-              ทั้งหมด
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-3 px-0 pb-0">
-          {groups.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-8">ไม่มี session</p>
-          ) : (
-            <div className="max-h-52 overflow-y-auto">
-              {/* header row */}
-              <div className="flex items-center gap-3 px-4 pb-1 text-xs font-medium text-muted-foreground border-b">
-                <span className="w-2" />
-                <span className="w-4" />
-                <span className="w-28">Agent</span>
-                <span className="w-36">User</span>
-                <span className="flex-1">สถานะ</span>
-                <span className="w-12 text-right">เมื่อ</span>
-              </div>
-              {groups.map(g => {
-                const st = stateInfo(g.state)
-                const isActive = g.state === 'thinking' || g.state === 'tool_call'
-                const isSelected = effectiveKey === g.sessionKey
-                return (
-                  <button
-                    key={g.sessionKey}
-                    type="button"
-                    onClick={() => setSelectedKey(prev => prev === g.sessionKey ? null : g.sessionKey)}
-                    className={`w-full flex items-center gap-3 px-4 py-2 text-left text-xs transition-colors border-b last:border-0
-                      ${isSelected ? 'bg-muted' : 'hover:bg-muted/50'}`}
-                  >
-                    <span className={`shrink-0 w-2 h-2 rounded-full ${st.dot} ${isActive ? 'anim-pulse' : ''}`} />
-                    <span className="shrink-0 w-4 flex justify-center"><ChannelIcon channel={g.channel} /></span>
-                    <span className={`shrink-0 w-28 truncate font-mono font-medium ${agentColor(g.agentId)}`}>{g.agentId}</span>
-                    <span className="shrink-0 w-36 truncate text-muted-foreground">{g.user.replace('direct:', '')}</span>
-                    <span className={`flex-1 ${st.cls}`}>
-                      {st.label}{isActive && g.elapsed > 0 ? ` ${g.elapsed}s` : ''}
-                    </span>
-                    {g.lastMessageAt && (
-                      <span className="shrink-0 w-12 text-right text-muted-foreground tabular-nums">
-                        {relativeTime(g.lastMessageAt)}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Event log ─────────────────────────────────────────────────────── */}
-      <div className="space-y-3">
-
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-sm font-medium flex-1 min-w-0 truncate">
-            {isGlobal
-              ? <span className="text-muted-foreground">📡 {panelTitle}</span>
-              : panelTitle
-            }
-          </p>
-          <div className="flex gap-1 flex-wrap">
-            {[
-              { id: 'ALL',      label: 'ทั้งหมด' },
-              { id: 'message',  label: '📩 msg' },
-              { id: 'thinking', label: '💭 think' },
-              { id: 'tool',     label: '🔧 tool' },
-              { id: 'replied',  label: '✅ reply' },
-              { id: 'error',    label: '❌ error' },
-            ].map(s => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setStateFilter(s.id)}
-                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
-                  stateFilter === s.id
-                    ? 'bg-foreground text-background border-foreground dark:bg-white dark:text-zinc-900'
-                    : 'border-input text-muted-foreground hover:border-foreground/40'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          <Input
-            placeholder="ค้นหา..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-36 h-8 text-xs"
-          />
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
-            <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
-            Auto scroll
-          </label>
+              {s.label}
+            </button>
+          ))}
         </div>
 
-        {/* Log panel */}
-        <div className="border rounded-xl bg-zinc-950 font-mono text-xs h-[480px] overflow-y-auto p-1">
-          {filtered.length === 0 ? (
-            <p className="text-zinc-600 text-center py-12">ไม่มีข้อมูล</p>
-          ) : (
-            filtered.map((e, i) => {
-              const badge = typeBadge(e.type)
-              const isExp = expandedIdx === i
-              let rowCls = 'hover:bg-zinc-900'
-              if (e.isLive)                   rowCls = 'row-live'
-              else if (e.type === 'thinking') rowCls = isExp ? 'bg-yellow-950/30' : 'bg-yellow-950/15 hover:bg-yellow-950/25'
-              else if (e.type === 'tool')     rowCls = isExp ? 'bg-purple-950/30' : 'bg-purple-950/15 hover:bg-purple-950/25'
-              else if (e.type === 'error')    rowCls = isExp ? 'bg-red-950/35' : 'bg-red-950/20 hover:bg-red-950/30'
-              else if (isExp)                 rowCls = 'bg-zinc-800'
+        <Input
+          placeholder="ค้นหา..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-32 h-8 text-xs"
+        />
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+          <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
+          Auto scroll
+        </label>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {filtered.length} events{filtered.length !== events.length ? ` / ${events.length}` : ''}
+        </span>
+      </div>
 
-              // Try to format tool JSON nicely
-              let expandText = e.text
-              if (e.type === 'tool') {
-                const colonIdx = e.text.indexOf(': ')
-                if (colonIdx !== -1) {
-                  try {
-                    const parsed = JSON.parse(e.text.slice(colonIdx + 2))
-                    expandText = e.text.slice(0, colonIdx) + ':\n' + JSON.stringify(parsed, null, 2)
-                  } catch { /* keep original */ }
-                }
+      {/* ── Log panel — fills remaining height ───────────────────────────── */}
+      <div className="flex-1 min-h-0 border rounded-xl bg-zinc-950 font-mono text-xs overflow-y-auto p-1">
+        {filtered.length === 0 ? (
+          <p className="text-zinc-600 text-center py-12">ไม่มีข้อมูล</p>
+        ) : (
+          filtered.map((e, i) => {
+            const badge = typeBadge(e.type)
+            const isExp = expandedIdx === i
+            let rowCls = 'hover:bg-zinc-900'
+            if (e.isLive)                   rowCls = 'row-live'
+            else if (e.type === 'thinking') rowCls = isExp ? 'bg-yellow-950/30' : 'bg-yellow-950/15 hover:bg-yellow-950/25'
+            else if (e.type === 'tool')     rowCls = isExp ? 'bg-purple-950/30' : 'bg-purple-950/15 hover:bg-purple-950/25'
+            else if (e.type === 'error')    rowCls = isExp ? 'bg-red-950/35' : 'bg-red-950/20 hover:bg-red-950/30'
+            else if (isExp)                 rowCls = 'bg-zinc-800'
+
+            let expandText = e.text
+            if (e.type === 'tool') {
+              const colonIdx = e.text.indexOf(': ')
+              if (colonIdx !== -1) {
+                try {
+                  const parsed = JSON.parse(e.text.slice(colonIdx + 2))
+                  expandText = e.text.slice(0, colonIdx) + ':\n' + JSON.stringify(parsed, null, 2)
+                } catch { /* keep original */ }
               }
+            }
 
-              return (
-                <div
-                  key={i}
-                  className={`rounded transition-colors cursor-pointer select-text ${rowCls}`}
-                  onClick={() => setExpandedIdx(isExp ? null : i)}
-                >
-                  {/* Compact header row */}
-                  <div className="flex items-start px-2 py-0.5 leading-5">
-                    <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
-                    {isGlobal && (
-                      <span className={`shrink-0 w-24 truncate ${agentColor(e.agentId)}`}>
-                        {e.agentId}·{e.channel === 'telegram' ? 'tg' : e.channel === 'line' ? 'line' : 'web'}
-                      </span>
-                    )}
-                    {isGlobal && (
-                      <span className="shrink-0 w-24 text-zinc-600 truncate">
-                        {e.user.replace('direct:', '').slice(0, 12)}
-                      </span>
-                    )}
-                    <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
-                    <span className={`flex-1 text-zinc-300 ${isExp ? '' : 'truncate'}`} title={isExp ? undefined : e.text}>
-                      {isExp ? null : e.text}
-                      {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
+            return (
+              <div
+                key={i}
+                className={`rounded transition-colors cursor-pointer select-text ${rowCls}`}
+                onClick={() => setExpandedIdx(isExp ? null : i)}
+              >
+                <div className="flex items-start px-2 py-0.5 leading-5">
+                  <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
+                  {isGlobal && (
+                    <span className={`shrink-0 w-24 truncate ${agentColor(e.agentId)}`}>
+                      {e.agentId}·{e.channel === 'telegram' ? 'tg' : e.channel === 'line' ? 'line' : 'web'}
                     </span>
-                    {e.type === 'reply' && e.responseDuration != null && (
-                      <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
-                        {e.responseDuration.toFixed(1)}s
-                      </span>
-                    )}
-                    <span className="shrink-0 w-4 text-right text-zinc-600">{isExp ? '▲' : '▼'}</span>
-                  </div>
-                  {/* Expanded full content */}
-                  {isExp && (
-                    <pre className="px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ml-20">
-                      {expandText}
-                    </pre>
                   )}
+                  {isGlobal && (
+                    <span className="shrink-0 w-24 text-zinc-600 truncate">
+                      {e.user.replace('direct:', '').slice(0, 12)}
+                    </span>
+                  )}
+                  <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
+                  <span className={`flex-1 text-zinc-300 ${isExp ? '' : 'truncate'}`} title={isExp ? undefined : e.text}>
+                    {isExp ? null : e.text}
+                    {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
+                  </span>
+                  {e.type === 'reply' && e.responseDuration != null && (
+                    <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
+                      {e.responseDuration.toFixed(1)}s
+                    </span>
+                  )}
+                  <span className="shrink-0 w-4 text-right text-zinc-600">{isExp ? '▲' : '▼'}</span>
                 </div>
-              )
-            })
-          )}
-          <div ref={bottomRef} />
-        </div>
-
-        <p className="text-xs text-muted-foreground">
-          {filtered.length} events{filtered.length !== events.length ? ` (กรองจาก ${events.length})` : ''}
-        </p>
+                {isExp && (
+                  <pre className="px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ml-20">
+                    {expandText}
+                  </pre>
+                )}
+              </div>
+            )
+          })
+        )}
+        <div ref={bottomRef} />
       </div>
 
       <style>{`
