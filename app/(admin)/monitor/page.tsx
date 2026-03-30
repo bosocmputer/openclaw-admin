@@ -179,6 +179,7 @@ export default function MonitorPage() {
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { data, dataUpdatedAt } = useQuery({
@@ -400,34 +401,62 @@ export default function MonitorPage() {
           ) : (
             filtered.map((e, i) => {
               const badge = typeBadge(e.type)
+              const isExp = expandedIdx === i
               let rowCls = 'hover:bg-zinc-900'
               if (e.isLive)                   rowCls = 'row-live'
-              else if (e.type === 'thinking') rowCls = 'bg-yellow-950/15 hover:bg-yellow-950/25'
-              else if (e.type === 'tool')     rowCls = 'bg-purple-950/15 hover:bg-purple-950/25'
-              else if (e.type === 'error')    rowCls = 'bg-red-950/20 hover:bg-red-950/30'
+              else if (e.type === 'thinking') rowCls = isExp ? 'bg-yellow-950/30' : 'bg-yellow-950/15 hover:bg-yellow-950/25'
+              else if (e.type === 'tool')     rowCls = isExp ? 'bg-purple-950/30' : 'bg-purple-950/15 hover:bg-purple-950/25'
+              else if (e.type === 'error')    rowCls = isExp ? 'bg-red-950/35' : 'bg-red-950/20 hover:bg-red-950/30'
+              else if (isExp)                 rowCls = 'bg-zinc-800'
+
+              // Try to format tool JSON nicely
+              let expandText = e.text
+              if (e.type === 'tool') {
+                const colonIdx = e.text.indexOf(': ')
+                if (colonIdx !== -1) {
+                  try {
+                    const parsed = JSON.parse(e.text.slice(colonIdx + 2))
+                    expandText = e.text.slice(0, colonIdx) + ':\n' + JSON.stringify(parsed, null, 2)
+                  } catch { /* keep original */ }
+                }
+              }
 
               return (
-                <div key={i} className={`flex items-start px-2 py-0.5 leading-5 rounded transition-colors ${rowCls}`}>
-                  <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
-                  {isGlobal && (
-                    <span className={`shrink-0 w-24 truncate ${agentColor(e.agentId)}`}>
-                      {e.agentId}·{e.channel === 'telegram' ? 'tg' : e.channel === 'line' ? 'line' : 'web'}
+                <div
+                  key={i}
+                  className={`rounded transition-colors cursor-pointer select-text ${rowCls}`}
+                  onClick={() => setExpandedIdx(isExp ? null : i)}
+                >
+                  {/* Compact header row */}
+                  <div className="flex items-start px-2 py-0.5 leading-5">
+                    <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
+                    {isGlobal && (
+                      <span className={`shrink-0 w-24 truncate ${agentColor(e.agentId)}`}>
+                        {e.agentId}·{e.channel === 'telegram' ? 'tg' : e.channel === 'line' ? 'line' : 'web'}
+                      </span>
+                    )}
+                    {isGlobal && (
+                      <span className="shrink-0 w-24 text-zinc-600 truncate">
+                        {e.user.replace('direct:', '').slice(0, 12)}
+                      </span>
+                    )}
+                    <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
+                    <span className={`flex-1 text-zinc-300 ${isExp ? '' : 'truncate'}`} title={isExp ? undefined : e.text}>
+                      {isExp ? null : e.text}
+                      {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
                     </span>
-                  )}
-                  {isGlobal && (
-                    <span className="shrink-0 w-24 text-zinc-600 truncate">
-                      {e.user.replace('direct:', '').slice(0, 12)}
-                    </span>
-                  )}
-                  <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
-                  <span className="flex-1 text-zinc-300 truncate" title={e.text}>
-                    {e.text}
-                    {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
-                  </span>
-                  {e.type === 'reply' && e.responseDuration != null && (
-                    <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
-                      {e.responseDuration.toFixed(1)}s
-                    </span>
+                    {e.type === 'reply' && e.responseDuration != null && (
+                      <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
+                        {e.responseDuration.toFixed(1)}s
+                      </span>
+                    )}
+                    <span className="shrink-0 w-4 text-right text-zinc-600">{isExp ? '▲' : '▼'}</span>
+                  </div>
+                  {/* Expanded full content */}
+                  {isExp && (
+                    <pre className="px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ml-20">
+                      {expandText}
+                    </pre>
                   )}
                 </div>
               )
