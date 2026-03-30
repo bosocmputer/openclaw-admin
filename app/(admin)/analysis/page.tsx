@@ -3,10 +3,11 @@
 import { useQuery, useQueries } from '@tanstack/react-query'
 import {
   getAgents, getMembers, getWebchatRooms, getGatewayLogs, getAgentSessions,
-  getLineConfig, getLineBotInfo,
+  getLineConfig, getLineBotInfo, getMonitorCost, getAlerting, putAlerting,
   type Agent, type Member, type WebchatRoom, type LogEntry, type ChatSession, type LineBotInfo,
+  type CostData, type AlertingConfig,
 } from '@/lib/api'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
@@ -259,6 +260,135 @@ function SystemSection({ logs }: { logs: LogEntry[] }) {
   )
 }
 
+function CostDashboard({ data }: { data: CostData }) {
+  const agentIds = useMemo(() => {
+    const ids = new Set<string>()
+    data.days.forEach(d => d.agents.forEach(a => ids.add(a.agentId)))
+    return Array.from(ids).sort()
+  }, [data])
+
+  const fmtCost = (n: number) => n === 0 ? '$0' : n < 0.001 ? '<$0.001' : `$${n.toFixed(3)}`
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Cost Dashboard</h2>
+
+      {/* Summary */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm text-zinc-500">Total (30 days)</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold text-emerald-500">{fmtCost(data.summary.totalCost)}</p></CardContent>
+        </Card>
+        {agentIds.map(id => (
+          <Card key={id}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm text-zinc-500 font-mono">{id}</CardTitle></CardHeader>
+            <CardContent><p className="text-2xl font-bold">{fmtCost(data.summary.byAgent[id] ?? 0)}</p></CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Daily table */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-zinc-500">Daily Cost (last 30 days)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                  <th className="text-left py-1 pr-4 text-zinc-500 font-medium">Date</th>
+                  {agentIds.map(id => (
+                    <th key={id} className="text-right py-1 px-2 text-zinc-500 font-medium font-mono">{id}</th>
+                  ))}
+                  <th className="text-right py-1 pl-2 text-zinc-500 font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...data.days].reverse().map(day => {
+                  const totalDay = day.total
+                  const isHigh = totalDay > 1
+                  const isMid = totalDay > 0.1
+                  return (
+                    <tr key={day.date} className="border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                      <td className="py-1 pr-4 font-mono text-zinc-500">{day.date}</td>
+                      {agentIds.map(id => {
+                        const a = day.agents.find(x => x.agentId === id)
+                        return <td key={id} className="text-right px-2 tabular-nums">{a ? fmtCost(a.cost) : '—'}</td>
+                      })}
+                      <td className={`text-right pl-2 font-semibold tabular-nums ${isHigh ? 'text-red-500' : isMid ? 'text-amber-500' : 'text-emerald-500'}`}>
+                        {fmtCost(totalDay)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function AlertingSection({ initialConfig }: { initialConfig: AlertingConfig }) {
+  const [config, setConfig] = useState<AlertingConfig>(initialConfig)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await putAlerting(config)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Error Alerting</h2>
+      <Card>
+        <CardContent className="pt-4 space-y-4">
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="alert-enabled"
+              checked={config.telegram.enabled}
+              onChange={e => setConfig(c => ({ ...c, telegram: { ...c.telegram, enabled: e.target.checked } }))}
+              className="w-4 h-4 accent-emerald-500"
+            />
+            <label htmlFor="alert-enabled" className="text-sm font-medium">เปิดใช้งาน Telegram Alert</label>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-zinc-500 w-32 shrink-0">Chat ID</label>
+            <input
+              type="text"
+              value={config.telegram.chatId}
+              onChange={e => setConfig(c => ({ ...c, telegram: { ...c.telegram, chatId: e.target.value } }))}
+              placeholder="ใส่ Telegram chat_id หรือ group_id"
+              className="flex-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          </div>
+          <p className="text-xs text-zinc-400">Bot token ใช้จาก Telegram channel ที่ตั้งค่าไว้แล้ว • แจ้งเตือนเมื่อ agent error หรือหยุดกลางคัน</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="text-sm px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium disabled:opacity-50"
+            >
+              {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+            </button>
+            {saved && <span className="text-xs text-emerald-500">✓ บันทึกแล้ว</span>}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 function LineSection({ accounts }: { accounts: { accountId: string; botInfo: LineBotInfo | null }[] }) {
   return (
     <div className="space-y-4">
@@ -290,6 +420,8 @@ function LineSection({ accounts }: { accounts: { accountId: string; botInfo: Lin
 export default function AnalysisPage() {
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: getAgents })
   const { data: members = [] } = useQuery({ queryKey: ['members'], queryFn: getMembers })
+  const { data: costData } = useQuery({ queryKey: ['monitor-cost'], queryFn: () => getMonitorCost(30) })
+  const { data: alertingConfig } = useQuery({ queryKey: ['alerting-config'], queryFn: getAlerting })
   const { data: webchatRooms = [] } = useQuery({ queryKey: ['webchat-rooms-dash'], queryFn: () => getWebchatRooms() })
   const { data: logs = [], isLoading: logsLoading } = useQuery({
     queryKey: ['gateway-logs'],
@@ -348,6 +480,10 @@ export default function AnalysisPage() {
       <WebchatSection rooms={webchatRooms} />
 
       <MembersSection members={members} />
+
+      {costData && <CostDashboard data={costData} />}
+
+      {alertingConfig && <AlertingSection initialConfig={alertingConfig} />}
 
       {logsLoading ? (
         <p className="text-sm text-zinc-400">Loading logs...</p>

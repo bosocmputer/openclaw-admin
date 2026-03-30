@@ -441,6 +441,12 @@ export interface MonitorEvent {
   agentId?: string
   channel?: string
   user?: string
+  latency?: number
+  inputTokens?: number
+  outputTokens?: number
+  cost?: number
+  toolName?: string
+  toolResult?: string
 }
 
 export interface MonitorSession {
@@ -452,6 +458,8 @@ export interface MonitorSession {
   lastReplyText: string | null
   elapsed: number
   cost: number
+  inputTokens?: number
+  outputTokens?: number
   events: MonitorEvent[]
 }
 
@@ -482,4 +490,83 @@ export interface MonitorData {
 export async function getMonitorEvents(): Promise<MonitorData> {
   const { data } = await api.get('/api/monitor/events')
   return data
+}
+
+// ─── Session Replay ────────────────────────────────────────────────────────────
+
+export interface SessionReplayToolCall {
+  name: string
+  input: unknown
+  result?: string
+}
+
+export interface SessionReplayMessage {
+  role: 'user' | 'assistant'
+  timestamp: string
+  text: string
+  thinking?: string | null
+  toolCalls?: SessionReplayToolCall[]
+  usage?: { input: number; output: number; cost: number } | null
+  latency?: number | null
+  model?: string
+  stopReason?: string
+}
+
+export interface SessionReplay {
+  sessionId: string
+  agentId: string
+  messages: SessionReplayMessage[]
+  stats: {
+    turns: number
+    inputTokens: number
+    outputTokens: number
+    totalCost: number
+    avgLatency: number
+  }
+}
+
+export async function getSessionReplay(agentId: string, sessionId: string): Promise<SessionReplay> {
+  const { data } = await api.get(`/api/agents/${agentId}/sessions/${sessionId}`)
+  return data
+}
+
+// ─── Cost Dashboard ────────────────────────────────────────────────────────────
+
+export interface CostDayAgent {
+  agentId: string
+  cost: number
+  inputTokens: number
+  outputTokens: number
+  turns: number
+}
+
+export interface CostDay {
+  date: string
+  agents: CostDayAgent[]
+  total: number
+}
+
+export interface CostData {
+  days: CostDay[]
+  summary: { totalCost: number; byAgent: Record<string, number> }
+}
+
+export async function getMonitorCost(days = 30): Promise<CostData> {
+  const { data } = await api.get('/api/monitor/cost', { params: { days } })
+  return data
+}
+
+// ─── Alerting ─────────────────────────────────────────────────────────────────
+
+export interface AlertingConfig {
+  telegram: { enabled: boolean; chatId: string }
+}
+
+export async function getAlerting(): Promise<AlertingConfig> {
+  const { data } = await api.get('/api/alerting')
+  return data
+}
+
+export async function putAlerting(config: AlertingConfig): Promise<void> {
+  await api.put('/api/alerting', config)
 }

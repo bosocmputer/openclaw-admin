@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getMonitorEvents, type MonitorData, type MonitorEvent } from '@/lib/api'
+import { getMonitorEvents, getSessionReplay, type MonitorData, type MonitorEvent } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -25,13 +25,6 @@ function tsToSec(ts: string): number {
   return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60 + parseFloat(p[2])
 }
 
-function relativeTime(iso: string): string {
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (diff < 60) return `${diff}s`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  return `${Math.floor(diff / 3600)}h`
-}
-
 // ─── Types ─────────────────────────────────────────────────────────────────────
 interface FlatEvent {
   ts: string
@@ -44,6 +37,11 @@ interface FlatEvent {
   sessionKey: string
   isLive: boolean
   responseDuration?: number
+  latency?: number
+  inputTokens?: number
+  outputTokens?: number
+  cost?: number
+  toolResult?: string
 }
 
 interface SessionGroup {
@@ -93,29 +91,6 @@ function agentColor(id: string) {
   return agentColorMap[id]
 }
 
-// ─── Channel Icon ──────────────────────────────────────────────────────────────
-function ChannelIcon({ channel }: { channel: 'webchat' | 'telegram' | 'line' }) {
-  if (channel === 'telegram') {
-    return (
-      <svg className="inline-block w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#29B2E8" aria-label="Telegram">
-        <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-      </svg>
-    )
-  }
-  if (channel === 'line') {
-    return (
-      <svg className="inline-block w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#06C755" aria-label="LINE">
-        <path d="M19.365 9.863c.349 0 .63.285.63.63 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.627.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.627-.63.349 0 .631.285.631.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.281.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.070 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/>
-      </svg>
-    )
-  }
-  return (
-    <svg className="inline-block w-3.5 h-3.5 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor" aria-label="Webchat">
-      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
-    </svg>
-  )
-}
-
 // ─── Data transform ────────────────────────────────────────────────────────────
 function buildGroups(data: MonitorData): SessionGroup[] {
   const groups: SessionGroup[] = []
@@ -151,6 +126,11 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             ts: e.ts, tsThai: tsToThai(e.ts), type: e.type, text: e.text,
             agentId: agent.id, channel: ch, user: session.user,
             sessionKey: session.sessionKey, isLive: isActive && isLast, responseDuration,
+            latency: (e as MonitorEvent).latency,
+            inputTokens: (e as MonitorEvent).inputTokens,
+            outputTokens: (e as MonitorEvent).outputTokens,
+            cost: (e as MonitorEvent).cost,
+            toolResult: (e as MonitorEvent).toolResult,
           })
         }
 
@@ -179,6 +159,7 @@ export default function MonitorPage() {
   const [stateFilter, setStateFilter] = useState('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
+  const [replayOpen, setReplayOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { data, dataUpdatedAt } = useQuery({
@@ -206,6 +187,14 @@ export default function MonitorPage() {
   const selectedGroup = groups.find(g => g.sessionKey === selectedKey) ?? null
   const effectiveKey = selectedGroup ? selectedKey : null
 
+  // Replay queries (need selectedGroup declared first)
+  const replayAgentId = selectedGroup?.agentId ?? null
+  const { data: replayData, isLoading: replayLoading } = useQuery({
+    queryKey: ['session-replay', replayAgentId, selectedKey],
+    queryFn: () => getSessionReplay(replayAgentId!, selectedKey!),
+    enabled: replayOpen && replayAgentId !== null && selectedKey !== null,
+  })
+
   let longestDur = 0
   let errorCount = 0
   for (const g of groups) {
@@ -220,17 +209,13 @@ export default function MonitorPage() {
   // ─── Events to display ────────────────────────────────────────────────────
   const isGlobal = effectiveKey === null
   let events: FlatEvent[] = []
-  let panelTitle = 'ทุก session'
 
   if (isGlobal) {
     events = groups.flatMap(g => g.events)
     events.sort((a, b) => a.ts.localeCompare(b.ts))
   } else {
     const g = groups.find(g => g.sessionKey === effectiveKey)
-    if (g) {
-      panelTitle = `${g.agentId} · ${g.channel} · ${g.user.replace('direct:', '')}`
-      events = g.events
-    }
+    if (g) events = g.events
   }
 
   const q = search.toLowerCase()
@@ -282,8 +267,9 @@ export default function MonitorPage() {
       <div className="shrink-0 flex items-center gap-2 flex-wrap">
         {/* Session dropdown */}
         <select
+          aria-label="เลือก session"
           value={selectedKey ?? ''}
-          onChange={e => { setSelectedKey(e.target.value || null); setExpandedIdx(null) }}
+          onChange={e => { setSelectedKey(e.target.value || null); setExpandedIdx(null); setReplayOpen(false) }}
           className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring min-w-0 max-w-[260px] truncate"
         >
           <option value="">📡 ทุก session ({groups.length})</option>
@@ -298,6 +284,18 @@ export default function MonitorPage() {
             )
           })}
         </select>
+
+        {/* Full Replay button — only when specific session selected */}
+        {effectiveKey && (
+          <Button
+            size="sm"
+            variant={replayOpen ? 'default' : 'outline'}
+            className="h-8 text-xs px-2.5"
+            onClick={() => setReplayOpen(v => !v)}
+          >
+            📋 {replayOpen ? 'ปิด Replay' : 'Full Replay'}
+          </Button>
+        )}
 
         {/* Filter pills */}
         <div className="flex gap-1 flex-wrap">
@@ -339,7 +337,62 @@ export default function MonitorPage() {
         </span>
       </div>
 
+      {/* ── Full Replay Panel ─────────────────────────────────────────── */}
+      {replayOpen && effectiveKey && (
+        <div className="flex-1 min-h-0 border rounded-xl bg-zinc-950 font-mono text-xs overflow-y-auto p-3 space-y-3">
+          {replayLoading && <p className="text-zinc-500 text-center py-8">กำลังโหลด full session...</p>}
+          {!replayLoading && !replayData && (
+            <p className="text-zinc-500 text-center py-8">ไม่พบ session ID — กรุณารอสักครู่</p>
+          )}
+          {replayData && (
+            <>
+              {/* Stats bar */}
+              <div className="flex gap-3 text-zinc-500 text-xs border-b border-zinc-800 pb-2 flex-wrap">
+                <span>{replayData.stats.turns} turns</span>
+                <span>in: {replayData.stats.inputTokens.toLocaleString()}</span>
+                <span>out: {replayData.stats.outputTokens.toLocaleString()}</span>
+                <span className="text-yellow-500">${replayData.stats.totalCost.toFixed(4)}</span>
+                <span>avg {replayData.stats.avgLatency}s</span>
+              </div>
+              {/* Messages */}
+              {replayData.messages.map((msg, mi) => (
+                <div key={mi} className={`rounded p-2 ${msg.role === 'user' ? 'bg-zinc-900 border border-zinc-800' : 'bg-zinc-950'}`}>
+                  <div className="flex gap-2 items-center mb-1 text-zinc-500">
+                    <span className={msg.role === 'user' ? 'text-blue-400' : 'text-green-400'}>{msg.role === 'user' ? '👤 User' : '🤖 Agent'}</span>
+                    <span>{msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}</span>
+                    {msg.latency != null && <span className={durationColor(msg.latency)}>{msg.latency}s</span>}
+                    {msg.usage && (
+                      <>
+                        <span>↑{msg.usage.input.toLocaleString()}</span>
+                        <span>↓{msg.usage.output.toLocaleString()}</span>
+                        <span className="text-yellow-500">${msg.usage.cost.toFixed(4)}</span>
+                      </>
+                    )}
+                    {msg.model && <span className="truncate max-w-32 text-zinc-600">{msg.model}</span>}
+                  </div>
+                  {msg.thinking && (
+                    <details className="mb-1">
+                      <summary className="text-yellow-600 cursor-pointer text-xs">💭 Thinking</summary>
+                      <pre className="mt-1 text-yellow-200/70 whitespace-pre-wrap break-all leading-relaxed text-xs">{msg.thinking}</pre>
+                    </details>
+                  )}
+                  {msg.toolCalls && msg.toolCalls.length > 0 && msg.toolCalls.map((tc, ti) => (
+                    <details key={ti} className="mb-1">
+                      <summary className="text-purple-400 cursor-pointer text-xs">🔧 {tc.name}</summary>
+                      <pre className="mt-1 text-purple-200/70 whitespace-pre-wrap break-all text-xs">Input: {JSON.stringify(tc.input, null, 2)}</pre>
+                      {tc.result && <pre className="mt-1 text-zinc-400 whitespace-pre-wrap break-all text-xs">Result: {tc.result}</pre>}
+                    </details>
+                  ))}
+                  {msg.text && <pre className="text-zinc-200 whitespace-pre-wrap break-all leading-relaxed">{msg.text}</pre>}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── Log panel — fills remaining height ───────────────────────────── */}
+      {!replayOpen && (
       <div className="flex-1 min-h-0 border rounded-xl bg-zinc-950 font-mono text-xs overflow-y-auto p-1">
         {filtered.length === 0 ? (
           <p className="text-zinc-600 text-center py-12">ไม่มีข้อมูล</p>
@@ -388,6 +441,13 @@ export default function MonitorPage() {
                     {isExp ? null : e.text}
                     {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
                   </span>
+                  {e.type === 'reply' && (e.latency != null || e.inputTokens) && (
+                    <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
+                      {e.latency != null && <span className={durationColor(e.latency)}>{e.latency}s</span>}
+                      {e.inputTokens ? <span title={`In: ${e.inputTokens?.toLocaleString()} Out: ${e.outputTokens?.toLocaleString()}`}>{(((e.inputTokens ?? 0) + (e.outputTokens ?? 0)) / 1000).toFixed(1)}K</span> : null}
+                      {e.cost ? <span className="text-yellow-600">${e.cost.toFixed(4)}</span> : null}
+                    </span>
+                  )}
                   {e.type === 'reply' && e.responseDuration != null && (
                     <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
                       {e.responseDuration.toFixed(1)}s
@@ -398,6 +458,11 @@ export default function MonitorPage() {
                 {isExp && (
                   <pre className="px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ml-20">
                     {expandText}
+                    {e.type === 'tool' && e.toolResult && (
+                      <span className="block mt-2 pt-2 border-t border-zinc-700 text-zinc-400">
+                        {'↩ Result:\n'}{e.toolResult}
+                      </span>
+                    )}
                   </pre>
                 )}
               </div>
@@ -406,6 +471,7 @@ export default function MonitorPage() {
         )}
         <div ref={bottomRef} />
       </div>
+      )}
 
       <style>{`
         @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
