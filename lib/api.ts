@@ -267,6 +267,10 @@ export async function deleteLineAccount(accountId: string): Promise<void> {
   await api.delete(`/api/line/accounts/${accountId}`)
 }
 
+export async function updateLineAccount(accountId: string, fields: { channelAccessToken?: string; channelSecret?: string; webhookPath?: string }): Promise<void> {
+  await api.patch(`/api/line/accounts/${accountId}`, fields)
+}
+
 export async function getLinePending(): Promise<LinePendingItem[]> {
   const { data } = await api.get('/api/line/pending')
   return data
@@ -386,7 +390,7 @@ export async function getWebchatHistory(roomId: number, username: string): Promi
 }
 
 export async function sendWebchatMessage(roomId: number, username: string, message: string, signal?: AbortSignal): Promise<{ ok: boolean; reply: string }> {
-  const { data } = await api.post('/api/webchat/send', { roomId, username, message }, { signal })
+  const { data } = await api.post('/api/webchat/send', { roomId, username, message }, { signal, timeout: 180_000 })
   return data
 }
 

@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getLineConfig, getLineBotInfo, getLineBindings, getLinePending, getAgents,
-  addLineAccount, deleteLineAccount, setLineBinding, approveLinePairing, restartGateway,
+  addLineAccount, deleteLineAccount, updateLineAccount, setLineBinding, approveLinePairing, restartGateway,
   type LineBotInfo,
 } from '@/lib/api'
 import { useState } from 'react'
@@ -33,6 +33,8 @@ function AccountCard({
   agents,
   onBindAgent,
   bindingSaving,
+  onEdit,
+  editing,
   onDelete,
   deleting,
 }: {
@@ -43,6 +45,8 @@ function AccountCard({
   agents: { id: string }[]
   onBindAgent: (agentId: string) => void
   bindingSaving: boolean
+  onEdit: () => void
+  editing: boolean
   onDelete: () => void
   deleting: boolean
 }) {
@@ -70,15 +74,20 @@ function AccountCard({
           {boundAgentId && (
             <Badge variant="secondary" className="text-xs">→ agent: {boundAgentId}</Badge>
           )}
-          <Button
-            variant="destructive"
-            size="sm"
-            className="text-xs ml-auto"
-            disabled={deleting}
-            onClick={onDelete}
-          >
-            {deleting ? 'Deleting...' : 'Delete OA'}
-          </Button>
+          <div className="ml-auto flex gap-2">
+            <Button variant="outline" size="sm" className="text-xs" disabled={editing} onClick={onEdit}>
+              Edit
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="text-xs"
+              disabled={deleting}
+              onClick={onDelete}
+            >
+              {deleting ? 'Deleting...' : 'Delete OA'}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -169,6 +178,12 @@ export default function LinePage() {
   const [showToken, setShowToken] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
   const [deleteDialog, setDeleteDialog] = useState<string | null>(null)
+  const [editDialog, setEditDialog] = useState<string | null>(null)
+  const [editToken, setEditToken] = useState('')
+  const [editSecret, setEditSecret] = useState('')
+  const [editWebhookPath, setEditWebhookPath] = useState('')
+  const [showEditToken, setShowEditToken] = useState(false)
+  const [showEditSecret, setShowEditSecret] = useState(false)
 
   const { data: lineConfig, isLoading } = useQuery({ queryKey: ['line-config'], queryFn: getLineConfig })
   const { data: botInfoMap = {} } = useQuery({
@@ -247,6 +262,23 @@ export default function LinePage() {
       toast.success('Agent binding saved')
     },
     onError: () => toast.error('Failed to save binding'),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: () => updateLineAccount(editDialog!, {
+      channelAccessToken: editToken.trim() || undefined,
+      channelSecret: editSecret.trim() || undefined,
+      webhookPath: editWebhookPath.trim() || undefined,
+    }),
+    onSuccess: async () => {
+      toast.loading('Restarting gateway...', { id: 'restart' })
+      try { await restartGateway() } catch {}
+      toast.success('LINE OA updated — gateway restarted', { id: 'restart' })
+      qc.invalidateQueries({ queryKey: ['line-config'] })
+      qc.invalidateQueries({ queryKey: ['line-botinfo'] })
+      setEditDialog(null)
+    },
+    onError: () => toast.error('Failed to update LINE OA'),
   })
 
   const approveMutation = useMutation({
@@ -356,6 +388,13 @@ export default function LinePage() {
             agents={agents}
             onBindAgent={agentId => bindMutation.mutate({ accountId: id, agentId })}
             bindingSaving={bindMutation.isPending}
+            onEdit={() => {
+              setEditToken('')
+              setEditSecret('')
+              setEditWebhookPath(webhookPaths[id] ?? '')
+              setEditDialog(id)
+            }}
+            editing={updateMutation.isPending && editDialog === id}
             onDelete={() => setDeleteDialog(id)}
             deleting={deleteMutation.isPending && deleteDialog === id}
           />
@@ -393,6 +432,67 @@ export default function LinePage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editDialog} onOpenChange={open => { if (!open) setEditDialog(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>แก้ไข LINE OA: {editDialog}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Webhook Path</p>
+              <Input
+                placeholder="/line/webhook/sale"
+                value={editWebhookPath}
+                onChange={e => setEditWebhookPath(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Channel Access Token</p>
+              <p className="text-xs text-zinc-500">เว้นว่างถ้าไม่ต้องการเปลี่ยน</p>
+              <div className="flex gap-2">
+                <Input
+                  type={showEditToken ? 'text' : 'password'}
+                  placeholder="ไม่เปลี่ยน"
+                  value={editToken}
+                  onChange={e => setEditToken(e.target.value)}
+                  className="font-mono flex-1"
+                />
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => setShowEditToken(v => !v)}>
+                  {showEditToken ? 'Hide' : 'Show'}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Channel Secret</p>
+              <p className="text-xs text-zinc-500">เว้นว่างถ้าไม่ต้องการเปลี่ยน</p>
+              <div className="flex gap-2">
+                <Input
+                  type={showEditSecret ? 'text' : 'password'}
+                  placeholder="ไม่เปลี่ยน"
+                  value={editSecret}
+                  onChange={e => setEditSecret(e.target.value)}
+                  className="font-mono flex-1"
+                />
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => setShowEditSecret(v => !v)}>
+                  {showEditSecret ? 'Hide' : 'Show'}
+                </Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialog(null)}>Cancel</Button>
+            <Button
+              disabled={updateMutation.isPending}
+              onClick={() => updateMutation.mutate()}
+            >
+              {updateMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Dialog */}
       <Dialog open={!!deleteDialog} onOpenChange={open => { if (!open) setDeleteDialog(null) }}>
