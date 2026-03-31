@@ -158,7 +158,8 @@ export default function MonitorPage() {
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
+  const [expandedIdxSet, setExpandedIdxSet] = useState<Set<number>>(new Set())
+  const [expandAll, setExpandAll] = useState(false)
   const [replayOpen, setReplayOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -230,6 +231,25 @@ export default function MonitorPage() {
     return true
   })
 
+  function handleToggleExpandAll() {
+    if (expandAll) {
+      setExpandedIdxSet(new Set())
+      setExpandAll(false)
+    } else {
+      setExpandedIdxSet(new Set(Array.from({ length: filtered.length }, (_, i) => i)))
+      setExpandAll(true)
+    }
+  }
+
+  function toggleRow(i: number) {
+    setExpandedIdxSet(prev => {
+      const next = new Set(prev)
+      if (next.has(i)) { next.delete(i) } else { next.add(i) }
+      return next
+    })
+    setExpandAll(false)
+  }
+
   return (
     <div className="flex flex-col h-full gap-3">
 
@@ -269,7 +289,7 @@ export default function MonitorPage() {
         <select
           aria-label="เลือก session"
           value={selectedKey ?? ''}
-          onChange={e => { setSelectedKey(e.target.value || null); setExpandedIdx(null); setReplayOpen(false) }}
+          onChange={e => { setSelectedKey(e.target.value || null); setExpandedIdxSet(new Set()); setExpandAll(false); setReplayOpen(false) }}
           className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring min-w-0 max-w-[260px] truncate"
         >
           <option value="">📡 ทุก session ({groups.length})</option>
@@ -332,6 +352,11 @@ export default function MonitorPage() {
           <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
           Auto scroll
         </label>
+        {!replayOpen && filtered.length > 0 && (
+          <Button size="sm" variant="outline" className="h-8 text-xs px-2.5" onClick={handleToggleExpandAll}>
+            {expandAll ? '▲ Collapse All' : '▼ Expand All'}
+          </Button>
+        )}
         <span className="text-xs text-muted-foreground ml-auto">
           {filtered.length} events{filtered.length !== events.length ? ` / ${events.length}` : ''}
         </span>
@@ -399,7 +424,7 @@ export default function MonitorPage() {
         ) : (
           filtered.map((e, i) => {
             const badge = typeBadge(e.type)
-            const isExp = expandedIdx === i
+            const isExp = expandedIdxSet.has(i)
             let rowCls = 'hover:bg-zinc-900'
             if (e.isLive)                   rowCls = 'row-live'
             else if (e.type === 'thinking') rowCls = isExp ? 'bg-yellow-950/30' : 'bg-yellow-950/15 hover:bg-yellow-950/25'
@@ -422,7 +447,7 @@ export default function MonitorPage() {
               <div
                 key={i}
                 className={`rounded transition-colors cursor-pointer select-text ${rowCls}`}
-                onClick={() => setExpandedIdx(isExp ? null : i)}
+                onClick={() => toggleRow(i)}
               >
                 <div className="flex items-start px-2 py-0.5 leading-5">
                   <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
