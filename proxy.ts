@@ -4,7 +4,7 @@ import { decrypt } from '@/lib/session'
 const PUBLIC_ROUTES = ['/login']
 
 // route ที่ role=chat เข้าได้
-const CHAT_ALLOWED = ['/webchat']
+const CHAT_ALLOWED = ['/webchat', '/api']
 
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname
