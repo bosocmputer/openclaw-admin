@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-03-30 (รอบ 10)
+> อัปเดต: 2026-03-31 (รอบ 11)
 
 ---
 
@@ -216,7 +216,7 @@ GET /api/line/botinfo → เรียก LINE API getProfile ต่อ account 
 GET /api/line/bindings → กรอง bindings[] type:"route" channel:"line" → [{ accountId, agentId }]
 POST /api/line/accounts { accountId, channelAccessToken, channelSecret, webhookPath }
   → เพิ่ม accounts[accountId] = { channelAccessToken, channelSecret, webhookPath, dmPolicy:"open" }
-  → PUT /api/config
+  → PUT /api/config  ← dmPolicy="open" เสมอ (pairing ถูกลบออกแล้ว)
 DELETE /api/line/accounts/:id → ลบ accounts[id] + bindings ออกจาก config
 
 LINE session key: agent:<agentId>:line:direct:<lineUserId>

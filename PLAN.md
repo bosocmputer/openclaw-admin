@@ -1,6 +1,6 @@
 # OpenClaw Admin — Project Plan
 
-> อัปเดตล่าสุด: 2026-03-30 (รอบ 10)
+> อัปเดตล่าสุด: 2026-03-31 (รอบ 11)
 
 ---
 
@@ -130,7 +130,7 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
   - Dropdown ผูก Agent
   - แสดง Webhook URL: `<tunnel-url>/line/webhook/<id>` สำหรับตั้งใน LINE Console
   - DM Policy: **open** (ตอบทุกคน) / **allowlist**
-  - ปุ่ม Delete + QR pairing approve
+  - ปุ่ม Delete
 - **หมายเหตุ**: ต้องมี cloudflared สำหรับ HTTPS public URL ก่อนตั้ง webhook
 - **webhookPath ต้องไม่ซ้ำกัน** — ถ้าซ้ำ account ที่ start ทีหลังจะ override handler ทำให้ account แรกได้ 401
 
@@ -364,7 +364,8 @@ Browser → Next.js (localhost:3000) → Express API (server:4000) → openclaw.
 - **role=chat**: login แล้ว redirect `/webchat` ทันที — proxy.ts กั้น route อื่นทั้งหมด — ไม่มี sidebar เมนู
 - **LINE webhookPath ต้องไม่ซ้ำกัน**: `registerPluginHttpRoute` ใน openclaw-gateway ใช้ `replaceExisting:true` — ถ้า 2 OA ใช้ path เดียวกัน OA ที่ start ทีหลัง override handler → OA แรกได้ 401
 - **LINE session key**: `agent:<agentId>:line:direct:<lineUserId>` เช่น `agent:sale:line:direct:u6490df71c89c6db1b51c7084b46055ef`
-- **LINE dmPolicy**: ใช้ `open` เท่านั้น — ไม่ต้อง pairing
+- **LINE dmPolicy**: ใช้ `open` เท่านั้น — pairing ถูกลบออกแล้ว (LINE OA ใหม่สร้างด้วย `dmPolicy: 'open'` เสมอ)
+- **proxy.ts CHAT_ALLOWED**: role=chat ต้องเข้า `/webchat` และ `/api` ได้ — ถ้าไม่มี `/api` browser call จะ redirect เป็น HTML ทำให้ axios crash
 - **cloudflared**: LINE webhook ต้องการ HTTPS public URL — ใช้ cloudflared expose port 18789 (openclaw-gateway) ดู INSTALL.md ขั้นตอน 11.9
 - **LINE Console**: Webhook URL per OA เช่น `https://<tunnel>.trycloudflare.com/line/webhook/sale` — ต้อง verify + enable ใน LINE Console
 - **Sidebar เมนู (admin/superadmin)**: Dashboard, Model, Agents, Telegram, **LINE**, Webchat, **Monitor**, Analysis, Logs, **Compaction**, คู่มือ, สมาชิก
