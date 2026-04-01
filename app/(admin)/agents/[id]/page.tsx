@@ -77,21 +77,16 @@ function SoulPanel({ agentId }: { agentId: string }) {
           <div className="flex items-center gap-2 flex-wrap">
             {dirty && <Badge variant="outline" className="text-amber-600 border-amber-400">Unsaved</Badge>}
             <div className="flex items-center gap-1.5">
-              <Select value={persona} onValueChange={v => v && setPersona(v)}>
-                <SelectTrigger className="h-8 w-32 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PERSONAS.map(p => (
-                    <SelectItem key={p.value} value={p.value}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{p.label}</span>
-                        <span className="text-zinc-400 text-xs">{p.desc}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <select
+                value={persona}
+                onChange={e => setPersona(e.target.value)}
+                title="เลือกบุคลิก agent"
+                className="h-8 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm px-2 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+              >
+                {PERSONAS.map(p => (
+                  <option key={p.value} value={p.value}>{p.label} — {p.desc}</option>
+                ))}
+              </select>
               <Button variant="outline" size="sm" onClick={loadTemplate} disabled={loadingTemplate}>
                 {loadingTemplate ? 'Loading...' : 'Load Template'}
               </Button>
