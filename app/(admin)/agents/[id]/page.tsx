@@ -77,7 +77,7 @@ function SoulPanel({ agentId }: { agentId: string }) {
           <div className="flex items-center gap-2 flex-wrap">
             {dirty && <Badge variant="outline" className="text-amber-600 border-amber-400">Unsaved</Badge>}
             <div className="flex items-center gap-1.5">
-              <Select value={persona} onValueChange={setPersona}>
+              <Select value={persona} onValueChange={v => v && setPersona(v)}>
                 <SelectTrigger className="h-8 w-32 text-xs">
                   <SelectValue />
                 </SelectTrigger>
