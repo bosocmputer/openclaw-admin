@@ -84,8 +84,10 @@ function SoulPanel({ agentId }: { agentId: string }) {
                 <SelectContent>
                   {PERSONAS.map(p => (
                     <SelectItem key={p.value} value={p.value}>
-                      <span className="font-medium">{p.label}</span>
-                      <span className="text-zinc-400 ml-1.5 text-xs">— {p.desc}</span>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{p.label}</span>
+                        <span className="text-zinc-400 text-xs">{p.desc}</span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
