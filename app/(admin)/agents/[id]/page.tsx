@@ -39,7 +39,17 @@ function SoulPanel({ agentId }: { agentId: string }) {
     queryFn: () => getAgentSoul(agentId),
   })
 
-  useEffect(() => { if (data !== undefined) { setSoul(data); setDirty(false) } }, [data])
+  useEffect(() => {
+    if (data !== undefined) {
+      setSoul(data)
+      setDirty(false)
+      // detect persona from saved SOUL text
+      if (data.includes('ตอบเป็นกันเอง')) setPersona('friendly')
+      else if (data.includes('ตอบสดใส')) setPersona('cheerful')
+      else if (data.includes('ตอบข้อมูลล้วน')) setPersona('strict')
+      else if (data.includes('ตอบสุภาพ ทางการ')) setPersona('professional')
+    }
+  }, [data])
 
   const save = useMutation({
     mutationFn: () => putAgentSoul(agentId, soul),
