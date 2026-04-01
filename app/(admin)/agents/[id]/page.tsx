@@ -20,11 +20,19 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 
 // ── Soul Panel ────────────────────────────────────────────
+const PERSONAS = [
+  { value: 'professional', label: 'ทางการ',     desc: 'สุภาพ กระชับ ตรงประเด็น ไม่มีอีโมจิ' },
+  { value: 'friendly',     label: 'เป็นกันเอง',  desc: 'ภาษาพูด อบอุ่น มีอีโมจิเล็กน้อย' },
+  { value: 'cheerful',     label: 'สดใส',        desc: 'กระตือรือร้น ให้กำลังใจ มีอีโมจิ' },
+  { value: 'strict',       label: 'เน้นข้อมูล',  desc: 'ข้อมูลล้วน ไม่คุย off-topic' },
+]
+
 function SoulPanel({ agentId }: { agentId: string }) {
   const qc = useQueryClient()
   const [soul, setSoul] = useState('')
   const [dirty, setDirty] = useState(false)
   const [loadingTemplate, setLoadingTemplate] = useState(false)
+  const [persona, setPersona] = useState('professional')
 
   const { data, isLoading } = useQuery({
     queryKey: ['soul', agentId],
@@ -46,10 +54,11 @@ function SoulPanel({ agentId }: { agentId: string }) {
   async function loadTemplate() {
     setLoadingTemplate(true)
     try {
-      const { data } = await api.get(`/api/agents/${agentId}/soul/template`)
+      const { data } = await api.get(`/api/agents/${agentId}/soul/template`, { params: { persona } })
       setSoul(data.soul)
       setDirty(true)
-      toast.success(`โหลด template สำหรับ mode "${data.accessMode}" แล้ว — กด Save เพื่อบันทึก`)
+      const personaLabel = PERSONAS.find(p => p.value === persona)?.label ?? persona
+      toast.success(`โหลด template — mode "${data.accessMode}" / บุคลิก "${personaLabel}" — กด Save เพื่อบันทึก`)
     } catch {
       toast.error('Failed to load template')
     } finally {
@@ -65,11 +74,26 @@ function SoulPanel({ agentId }: { agentId: string }) {
             <CardTitle className="text-base">SOUL</CardTitle>
             <p className="text-xs text-zinc-500 mt-0.5">System prompt ที่กำหนดบุคลิก ขอบเขต และพฤติกรรมของ agent</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {dirty && <Badge variant="outline" className="text-amber-600 border-amber-400">Unsaved</Badge>}
-            <Button variant="outline" size="sm" onClick={loadTemplate} disabled={loadingTemplate}>
-              {loadingTemplate ? 'Loading...' : 'Load Template'}
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Select value={persona} onValueChange={setPersona}>
+                <SelectTrigger className="h-8 w-32 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERSONAS.map(p => (
+                    <SelectItem key={p.value} value={p.value}>
+                      <span className="font-medium">{p.label}</span>
+                      <span className="text-zinc-400 ml-1.5 text-xs">— {p.desc}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={loadTemplate} disabled={loadingTemplate}>
+                {loadingTemplate ? 'Loading...' : 'Load Template'}
+              </Button>
+            </div>
           </div>
         </div>
       </CardHeader>
