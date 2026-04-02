@@ -599,11 +599,11 @@ pm2 restart openclaw-api --update-env
 
 > Webchat อาจใช้เวลา 30–60 วินาทีต่อคำถาม (agent ต้องดึงข้อมูล ERP) — นี่คือพฤติกรรมปกติ
 
-### Webchat ตอบใน LINE ด้วย (bug เก่า)
+### Webchat ตอบใน LINE ด้วย
 
-เกิดจาก sessions เก่าแบบ `hook:webchat:{username}` (ไม่มี `uid:`) ที่มี `lastChannel=line` ค้างอยู่
+มีสาเหตุได้ 2 แบบ — รันทั้งสอง script แล้ว restart gateway:
 
-แก้ไขโดยลบ sessions เก่าออก (แต่ละ agent):
+**แบบที่ 1 — sessions เก่าแบบ `hook:webchat:{username}` (ไม่มี `uid:`) ค้างอยู่:**
 
 ```bash
 python3 << 'EOF'
@@ -617,6 +617,33 @@ for path in glob.glob(os.path.expanduser('~/.openclaw/agents/*/sessions/sessions
         print(f'{path}: removing {bad}')
         for k in bad: del data[k]
         with open(path, 'w') as f: json.dump(data, f, indent=2)
+    else:
+        print(f'{path}: clean')
+EOF
+```
+
+**แบบที่ 2 — `main` session ของ agent มี `lastChannel=line` ค้างอยู่** (พบใน production):
+
+เกิดเมื่อ agent เคยรับ LINE message มาก่อน แล้ว gateway ใช้ `main` session เป็น fallback ทำให้ webchat reply ออกไปทาง LINE
+
+```bash
+python3 << 'EOF'
+import json, os, glob
+
+for path in glob.glob(os.path.expanduser('~/.openclaw/agents/*/sessions/sessions.json')):
+    with open(path) as f:
+        data = json.load(f)
+    changed = False
+    for k, v in data.items():
+        if k.endswith(':main') and isinstance(v, dict) and v.get('lastChannel') == 'line':
+            print(f'{path}: clearing lastChannel from {k}')
+            v.pop('lastChannel', None)
+            v.pop('lastAccountId', None)
+            v.pop('lastPeer', None)
+            changed = True
+    if changed:
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
     else:
         print(f'{path}: clean')
 EOF
