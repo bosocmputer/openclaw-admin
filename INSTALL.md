@@ -6,8 +6,6 @@
 
 ## ข้อมูลที่ต้องเตรียมก่อนเริ่ม
 
-เตรียมข้อมูลเหล่านี้ให้ครบก่อนเริ่มติดตั้ง:
-
 | ข้อมูล | ตัวอย่าง | หมายเหตุ |
 |--------|---------|---------|
 | IP address ของ server | `192.168.1.100` | ถามผู้ดูแลระบบร้าน |
@@ -21,14 +19,21 @@
 ## ภาพรวมระบบ
 
 ```
-หน้าเว็บ Admin (port 3000)
-       │
-       ├── PostgreSQL (port 5432)   ← เก็บข้อมูล admin users
-       │
-openclaw-api (port 4000)            ← Express API
-       │
-openclaw-gateway (port 18789)       ← รับ-ส่งข้อความ Telegram
+Browser (port 3000)
+    │  HTTP — ผ่าน Next.js proxy → /api/proxy/*
+    ▼
+openclaw-admin (Docker, port 3000)   ← Next.js frontend + proxy
+    │  Bearer token → http://SERVER_IP:4000
+    ▼
+openclaw-api (pm2, port 4000)        ← Express API บน host
+    │  POST /hooks/agent → http://127.0.0.1:18789
+    ▼
+openclaw-gateway (port 18789)        ← agent runtime, LINE, Telegram
+    │
+    └── PostgreSQL (Docker, port 5432)   ← admin_users, webchat_*
 ```
+
+> **หมายเหตุ**: openclaw-api รันบน host โดยตรง (ไม่ใช่ Docker) เพราะต้องการ openclaw CLI
 
 ---
 
@@ -41,25 +46,18 @@ sudo apt install -y curl git nano
 
 ---
 
-## ขั้นตอนที่ 2 — ติดตั้ง Node.js 24 (แนะนำ) หรือ 22.16+
+## ขั้นตอนที่ 2 — ติดตั้ง Node.js 22+ (บน host)
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
 
-> ใช้ Node 22 ได้เช่นกัน (ต้องเป็น 22.16+):
->
-> ```bash
-> curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-> sudo apt install -y nodejs
-> ```
-
-ตรวจสอบว่าติดตั้งสำเร็จ:
+ตรวจสอบ:
 
 ```bash
-node --version   # ต้องได้ v24.x.x หรือ v22.16+
-npm --version    # ต้องได้ 10.x.x ขึ้นไป
+node --version   # ต้องได้ v22.x.x ขึ้นไป
+npm --version
 ```
 
 ---
@@ -71,120 +69,108 @@ curl -fsSL https://get.docker.com | sudo bash
 sudo usermod -aG docker $USER
 ```
 
-> **สำคัญ**: หลังรันคำสั่งนี้ต้อง **logout แล้ว login ใหม่** เพื่อให้สิทธิ์ Docker มีผล
+> **สำคัญ**: ต้อง **logout แล้ว login ใหม่** เพื่อให้สิทธิ์ Docker มีผล
 
 ```bash
-# logout
 exit
 ```
 
 SSH เข้ามาใหม่ แล้วทดสอบ:
 
 ```bash
-docker --version         # ต้องได้ Docker version 24+
+docker --version
 docker compose version   # ต้องได้ v2.x.x
 ```
 
 ---
 
-## ขั้นตอนที่ 4 — ติดตั้ง OpenClaw CLI
+## ขั้นตอนที่ 4 — ตั้งค่า npm global path และติดตั้ง global packages
+
+npm ติดตั้ง global packages ไว้ที่ `~/.npm-global` ซึ่ง **ไม่อยู่ใน PATH เริ่มต้น** — ต้องตั้งก่อน:
 
 ```bash
-npm install -g openclaw@latest
+mkdir -p ~/.npm-global
+npm config set prefix '~/.npm-global'
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+แล้วติดตั้ง:
+
+```bash
+npm install -g openclaw@latest mcporter pm2
 ```
 
 ตรวจสอบ:
 
 ```bash
 openclaw --version
-```
-
----
-
-## ขั้นตอนที่ 5 — ติดตั้ง mcporter CLI
-
-```bash
-npm install -g mcporter
-```
-
-ตรวจสอบ:
-
-```bash
 mcporter --version
+pm2 --version
 ```
+
+> **สำคัญ**: ถ้าเปิด terminal ใหม่แล้ว `pm2` หรือ `openclaw` ไม่เจอ ให้รัน `source ~/.bashrc` อีกครั้ง
 
 ---
 
-## ขั้นตอนที่ 6 — ติดตั้ง pm2
+## ขั้นตอนที่ 5 — Generate tokens
+
+สร้าง token 3 ตัว (ใช้ต่างกันทั้งหมด — ห้ามใช้ค่าตัวอย่างจากคู่มือนี้):
 
 ```bash
-npm install -g pm2
-```
-
----
-
-## ขั้นตอนที่ 7 — Generate HOOKS_TOKEN
-
-สร้าง HOOKS_TOKEN ก่อน — จะต้องใช้ทั้งใน `openclaw.json` และ `~/openclaw-api/.env`:
-
-```bash
+# HOOKS_TOKEN — ใช้ใน openclaw.json และ openclaw-api/.env
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# SESSION_SECRET — ใช้ใน openclaw-admin/.env
+openssl rand -hex 32
+
+# API_TOKEN — ใช้ใน openclaw-api/.env และ openclaw-admin/.env (แทนค่า default)
+node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 ```
 
-**จด/copy ค่าที่ได้ไว้** เช่น `88e232...` — จะใช้ใน ขั้นตอน 7.3 และ 9.2
+**จดค่าทั้งสามไว้** — จะใช้ในขั้นตอน 6.3, 7.2 และ 8.2
+
+> **สำคัญ**: อย่าใช้ค่า `sml-openclaw-2026` จากตัวอย่างในคู่มือนี้เป็น API_TOKEN จริง — generate ใหม่ทุกครั้ง
 
 ---
 
-## ขั้นตอนที่ 7.1 — ติดตั้ง openclaw-gateway
+## ขั้นตอนที่ 6 — ติดตั้ง openclaw-gateway
+
+### 6.1 รัน onboard wizard
 
 ```bash
-openclaw onboard --install-daemon
+openclaw onboard
 ```
 
-คำสั่งนี้จะแสดง wizard ถามเรื่อง model/provider — **เลือกอะไรก็ได้ แล้วกด Enter ผ่านไปจนจบ** อย่ากด Ctrl+C กลางคัน
+wizard จะถามเรื่อง model/provider — **เลือกอะไรก็ได้ แล้วกด Enter ผ่านจนจบ** อย่ากด Ctrl+C กลางคัน
 
-คำสั่งนี้จะ:
-- สร้างไฟล์ config ที่ `~/.openclaw/openclaw.json`
-- ติดตั้ง `openclaw-gateway` เป็น systemd service
+คำสั่งนี้สร้าง `~/.openclaw/openclaw.json` และ config พื้นฐาน
 
-> **สำคัญ**: ค่าที่เลือกใน wizard ไม่มีผลถาวร — แก้ได้ทั้งหมดผ่าน Web Admin ในขั้นตอนถัดไป
-> ห้ามกด Ctrl+C กลางคัน เพราะจะทำให้ `openclaw.json` ไม่ถูกสร้าง
+> ค่าที่เลือกใน wizard แก้ได้ทั้งหมดผ่าน Web Admin ในขั้นตอนถัดไป
 
----
-
-## ขั้นตอนที่ 7.2 — ตรวจสอบและ start gateway
+### 6.2 ตรวจสอบและ start gateway
 
 ```bash
 openclaw gateway status
 ```
 
-ถ้าเห็น `RPC probe: ok` — gateway รันอยู่แล้ว ไปขั้นตอน 7.3 ได้เลย
+ถ้าเห็น `RPC probe: ok` — gateway รันอยู่แล้ว ไปขั้นตอน 6.3
 
-ถ้า gateway ไม่รัน ให้หา path ของ openclaw ก่อน:
-
-```bash
-ls /usr/lib/node_modules/openclaw/dist/index.js 2>/dev/null \
-  && echo "path: /usr/lib/node_modules/openclaw/dist/index.js" \
-  || echo "path: $(npm root -g)/openclaw/dist/index.js"
-```
-
-แล้วรันผ่าน pm2 โดยใช้ path ที่ได้:
+ถ้า gateway ไม่รัน ให้รันด้วย:
 
 ```bash
-pm2 start /usr/lib/node_modules/openclaw/dist/index.js \
-  --name openclaw-gateway \
-  --interpreter node \
-  -- gateway --port 18789
-pm2 save
-pm2 startup
-# copy คำสั่งที่แสดงออกมาแล้วรัน
+nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &
 ```
 
-> **หมายเหตุ**: ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` แทน `openclaw gateway restart` ทุกครั้ง
+ตรวจสอบ:
 
----
+```bash
+ps aux | grep openclaw-gateway | grep -v grep
+```
 
-## ขั้นตอนที่ 7.3 — ตั้งค่า Hooks สำหรับ Webchat
+> **หมายเหตุ**: gateway ใน production ควรรันผ่าน systemd (`openclaw gateway install`) หรือ pm2 เพื่อ auto-restart เมื่อ reboot ดูวิธีที่ท้าย INSTALL.md
+
+### 6.3 ตั้งค่า Hooks สำหรับ Webchat
 
 เปิดไฟล์ config:
 
@@ -199,7 +185,7 @@ nano ~/.openclaw/openclaw.json
   "gateway": { ... },
   "hooks": {
     "enabled": true,
-    "token": "วางค่า HOOKS_TOKEN ที่ได้จากขั้นตอนที่ 7 ที่นี่",
+    "token": "วางค่า HOOKS_TOKEN ที่ generate จากขั้นตอน 5",
     "allowRequestSessionKey": true
   }
 }
@@ -207,60 +193,53 @@ nano ~/.openclaw/openclaw.json
 
 > **สำคัญ**: `hooks` ต้องอยู่ระดับเดียวกับ `gateway` — ห้ามวางไว้ข้างใน `gateway` จะ error
 
-บันทึกไฟล์: กด `Ctrl+X` → `Y` → `Enter`
+บันทึก: `Ctrl+X` → `Y` → `Enter`
+
+Restart gateway:
+
+```bash
+openclaw gateway restart
+```
 
 ---
 
-## ขั้นตอนที่ 8 — ติดตั้ง openclaw-admin + PostgreSQL
+## ขั้นตอนที่ 7 — ติดตั้ง openclaw-admin (Docker)
 
-> ทำขั้นตอนนี้ก่อน เพราะต้องได้ `POSTGRES_PASSWORD` ไปใช้ในขั้นตอนที่ 9
-
-### 8.1 Clone repo
+### 7.1 Clone repo
 
 ```bash
 git clone https://github.com/bosocmputer/openclaw-admin.git ~/openclaw-admin
 cd ~/openclaw-admin
 ```
 
-### 8.2 ตั้งค่า .env
-
-**ขั้นตอนที่ 1** — สร้าง SESSION_SECRET ก่อน:
-
-```bash
-openssl rand -hex 32
-```
-
-copy ค่าที่ได้ไว้ก่อน
-
-**ขั้นตอนที่ 2** — สร้างไฟล์ .env:
+### 7.2 สร้างไฟล์ .env
 
 ```bash
 nano ~/openclaw-admin/.env
 ```
 
-วางข้อความนี้ แล้วแก้ค่า `SERVER_IP`, `POSTGRES_PASSWORD`, `SESSION_SECRET`:
+วางข้อความนี้ แล้วแก้ค่า:
 
 ```env
 SERVER_IP=192.168.1.100
-API_TOKEN=sml-openclaw-2026
-POSTGRES_PASSWORD=ตั้งรหัสผ่านที่นี่
-SESSION_SECRET=วางค่าที่ได้จาก openssl ด้านบน
+API_TOKEN=ค่า API_TOKEN ที่ generate จากขั้นตอน 5
+POSTGRES_PASSWORD=ตั้งรหัสผ่านที่นี่ (อย่างน้อย 16 ตัวอักษร)
+SESSION_SECRET=วางค่าที่ได้จาก openssl ในขั้นตอน 5
 ```
 
 ตัวอย่างที่กรอกครบ:
 
 ```env
 SERVER_IP=192.168.1.100
-API_TOKEN=sml-openclaw-2026
-POSTGRES_PASSWORD=MyStr0ngP@ss
+API_TOKEN=9f4a2c8d1e7b3f6a0c5d8e2f5a9b3c7d1e4f7a0b
+POSTGRES_PASSWORD=MyStr0ngP@ssw0rd2026!
 SESSION_SECRET=a3f8c2d1e9b4f7a2c5d8e1f4b7c0d3e6f9a2b5c8d1e4f7a0b3c6d9e2f5a8b1
 ```
 
-บันทึก: กด `Ctrl+X` → `Y` → `Enter`
+> **จดรหัสผ่านนี้ไว้** — ใช้ใน DATABASE_URL ของ openclaw-api ขั้นตอน 8.2
+> **อย่าใช้รหัสผ่านสั้น** เช่น `sml` หรือ `password` — PostgreSQL expose port 5432 ออก host
 
-> **จดรหัสผ่านนี้ไว้** — จะต้องใช้อีกในขั้นตอนที่ 9
-
-### 8.3 รัน Docker
+### 7.3 รัน Docker
 
 ```bash
 cd ~/openclaw-admin
@@ -269,7 +248,7 @@ docker compose up -d --build
 
 > ครั้งแรกใช้เวลา 3–5 นาที — Docker จะสร้าง PostgreSQL user `openclaw` และ tables อัตโนมัติ
 
-ตรวจสอบ:
+ตรวจสอบ containers:
 
 ```bash
 docker compose ps
@@ -278,20 +257,19 @@ docker compose ps
 ต้องเห็น 2 containers สถานะ `running`:
 
 ```text
-NAME                              STATUS
 openclaw-admin-openclaw-admin-1   running
 openclaw-admin-postgres-1         running
 ```
 
-**ตรวจสอบ tables** (ต้องทำก่อนไปขั้นตอนต่อไป):
+ตรวจสอบ tables:
 
 ```bash
 docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin -c "\dt"
 ```
 
-ต้องเห็น 4 tables: `admin_users`, `webchat_rooms`, `webchat_messages`, `webchat_room_users`
+ต้องเห็น 5 tables: `admin_users`, `audit_logs`, `webchat_messages`, `webchat_room_users`, `webchat_rooms`
 
-ถ้าไม่เห็น tables ให้รัน:
+ถ้าไม่เห็น tables:
 
 ```bash
 docker compose down -v && docker compose up -d --build
@@ -299,9 +277,9 @@ docker compose down -v && docker compose up -d --build
 
 ---
 
-## ขั้นตอนที่ 9 — ติดตั้ง openclaw-api
+## ขั้นตอนที่ 8 — ติดตั้ง openclaw-api
 
-### 9.1 Clone repo
+### 8.1 Clone repo
 
 ```bash
 git clone https://github.com/bosocmputer/openclaw-api.git ~/openclaw-api
@@ -309,197 +287,161 @@ cd ~/openclaw-api
 npm install
 ```
 
-### 9.2 สร้างไฟล์ .env
+### 8.2 สร้างไฟล์ .env
 
 ```bash
 nano ~/openclaw-api/.env
 ```
 
-วางข้อความนี้ แล้วแก้ค่าให้ถูกต้อง:
+วางข้อความนี้ แก้ค่าให้ถูกต้อง:
 
 ```env
-API_TOKEN=sml-openclaw-2026
+API_TOKEN=ค่า API_TOKEN เดียวกับใน ~/openclaw-admin/.env
 PORT=4000
 DATABASE_URL=postgresql://openclaw:POSTGRES_PASSWORD_HERE@localhost:5432/openclaw_admin
-HOOKS_TOKEN=ค่า HOOKS_TOKEN ที่ได้จากขั้นตอนที่ 7 (ใช้ค่าเดิม อย่า generate ใหม่)
+HOOKS_TOKEN=ค่า HOOKS_TOKEN จากขั้นตอน 5 (ค่าเดิม อย่า generate ใหม่)
 ```
 
-> **สำคัญ**: `POSTGRES_PASSWORD_HERE` ต้องเป็นรหัสผ่านเดียวกับ `POSTGRES_PASSWORD` ใน `~/openclaw-admin/.env`
-> และ URL ต้องใช้ `localhost` เสมอ — ห้ามใส่ IP address อื่น
+> - `API_TOKEN` ต้องตรงกับ `API_TOKEN` ใน `~/openclaw-admin/.env`
+> - `POSTGRES_PASSWORD_HERE` ต้องเป็นรหัสผ่านเดียวกับ `POSTGRES_PASSWORD` ใน `~/openclaw-admin/.env`
+> - `HOOKS_TOKEN` ต้องตรงกับ `hooks.token` ใน `~/.openclaw/openclaw.json`
+> - DATABASE_URL ใช้ `localhost` เสมอ — PostgreSQL expose port 5432 ออกมาที่ host
 
-บันทึก: กด `Ctrl+X` → `Y` → `Enter`
-
-### 9.3 รันด้วย pm2
+### 8.3 รันด้วย pm2
 
 ```bash
 cd ~/openclaw-api
 pm2 start index.js --name openclaw-api
 pm2 save
+```
+
+ตั้งค่า pm2 ให้ start อัตโนมัติเมื่อ reboot:
+
+```bash
 pm2 startup
 ```
 
-คำสั่ง `pm2 startup` จะแสดงคำสั่งให้รันต่อ — **copy แล้วรันทันที** (แต่ละเครื่องจะต่างกัน):
+คำสั่งนี้จะแสดง **คำสั่ง sudo** ที่ต้องรัน — **copy แล้วรันทันที** (แต่ละเครื่องจะต่างกัน) ตัวอย่าง:
 
 ```bash
-sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u <user> --hp /home/<user>
+sudo env PATH=$PATH:/home/bosscatdog/.npm-global/bin:/usr/bin pm2 startup systemd -u bosscatdog --hp /home/bosscatdog
 ```
+
+> **สำคัญ**: ใช้คำสั่งที่ได้จาก `pm2 startup` จริงๆ — **อย่า copy จากตัวอย่างข้างบน** เพราะ path และ username ต่างกันแต่ละเครื่อง
 
 ตรวจสอบ:
 
 ```bash
 pm2 status
-```
+# ต้องเห็น openclaw-api: online
 
-ต้องเห็น `openclaw-api` สถานะ `online`
+systemctl status pm2-$USER
+# ต้องเห็น active (running)
+```
 
 ---
 
-## ขั้นตอนที่ 10 — ทดสอบเข้าหน้าเว็บ
+## ขั้นตอนที่ 9 — ทดสอบเข้าหน้าเว็บ
 
-เปิด browser แล้วเข้า:
+เปิด browser:
 
-```
+```text
 http://SERVER_IP:3000
 ```
 
-จะเห็นหน้า Login — เข้าด้วย:
+Login ด้วย:
 
-```
+```text
 username: superadmin
 password: superadmin
 ```
 
-> **สำคัญ**: เปลี่ยนรหัสผ่าน superadmin หลังเข้าระบบครั้งแรกทันที ไปที่เมนู **สมาชิก** → Reset Password
+> **เปลี่ยนรหัสผ่านทันที** — ไปที่เมนู **สมาชิก** → เลือก superadmin → Reset Password
+> รหัสผ่าน default `superadmin` เป็นที่รู้จักสาธารณะ — ถ้าไม่เปลี่ยนก่อนออก internet ระบบจะโดน brute force
 
 ---
 
-## ขั้นตอนที่ 11 — ตั้งค่าระบบผ่านหน้าเว็บ
+## ขั้นตอนที่ 10 — ตั้งค่าระบบผ่านหน้าเว็บ
 
-เมื่อ login เข้ามาแล้ว ทำตามลำดับนี้:
+### 10.1 ตั้ง Model (API Key)
 
-### 11.1 ตั้ง Model (API Key)
-
-1. ไปที่เมนู **Model**
+1. เมนู **Model**
 2. เลือก Provider (แนะนำ **OpenRouter**)
-3. วาง API Key ที่เตรียมไว้
-4. กด **Test** → ต้องได้ ✓ OK
-5. เลือก Model ที่ต้องการ
-6. กด **Save**
+3. วาง API Key → กด **Test** → ต้องได้ ✓
+4. เลือก Model → กด **Save**
 
-### 11.2 เพิ่ม Telegram Bot
+### 10.2 เพิ่ม Agent
 
-1. ไปที่เมนู **Telegram**
-2. ถ้าเห็น banner สีเหลือง **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram** ก่อน
-3. กด **เพิ่ม Bot ใหม่**
-4. กรอก Account ID (ชื่อสั้นๆ เช่น `sale`, `stock`)
-5. วาง Bot Token จาก @BotFather
-6. กด **Add Bot**
+1. เมนู **Agents** → กด **เพิ่ม Agent**
+2. กรอก Agent ID (เช่น `sale`, `stock`)
+3. เลือก Access Mode ตามหน้าที่ (sale=ขาย, stock=คลัง, admin=ผู้บริหาร)
+4. กด **Add**
 
-> **หมายเหตุ**: wizard ตอน onboard จะตั้ง `telegram.enabled = false` เสมอ — ต้องเปิดด้วยตัวเองที่นี่
+### 10.3 ตั้งค่า MCP (เชื่อมต่อ ERP)
 
-### 11.3 เพิ่ม Agent
-
-1. ไปที่เมนู **Agents**
-2. กด **เพิ่ม Agent**
-3. กรอก Agent ID (เช่น `sale`, `stock`)
-4. เลือก Access Mode ตามหน้าที่ (sale=ขาย, stock=คลัง, admin=ผู้บริหาร)
-5. กด **Add**
-
-### 11.4 ตั้งค่า MCP (เชื่อมต่อ ERP)
-
-1. ไปที่ **Agents → เลือก Agent → คอลัมน์ขวาล่าง MCP**
-2. กรอก URL ของ MCP Server ที่เตรียมไว้
+1. **Agents → เลือก Agent → MCP (คอลัมน์ขวาล่าง)**
+2. กรอก URL ของ MCP Server
 3. เลือก Access Mode ให้ตรงกับ Agent
-4. กด **Ping** → ต้องได้ ✓ OK
+4. กด **Ping** → ต้องได้ ✓
 5. กด **Test Access** → ต้องเห็นรายการ tools
 6. กด **Save MCP**
 
-### 11.5 เพิ่ม Telegram User
+### 10.4 เพิ่ม Telegram Bot
 
-1. ไปที่ **Agents → เลือก Agent → คอลัมน์ขวาบน Users**
+1. เมนู **Telegram**
+2. ถ้าเห็น banner **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram** ก่อน
+3. กด **เพิ่ม Bot ใหม่**
+4. กรอก Account ID (เช่น `sale`) และ Bot Token จาก @BotFather
+5. กด **Add Bot**
+
+### 10.5 ผูก Bot กับ Agent
+
+1. เมนู **Telegram** → ที่ Bot card → Dropdown **Agent** → เลือก Agent
+
+### 10.6 เพิ่ม Telegram User
+
+1. **Agents → เลือก Agent → Users (คอลัมน์ขวาบน)**
 2. กรอก Telegram User ID (ตัวเลข) และชื่อพนักงาน
 3. กด **Enter** หรือปุ่ม **Add**
 4. ระบบจะ restart gateway อัตโนมัติ
 
-### 11.6 ผูก Bot กับ Agent
+### 10.7 ตรวจสอบ Config
 
-1. ไปที่เมนู **Telegram**
-2. ที่ Bot card → Dropdown **Agent** → เลือก Agent ที่ต้องการ
+1. **Dashboard** → ดู **Config Health** — ต้องเป็น ✓ Valid
+2. ถ้าไม่ Valid กด **Auto Fix**
+3. กด **Restart Gateway**
 
-### 11.7 ตรวจสอบ Config
+### 10.8 ตั้งค่า Webchat (ถ้าต้องการให้พนักงานแชทผ่านเว็บ)
 
-1. กลับไปที่ **Dashboard**
-2. ดู **Config Health** — ต้องเป็น ✓ Valid
-3. ถ้าไม่ Valid กด **Auto Fix**
-4. กด **Restart Gateway**
+**สร้างห้องแชท:**
 
-### 11.8 ตั้งค่า Webchat (ถ้าต้องการให้พนักงานแชทผ่านเว็บ)
+1. เมนู **Webchat** → กด **+ เพิ่มห้อง**
+2. กรอก Agent (เช่น `sale`) และชื่อห้อง (เช่น `ฝ่ายขาย`)
+3. เลือก Policy: **open** (ทุกคน) หรือ **allowlist** (เฉพาะที่กำหนด)
+4. กด **Add**
 
-> Hooks ควรตั้งไว้แล้วตั้งแต่ขั้นตอนที่ 7.2 — ถ้ายังไม่ได้ตั้ง ให้ทำตามขั้นตอนที่ 7.2 ก่อน
+**เพิ่มพนักงาน role=chat:**
 
-Restart gateway หลังแก้ config:
+1. เมนู **สมาชิก** → กด **เพิ่มสมาชิก**
+2. กรอก username / password / ชื่อ
+3. เลือก Role: **chat**
+4. กด **Add**
 
-```bash
-# ถ้ารันผ่าน pm2
-pm2 restart openclaw-gateway
+> พนักงาน role=chat จะ login แล้วเห็นหน้า Webchat อย่างเดียว — ไม่มี sidebar เมนู admin
+> Webchat ตอบใน webchat เท่านั้น ไม่ส่งไป LINE/Telegram
 
-# ถ้ารันผ่าน systemd
-openclaw gateway restart
-```
+### 10.9 ตั้งค่า LINE OA (ถ้าใช้ LINE Messaging API)
 
-**เพิ่มห้องแชทใน Admin:**
+LINE ต้องการ **HTTPS webhook URL** — ต้องใช้ cloudflared expose port 18789 ออกเป็น HTTPS
 
-1. ไปที่เมนู **Webchat**
-2. กด **+ เพิ่มห้อง**
-3. กรอก Agent (เช่น `sale`) และชื่อห้อง (เช่น `ฝ่ายขาย`)
-4. เลือก Policy: **open** (ทุกคน) หรือ **allowlist** (เฉพาะที่กำหนด)
-5. กด **Add**
-
-**เพิ่มพนักงานที่ใช้ Webchat:**
-
-1. ไปที่เมนู **สมาชิก**
-2. กด **เพิ่มสมาชิก**
-3. กรอก username / password / ชื่อ
-4. เลือก Role: **chat**
-5. กด **Add**
-
-> พนักงาน role=chat จะ login แล้วเข้าหน้า Webchat ได้เลย — **ไม่มี sidebar เมนู** เห็นแค่รายการห้องแชทที่มีสิทธิ์ทางซ้าย และ chat area ทางขวา
-
----
-
-## ขั้นตอนที่ 11.9 — ตั้งค่า LINE OA (ถ้าใช้ LINE Messaging API)
-
-LINE Messaging API ต้องการ **HTTPS webhook URL** — ไม่รับ HTTP หรือ IP ตรงๆ
-ต้องการ OpenClaw v2026.3.28+ และ cloudflared เพื่อ expose port 18789 (gateway) ออกเป็น HTTPS
-
-### ติดตั้ง cloudflared
-
-**วิธีที่ 1 — curl (ใช้ได้ทุก distro):**
+**ติดตั้ง cloudflared:**
 
 ```bash
 curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
 chmod +x /usr/local/bin/cloudflared
 ```
 
-**วิธีที่ 2 — apt (Debian/Ubuntu):**
-
-```bash
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-archive-keyring.gpg >/dev/null
-echo 'deb [signed-by=/usr/share/keyrings/cloudflare-archive-keyring.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
-sudo apt update && sudo apt install cloudflared
-```
-
-### รัน Quick Tunnel (ไม่ต้องมี account)
-
-รันทดสอบก่อนเพื่อดู URL ที่ได้:
-
-```bash
-cloudflared tunnel --url http://localhost:18789 --no-autoupdate
-```
-
-URL จะขึ้นมาในรูปแบบ `https://xxxx-xxxx.trycloudflare.com`
-
-### รันเป็น background process (สำหรับ production)
+**รัน Quick Tunnel:**
 
 ```bash
 nohup cloudflared tunnel --url http://localhost:18789 --no-autoupdate > /tmp/cloudflared.log 2>&1 &
@@ -511,52 +453,57 @@ nohup cloudflared tunnel --url http://localhost:18789 --no-autoupdate > /tmp/clo
 grep trycloudflare /tmp/cloudflared.log
 ```
 
-> **หมายเหตุ**: URL จาก trycloudflare.com เปลี่ยนทุกครั้งที่ restart cloudflared
-> ถ้า URL เปลี่ยน ต้องไปอัปเดต Webhook URL ใน LINE Developers Console ทุก OA ด้วย
-> ถ้าต้องการ URL ถาวร ใช้ Named Tunnel (ต้องการ Cloudflare account + domain) — ดู [Cloudflare Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/)
+URL จะอยู่ในรูป `https://xxxx-xxxx.trycloudflare.com`
 
-### เพิ่ม LINE OA ผ่าน Web Admin
+> URL จาก trycloudflare.com เปลี่ยนทุกครั้งที่ restart cloudflared — ต้องอัปเดต Webhook URL ใน LINE Developers Console ทุกครั้ง
 
-1. ไปที่เมนู **LINE OA** (`/line`)
-2. กด **เพิ่ม OA ใหม่**
-3. กรอก Account ID (เช่น `sale`, `stock`)
-4. กรอก Webhook Path (เช่น `/line/webhook/sale`) — **แต่ละ OA ต้องต่างกัน**
-5. กรอก Channel Access Token และ Channel Secret จาก LINE Developers Console
-6. กด **Add**
+**เพิ่ม LINE OA ใน Web Admin:**
 
-### ตั้ง Webhook URL ใน LINE Developers Console
+1. เมนู **LINE OA** → กด **เพิ่ม OA ใหม่**
+2. กรอก Account ID (เช่น `sale`) — **ต้องไม่ซ้ำกับ username ของ webchat user** (ดูหมายเหตุด้านล่าง)
+3. กรอก Webhook Path (เช่น `/line/webhook/sale`) — **แต่ละ OA ต้องต่างกัน**
+4. กรอก Channel Access Token และ Channel Secret
+5. กด **Add**
 
-แต่ละ OA ต้องมี webhook URL ต่างกัน:
+**ตั้ง Webhook URL ใน LINE Developers Console:**
 
-```
+```text
 https://<tunnel-url>/line/webhook/<accountId>
 ```
 
-ตัวอย่าง:
-- `https://abc-def-ghi.trycloudflare.com/line/webhook/sale`
-- `https://abc-def-ghi.trycloudflare.com/line/webhook/stock`
+ตัวอย่าง: `https://abc-def.trycloudflare.com/line/webhook/sale`
 
-ขั้นตอน:
-1. เปิด [LINE Developers Console](https://developers.line.biz/console/)
-2. เลือก Channel ของ OA
-3. ไปที่ Messaging API → Webhook settings
-4. ใส่ Webhook URL → กด **Verify** → ต้องได้ Success
-5. เปิด **Use webhook**
+1. [LINE Developers Console](https://developers.line.biz/console/) → เลือก Channel
+2. Messaging API → Webhook settings → ใส่ URL → **Verify** → ต้องได้ Success
+3. เปิด **Use webhook**
 
-> **สำคัญ**: แต่ละ OA ต้องมี `webhookPath` ต่างกัน — ถ้าซ้ำกัน gateway จะ overwrite handler → OA ที่ start ทีหลังจะได้ 401 Unauthorized
-
----
-
-## ขั้นตอนที่ 12 — ทดสอบ Bot
-
-1. เปิด Telegram
-2. ค้นหา Bot ที่ตั้งไว้
-3. กด **Start** หรือพิมพ์ `/start`
-4. ลองถามคำถามเกี่ยวกับสินค้าหรือลูกค้า
+> **สำคัญ — ป้องกัน webchat ตอบซ้ำใน LINE**:
+> Session key ของ webchat มีรูปแบบ `hook:webchat:uid:{username}` — prefix `uid:` ป้องกัน
+> ไม่ให้ gateway สับสนกับ LINE accountId
+> อย่าตั้ง LINE accountId ที่มีคำว่า `uid:` นำหน้า และห้ามใช้ LINE accountId เดียวกับ
+> username ของ webchat user — มิฉะนั้น gateway อาจ reply ไป LINE แทนที่จะตอบใน webchat
+>
+> **สำคัญ — Webhook Path ต้องไม่ซ้ำ**:
+> ถ้า 2 OA ใช้ path เดียวกัน gateway จะ overwrite handler → OA แรกจะได้ 401 Unauthorized
 
 ---
 
-## การอัปเดตระบบ (ในอนาคต)
+## ขั้นตอนที่ 11 — ทดสอบระบบ
+
+**ทดสอบ Telegram:**
+
+1. เปิด Telegram → ค้นหา Bot → กด **Start**
+2. ลองถามคำถามเกี่ยวกับสินค้าหรือลูกค้า
+
+**ทดสอบ Webchat:**
+
+1. Login ด้วย user role=chat
+2. เลือกห้องแชท → พิมพ์ข้อความ
+3. Bot ต้องตอบกลับใน Webchat เท่านั้น — ไม่ตอบใน LINE หรือ Telegram
+
+---
+
+## การอัปเดตระบบ
 
 ### อัปเดต openclaw-api
 
@@ -582,110 +529,169 @@ docker compose up -d --build
 ### หน้าเว็บเข้าไม่ได้
 
 ```bash
-# ตรวจสอบ container ทำงานไหม
 docker compose ps
-
-# ดู log
 docker logs openclaw-admin-openclaw-admin-1 --tail 20
 ```
 
 ### Gateway ไม่ออนไลน์ (Dashboard แสดง offline)
 
 ```bash
-# restart gateway
 openclaw gateway restart
-
-# ดูสถานะ
 openclaw gateway status
+```
+
+ถ้า restart ไม่ได้ผ่าน CLI ให้ kill แล้วรันใหม่:
+
+```bash
+kill $(pgrep -f openclaw-gateway)
+nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &
 ```
 
 ### openclaw-api ไม่ตอบสนอง
 
 ```bash
-# ตรวจสอบสถานะ
 pm2 status
-
-# restart
 pm2 restart openclaw-api
-
-# ดู log
 pm2 logs openclaw-api --lines 30
+```
+
+### pm2: command not found (หลัง SSH เข้ามาใหม่)
+
+pm2 อาจไม่อยู่ใน PATH ของ session ปัจจุบัน:
+
+```bash
+source ~/.bashrc
+pm2 status
+```
+
+ถ้ายังไม่เจอ ให้ใช้ full path:
+
+```bash
+~/.npm-global/bin/pm2 status
+~/.npm-global/bin/pm2 restart openclaw-api
 ```
 
 ### Bot ไม่ตอบ
 
-1. ไปที่เมนู **Telegram** — ถ้าเห็น banner สีเหลือง **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram** ก่อน
-2. เช็ค **Dashboard → Config Health** — ถ้าไม่ Valid กด Auto Fix
-3. เช็คว่า Bot ผูก Agent ไว้แล้วใน **Telegram**
-4. เช็คว่า User ID ถูก add ไว้ใน **Agents → Users** แล้ว
-5. ลอง **Restart Gateway** จาก Dashboard
+1. เมนู **Telegram** — ถ้าเห็น banner **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram**
+2. **Dashboard → Config Health** — ถ้าไม่ Valid กด **Auto Fix**
+3. เช็คว่า Bot ผูก Agent ไว้ใน **Telegram**
+4. เช็คว่า User ID ถูก add ใน **Agents → Users**
+5. กด **Restart Gateway** จาก Dashboard
+
+### Webchat ไม่ตอบ (timeout / 502)
+
+1. ตรวจสอบ `hooks` ใน `~/.openclaw/openclaw.json`:
+
+```bash
+grep -A5 '"hooks"' ~/.openclaw/openclaw.json
+```
+
+ต้องเห็น `"enabled": true`, `"token": "..."`, `"allowRequestSessionKey": true`
+
+2. ตรวจสอบ `HOOKS_TOKEN` ใน `~/openclaw-api/.env` ต้องตรงกับ `hooks.token` ใน openclaw.json
+3. Restart:
+
+```bash
+openclaw gateway restart
+pm2 restart openclaw-api --update-env
+```
+
+> Webchat อาจใช้เวลา 30–60 วินาทีต่อคำถาม (agent ต้องดึงข้อมูล ERP) — นี่คือพฤติกรรมปกติ
+
+### Webchat ตอบใน LINE ด้วย (bug เก่า)
+
+เกิดจาก sessions เก่าแบบ `hook:webchat:{username}` (ไม่มี `uid:`) ที่มี `lastChannel=line` ค้างอยู่
+
+แก้ไขโดยลบ sessions เก่าออก (แต่ละ agent):
+
+```bash
+python3 << 'EOF'
+import json, os, glob
+
+for path in glob.glob(os.path.expanduser('~/.openclaw/agents/*/sessions/sessions.json')):
+    with open(path) as f:
+        data = json.load(f)
+    bad = [k for k in data if 'hook:webchat:' in k and 'hook:webchat:uid:' not in k]
+    if bad:
+        print(f'{path}: removing {bad}')
+        for k in bad: del data[k]
+        with open(path, 'w') as f: json.dump(data, f, indent=2)
+    else:
+        print(f'{path}: clean')
+EOF
+```
+
+แล้ว restart gateway:
+
+```bash
+openclaw gateway restart
+```
 
 ### Webchat สร้างห้องไม่ได้ (error: role "openclaw" does not exist)
 
-PostgreSQL ยังไม่มี user `openclaw` — เกิดจาก `POSTGRES_PASSWORD` ใน `.env` ไม่ถูกต้อง หรือ volume ถูกสร้างก่อนที่จะตั้ง `.env`
+PostgreSQL ยังไม่มี user `openclaw` — เกิดจาก `POSTGRES_PASSWORD` ใน `.env` ไม่ถูกต้อง หรือ volume ถูกสร้างก่อนตั้ง `.env`
 
 ```bash
-# ลบ volume เก่าแล้วสร้างใหม่ (ข้อมูลใน PostgreSQL จะหายทั้งหมด)
 cd ~/openclaw-admin
 docker compose down -v
-docker compose up -d
+docker compose up -d --build
 ```
 
 > ใช้ได้เฉพาะตอนติดตั้งใหม่เท่านั้น — ถ้ามีข้อมูลอยู่แล้วให้แจ้ง admin ก่อน
 
-### Webchat ไม่ตอบ (timeout / 502)
-
-1. ตรวจสอบ `hooks` ใน `~/.openclaw/openclaw.json` — ต้องมี `enabled:true`, `token`, และ `allowRequestSessionKey:true`
-2. ตรวจสอบ `HOOKS_TOKEN` ใน `~/openclaw-api/.env` ต้องตรงกับ `hooks.token` ใน openclaw.json
-3. Restart gateway และ api:
-
-```bash
-# ถ้ารันผ่าน systemd
-openclaw gateway restart
-pm2 restart openclaw-api --update-env
-
-# ถ้ารันผ่าน pm2
-pm2 restart openclaw-gateway
-pm2 restart openclaw-api --update-env
-
-# ถ้ารันเป็น process ธรรมดา (nohup)
-kill $(ps aux | grep openclaw-gateway | grep -v grep | awk '{print $2}')
-nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &
-```
-
-1. ตรวจสอบว่า gateway ขึ้นมาแล้ว: `ps aux | grep openclaw-gateway | grep -v grep`
-
-> **หมายเหตุ**: Webchat อาจใช้เวลา 30-60 วินาทีต่อคำถาม เนื่องจาก agent ต้องรัน mcporter เพื่อดึงข้อมูล ERP — นี่คือพฤติกรรมปกติ ไม่ใช่ error
-
----
-
 ### ลืมรหัสผ่าน superadmin
 
 ```bash
-# เข้าไปใน postgres container
-docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin
+docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin -c \
+  "UPDATE admin_users SET password = '\$2b\$12\$MxRWHntDsOcVe0woYXsHrec7s15//9IhhHXgfTx1V7d0ueYmghN/m' WHERE username = 'superadmin';"
+```
 
-# reset รหัสผ่านเป็น "superadmin" (bcrypt hash)
-UPDATE admin_users
-SET password = '$2b$12$MxRWHntDsOcVe0woYXsHrec7s15//9IhhHXgfTx1V7d0ueYmghN/m'
-WHERE username = 'superadmin';
+รหัสผ่านจะกลับเป็น `superadmin`
 
--- กด Ctrl+D เพื่อออก
+---
+
+## ทางเลือก — รัน Gateway เป็น Persistent Service
+
+### ผ่าน pm2
+
+```bash
+# หา path ของ openclaw
+ls /usr/lib/node_modules/openclaw/dist/index.js 2>/dev/null \
+  && echo "OK" || echo "path: $(npm root -g)/openclaw/dist/index.js"
+
+pm2 start /usr/lib/node_modules/openclaw/dist/index.js \
+  --name openclaw-gateway \
+  --interpreter node \
+  -- gateway --port 18789
+pm2 save
+pm2 startup
+```
+
+> ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` แทน `openclaw gateway restart` ทุกครั้ง
+
+### ผ่าน systemd (openclaw CLI)
+
+```bash
+openclaw gateway install
+systemctl --user enable openclaw-gateway.service
+systemctl --user start openclaw-gateway.service
 ```
 
 ---
 
-## สรุปข้อมูล Server ที่ต้องบันทึกไว้
-
-หลังติดตั้งเสร็จ บันทึกข้อมูลเหล่านี้เก็บไว้:
+## สรุปข้อมูลที่ต้องบันทึกหลังติดตั้ง
 
 | รายการ | ค่า |
-|--------|-----|
+| ------ | --- |
 | IP Address | |
 | Admin URL | `http://IP:3000` |
 | superadmin password | (ที่ตั้งใหม่) |
-| POSTGRES_PASSWORD | (ที่ตั้งใน .env) |
-| SESSION_SECRET | (ที่ generate ไว้) |
+| POSTGRES_PASSWORD | |
+| SESSION_SECRET | |
+| API_TOKEN | (generate เองจากขั้นตอน 5 — ห้ามใช้ค่า default) |
+| HOOKS_TOKEN | |
 | Telegram Bot Token(s) | |
 | OpenRouter API Key | |
 | MCP Server URL | |
+| LINE Tunnel URL | (เปลี่ยนทุก restart) |

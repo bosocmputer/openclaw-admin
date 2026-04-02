@@ -21,8 +21,8 @@ export async function audit(params: {
       INSERT INTO audit_logs (actor, action, target, detail, ip)
       VALUES (${params.actor}, ${params.action}, ${params.target ?? null}, ${params.detail ?? null}, ${params.ip ?? null})
     `
-  } catch {
+  } catch (e) {
     // audit failure must never break the main flow
-    console.error('[audit] failed to write log', params)
+    console.error('[audit] failed to write log', { ...params, error: e instanceof Error ? e.message : String(e) })
   }
 }
