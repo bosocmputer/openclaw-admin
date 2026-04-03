@@ -66,7 +66,7 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
 
 | Service | Deploy | Port | Repo | อัปเดต |
 | ------- | ------ | ---- | ---- | ------ |
-| openclaw-gateway | systemd | 18789 | — | `openclaw gateway restart` |
+| openclaw-gateway | systemd --user | 18789 | — | `openclaw gateway restart` |
 | openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull && npm install && pm2 restart openclaw-api` |
 | openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull && docker compose up -d --build` |
 | PostgreSQL | Docker | 5432 | — (same compose) | restart อัตโนมัติกับ openclaw-admin |
@@ -316,7 +316,6 @@ openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 │       ├── telegram/page.tsx         ← Telegram Bot management
 │       ├── line/page.tsx             ← LINE OA management (multi-OA, webhookPath, QR pairing)
 │       ├── logs/page.tsx             ← Live logs
-│       ├── mcp/page.tsx              ← MCP (standalone)
 │       ├── guide/page.tsx            ← คู่มือผู้ใช้
 │       ├── members/page.tsx          ← จัดการสมาชิก (superadmin only)
 │       ├── analysis/page.tsx         ← วิเคราะห์ข้อมูล (agents/sessions/tokens/members/logs)
@@ -334,7 +333,9 @@ openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 ├── lib/
 │   ├── api.ts                        ← axios instance + TypeScript types + API functions
 │   ├── session.ts                    ← JWT encrypt/decrypt (jose)
-│   └── db.ts                         ← PostgreSQL client (postgres.js)
+│   ├── db.ts                         ← PostgreSQL client (postgres.js)
+│   ├── audit.ts                      ← audit log helper (บันทึก login/logout/failed)
+│   └── rate-limit.ts                 ← Login rate limiter (in-memory)
 │
 ├── db/
 │   └── init.sql                      ← CREATE TABLE admin_users + seed superadmin
@@ -347,9 +348,18 @@ openclaw-admin/                       ← github: bosocmputer/openclaw-admin
 └── ARCHITECTURE.md                   ← ไฟล์นี้
 
 openclaw-api/                         ← github: bosocmputer/openclaw-api (แยก repo)
-├── index.js                          ← Express API endpoints ทั้งหมด (รวม /api/members)
-├── package.json                      ← dependencies: express, bcryptjs, pg, dotenv, cors
-└── .env                              ← API_TOKEN, PORT, DATABASE_URL (บน server)
+├── index.js                          ← Express entry point: middleware, routes, listen (ไม่ใช่ single-file อีกต่อไป)
+├── lib/
+│   ├── config.js                     ← shared constants: HOME, CONFIG_PATH, USERNAMES_PATH
+│   ├── files.js                      ← readConfig, writeConfig, readUserNames, writeUserNames
+│   ├── pg.js                         ← pgPool init + requirePg middleware
+│   └── soul-template.js              ← generateSoulTemplate per access mode/persona
+├── routes/                           ← แยก route ต่อ feature
+│   ├── agents.js, telegram.js, line.js, model.js, gateway.js
+│   ├── members.js, webchat.js, monitor.js, alerting.js
+│   ├── config.js, status.js
+├── package.json                      ← dependencies: express, bcryptjs, pg, cors, helmet, dotenv
+└── .env                              ← API_TOKEN, PORT, DATABASE_URL, HOOKS_TOKEN, ALLOWED_ORIGIN
 ```
 
 ---
