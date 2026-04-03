@@ -102,7 +102,10 @@ export interface OpenClawConfig {
       }>
     }
   }
-  gateway?: { mode?: string }
+  gateway?: {
+    mode?: string
+    webchat?: { chatHistoryMaxChars?: number }
+  }
 }
 
 export interface ProviderConfig {
