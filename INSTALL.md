@@ -205,6 +205,26 @@ openclaw gateway restart
 
 ## ขั้นตอนที่ 7 — ติดตั้ง openclaw-admin (Docker)
 
+### 7.0 ตั้งค่า ufw (firewall)
+
+Docker container ต้องการเข้าถึง openclaw-api (port 4000) ที่รันบน host — ถ้า ufw เปิดอยู่จะถูกบล็อกโดยอัตโนมัติ
+
+เช็คสถานะ:
+
+```bash
+ufw status
+```
+
+ถ้า `Status: active` — เพิ่ม rule อนุญาต Docker subnet:
+
+```bash
+ufw allow from 172.16.0.0/12 to any port 4000
+ufw allow 3000
+ufw reload
+```
+
+> **หมายเหตุ**: `172.16.0.0/12` ครอบคลุม Docker bridge network ทั้งหมด (`172.16.x.x`–`172.31.x.x`) ไม่ต้องรู้ subnet ของ Docker ล่วงหน้า
+
 ### 7.1 Clone repo
 
 ```bash
