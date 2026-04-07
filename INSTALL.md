@@ -98,7 +98,7 @@ source ~/.bashrc
 แล้วติดตั้ง:
 
 ```bash
-npm install -g openclaw@latest mcporter pm2
+npm install -g openclaw@2026.4.5 mcporter pm2
 ```
 
 ตรวจสอบ:
