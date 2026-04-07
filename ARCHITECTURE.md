@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-04-07 (รอบ 12 — OpenClaw v2026.4.6)
+> อัปเดต: 2026-04-07 (รอบ 13 — OpenClaw v2026.4.6)
 
 ---
 
@@ -313,14 +313,30 @@ checkpoint files = ~/.openclaw/agents/<id>/sessions/<sessionId>.jsonl.reset.<ts>
 ### 13. Memory & Dreams (ใหม่ — OpenClaw v2026.4.5)
 
 ```
-GET /api/memory/status        → status ทุก agent (memory + dreams file existence, size, preview)
+GET /api/memory/status        → status ทุก agent:
+                                  dailyMemory: { fileCount, totalChars, latestDate, latestPreview, files[] }
+                                  memory: { exists, sizeChars, preview }    ← MEMORY.md
+                                  dreams: { exists, sizeChars, preview }    ← dreams.md
+                                  dreaming: { enabled, config }
 GET /api/memory/:id/memory    → เนื้อหา MEMORY.md เต็ม
 GET /api/memory/:id/dreams    → เนื้อหา dreams.md เต็ม
+GET /api/memory/:id/daily/:f  → เนื้อหา daily memory file (เช่น 2026-04-07-session.md)
 
-MEMORY.md = ~/.openclaw/workspace-<id>/MEMORY.md (persistent memory)
-dreams.md = ~/.openclaw/workspace-<id>/dreams.md (dreaming phase output)
+memory/*.md = ~/.openclaw/workspace-<id>/memory/ — ระบบหลัก AI บันทึกรายวัน
+MEMORY.md   = ~/.openclaw/workspace-<id>/MEMORY.md — main session เท่านั้น
+dreams.md   = ~/.openclaw/workspace-<id>/dreams.md — dreaming phase output
 dreaming enabled/disabled ควบคุมใน openclaw.json: memory.dreaming.enabled
+
+SOUL.md template มี ## ความจำระหว่าง Session:
+  AI บันทึกชื่อ/ข้อมูล user ลง memory/YYYY-MM-DD.md ทันทีเมื่อ user แนะนำตัว
+  แต่ละ user มีข้อมูลแยกกัน (per-username) — ไม่ปะปนระหว่างผู้ใช้
 ```
+
+UI แสดง 3 ชั้น:
+
+- **บันทึกรายวัน** (emerald) — แสดง fileCount, latestPreview, expand เพื่ออ่านแต่ละไฟล์
+- **MEMORY.md** — long-term memory
+- **Dreams.md** — dreaming phase summary
 
 ---
 

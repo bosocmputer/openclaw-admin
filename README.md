@@ -79,7 +79,7 @@ Browser → GET /api/proxy/api/status
 | Compaction | `/compaction` | ตั้งค่า memory compaction (รองรับ fields ใหม่ v2026.3.28) |
 | Checkpoints | `/sessions` | ดูและ restore session compaction checkpoints ต่อ agent |
 | Webhooks | `/webhooks` | CRUD webhook routes สำหรับรับข้อมูลจากระบบภายนอก |
-| Memory | `/memory` | ดู MEMORY.md + dreams.md ต่อ agent (auto-refresh 30s) |
+| Memory | `/memory` | ดู daily memory files + MEMORY.md + dreams.md ต่อ agent (auto-refresh 30s) |
 | Analysis | `/analysis` | วิเคราะห์ token usage + สถิติรายงาน per agent |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
 | Guide | `/guide` | คู่มือผู้ใช้ (แสดง bot name จริงจาก config) |

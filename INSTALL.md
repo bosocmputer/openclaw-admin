@@ -577,14 +577,17 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
 
 ### 10.12 ตรวจสอบ Memory & Dreams
 
-ดูสถานะ MEMORY.md และ dreams.md ของแต่ละ agent:
+ดูสถานะ memory ของแต่ละ agent:
 
 1. เมนู **Memory**
-2. แต่ละ agent card แสดง:
-   - **MEMORY.md** — ขนาด + preview 3 บรรทัดแรก + ปุ่ม **ดู** เพื่ออ่านเต็ม
-   - **dreams.md** — ขนาด + preview + ปุ่ม **ดู**
+2. แต่ละ agent card แสดง 3 ส่วน:
+   - **บันทึกรายวัน** — จำนวนไฟล์ `memory/*.md` ที่ AI สร้างจริง + preview + กด **ดูทั้งหมด** เพื่อเลือกอ่านแต่ละไฟล์
+   - **MEMORY.md** — ความจำระยะยาว (main session เท่านั้น) + ปุ่ม **อ่าน**
+   - **Dreams.md** — ผลสรุป dreaming phase + ปุ่ม **อ่าน**
    - Badge **dreaming on/off** — สถานะ `memory.dreaming.enabled`
 
+> AI จะบันทึกชื่อและข้อมูล user ลง `memory/YYYY-MM-DD.md` ทันทีเมื่อ user แนะนำตัวในการสนทนา
+>
 > หน้านี้ auto-refresh ทุก 30 วินาที
 
 ---
