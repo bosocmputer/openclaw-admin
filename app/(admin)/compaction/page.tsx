@@ -6,18 +6,20 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 
 interface CompactionForm {
   mode: 'safeguard' | 'default' | 'off'
-  maxHistoryShare: number       // 0.1–0.9
-  keepRecentTokens: number      // token ที่เก็บหลัง compact
-  recentTurnsPreserve: number   // turn ล่าสุดที่ไม่ compress (0–12)
-  softThresholdTokens: number   // เริ่ม compact เมื่อเกินค่านี้ (0 = ปิด)
-  truncateAfterCompaction: boolean  // ตัด .jsonl เก่าออกหลัง compact
-  model: string                     // override model สำหรับ compact
-  timeoutSeconds: number            // timeout ต่อ compaction (0 = ค่า default)
-  customInstructions: string        // คำสั่งพิเศษสำหรับ compaction
+  maxHistoryShare: number
+  keepRecentTokens: number
+  recentTurnsPreserve: number
+  softThresholdTokens: number
+  truncateAfterCompaction: boolean
+  model: string
+  timeoutSeconds: number
+  customInstructions: string
+  dreamingEnabled: boolean
 }
 
 const DEFAULTS: CompactionForm = {
@@ -30,6 +32,7 @@ const DEFAULTS: CompactionForm = {
   model: '',
   timeoutSeconds: 0,
   customInstructions: '',
+  dreamingEnabled: false,
 }
 
 export default function CompactionPage() {
@@ -44,6 +47,7 @@ export default function CompactionPage() {
     if (!config) return
     const c = config.agents?.defaults?.compaction
     if (!c) return
+    const dreaming = (config as Record<string, unknown>)?.memory as Record<string, unknown> | undefined
     setForm({
       mode: (c.mode as CompactionForm['mode']) ?? 'safeguard',
       maxHistoryShare: typeof c.maxHistoryShare === 'number' ? c.maxHistoryShare : 0.5,
@@ -54,6 +58,9 @@ export default function CompactionPage() {
       model: typeof (c as Record<string, unknown>).model === 'string' ? (c as Record<string, unknown>).model as string : '',
       timeoutSeconds: typeof (c as Record<string, unknown>).timeoutSeconds === 'number' ? (c as Record<string, unknown>).timeoutSeconds as number : 0,
       customInstructions: typeof (c as Record<string, unknown>).customInstructions === 'string' ? (c as Record<string, unknown>).customInstructions as string : '',
+      dreamingEnabled: (dreaming as Record<string, unknown> | undefined)?.dreaming !== undefined
+        ? ((dreaming as Record<string, unknown>)?.dreaming as Record<string, unknown>)?.enabled === true
+        : false,
     })
   }, [config])
 
@@ -92,6 +99,10 @@ export default function CompactionPage() {
             ...config.agents?.defaults,
             compaction: form.mode === 'off' ? undefined : compaction,
           },
+        },
+        memory: {
+          ...((config as Record<string, unknown>).memory as object | undefined),
+          dreaming: { enabled: form.dreamingEnabled },
         },
       }
       await putConfig(updated)
@@ -136,6 +147,49 @@ export default function CompactionPage() {
             AI จะยังจำ <em>สาระสำคัญ</em>ของการสนทนาได้ แต่ใช้ token น้อยลงมาก
           </p>
           <p className="font-medium">ตัวอย่าง: session 50 turns (80k token) → compact → เหลือ ~10k token</p>
+        </CardContent>
+      </Card>
+
+      {/* ── Quick Start ── */}
+      <Card className="border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-900">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm text-green-700 dark:text-green-400">🚀 เริ่มต้นด่วน — ค่าแนะนำสำหรับ ERP Chatbot</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="text-xs text-green-700 dark:text-green-400 space-y-3">
+          <p>ถ้าไม่แน่ใจ ใช้ค่าแนะนำนี้ได้เลย เหมาะสำหรับระบบ ERP ที่มีการสนทนาต่อเนื่อง</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {[
+              { label: 'Mode', value: 'safeguard' },
+              { label: 'Max History Share', value: '50%' },
+              { label: 'Keep Recent Tokens', value: '10,000' },
+              { label: 'Recent Turns Preserve', value: '3 turns' },
+              { label: 'Truncate After Compact', value: 'เปิด' },
+              { label: 'Dreaming', value: 'เปิด (แนะนำ)' },
+            ].map(item => (
+              <div key={item.label} className="rounded bg-white dark:bg-green-900/30 border border-green-200 dark:border-green-800 px-2 py-1.5">
+                <p className="text-zinc-500 dark:text-zinc-400">{item.label}</p>
+                <p className="font-semibold text-green-700 dark:text-green-300">{item.value}</p>
+              </div>
+            ))}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs border-green-400 text-green-700 hover:bg-green-100 dark:hover:bg-green-900"
+            onClick={() => setForm(f => ({
+              ...f,
+              mode: 'safeguard',
+              maxHistoryShare: 0.5,
+              keepRecentTokens: 10000,
+              recentTurnsPreserve: 3,
+              truncateAfterCompaction: true,
+              dreamingEnabled: true,
+            }))}
+          >
+            ใช้ค่าแนะนำ
+          </Button>
         </CardContent>
       </Card>
 
@@ -366,6 +420,67 @@ export default function CompactionPage() {
         </Card>
       )}
 
+      {/* ── Memory & Dreaming ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">🧠 Memory & Dreaming</CardTitle>
+            <Badge variant={form.dreamingEnabled ? 'default' : 'secondary'} className={`text-xs ${form.dreamingEnabled ? 'bg-violet-600' : ''}`}>
+              {form.dreamingEnabled ? 'เปิดอยู่' : 'ปิดอยู่'}
+            </Badge>
+          </div>
+          <p className="text-xs text-zinc-500 mt-1">ให้ AI บันทึกความจำระยะยาวและสรุปบทเรียนจากการสนทนา</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border border-violet-200 bg-violet-50 dark:bg-violet-950/30 dark:border-violet-800 p-3 space-y-2 text-xs text-violet-700 dark:text-violet-300">
+            <div className="flex gap-2">
+              <span className="shrink-0">🧠</span>
+              <div>
+                <p className="font-medium">MEMORY.md — ความจำถาวร</p>
+                <p>AI บันทึกข้อมูลสำคัญระหว่างสนทนา เช่น ชื่อลูกค้าประจำ ความชอบ ข้อตกลงพิเศษ จำไว้ใช้ในครั้งถัดไป</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <span className="shrink-0">💤</span>
+              <div>
+                <p className="font-medium">Dreams.md — สรุปบทเรียน</p>
+                <p>AI สรุปรูปแบบการสนทนาที่ผ่านมาในช่วง off-peak เช่น สินค้าที่ถูกถามบ่อย คำถามที่ตอบยาก</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between border rounded-md px-4 py-3">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">เปิดใช้งาน Dreaming</p>
+              <p className="text-xs text-zinc-500">
+                {form.dreamingEnabled
+                  ? 'AI จะบันทึกความจำและสรุปบทเรียนอัตโนมัติ — ดูผลลัพธ์ได้ที่หน้า Memory'
+                  : 'ปิดอยู่ — AI จะไม่บันทึกความจำข้ามครั้ง (ปกติสำหรับ session ใหม่ทุกครั้ง)'}
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label={`Dreaming: ${form.dreamingEnabled ? 'เปิด' : 'ปิด'}`}
+              onClick={() => setForm(f => ({ ...f, dreamingEnabled: !f.dreamingEnabled }))}
+              className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                form.dreamingEnabled ? 'bg-violet-600' : 'bg-zinc-200 dark:bg-zinc-700'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                form.dreamingEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+
+          {form.dreamingEnabled && (
+            <div className="rounded-md bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 p-3 text-xs text-violet-600 dark:text-violet-400">
+              ✓ หลัง Save และ Restart Gateway — AI จะเริ่มบันทึก MEMORY.md และ Dreams.md ให้อัตโนมัติ
+              ดูสถานะได้ที่หน้า <a href="/memory" className="underline font-medium">Memory</a>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* ── Summary ── */}
       {form.mode !== 'off' && (
         <Card className="border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-900">
@@ -383,6 +498,7 @@ export default function CompactionPage() {
               {form.model.trim() && <li>model สำหรับ compact: <strong className="font-mono">{form.model.trim()}</strong></li>}
               {form.timeoutSeconds > 0 && <li>timeout: <strong>{form.timeoutSeconds}s</strong></li>}
               {form.customInstructions.trim() && <li>custom instructions: เปิดใช้งาน</li>}
+              <li>Dreaming / Memory: <strong>{form.dreamingEnabled ? 'เปิด' : 'ปิด'}</strong></li>
             </ul>
           </CardContent>
         </Card>
