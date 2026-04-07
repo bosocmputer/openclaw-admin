@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getStatus, getAgents, getConfig, restartGateway, getDoctorStatus, runDoctorFix,
+  getStatus, getAgents, getConfig, restartGateway, cleanSessions, getDoctorStatus, runDoctorFix,
   getMembers, getWebchatRooms, getChatUsers, getLineConfig, getLineBotInfo,
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 export default function DashboardPage() {
   const qc = useQueryClient()
   const [restartDialog, setRestartDialog] = useState(false)
+  const [cleanDialog, setCleanDialog] = useState(false)
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],
@@ -68,6 +69,12 @@ export default function DashboardPage() {
     onError: () => toast.error('Failed to restart gateway'),
   })
 
+  const clean = useMutation({
+    mutationFn: cleanSessions,
+    onSuccess: () => toast.success('ลบ stale sessions สำเร็จ — webchat จะไม่ตอบผ่าน LINE อีกแล้ว'),
+    onError: () => toast.error('Clean sessions failed'),
+  })
+
   const { data: doctorStatus, isLoading: doctorLoading, refetch: refetchDoctor } = useQuery({
     queryKey: ['doctor-status'],
     queryFn: getDoctorStatus,
@@ -113,21 +120,32 @@ export default function DashboardPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-500">Gateway Status</CardTitle>
           </CardHeader>
-          <CardContent className="flex items-center justify-between">
-            {statusLoading ? (
-              <span className="text-sm text-zinc-400">Checking...</span>
-            ) : (
-              <Badge variant={status?.gateway === 'online' ? 'default' : 'destructive'}>
-                {status?.gateway ?? 'unknown'}
-              </Badge>
-            )}
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              {statusLoading ? (
+                <span className="text-sm text-zinc-400">Checking...</span>
+              ) : (
+                <Badge variant={status?.gateway === 'online' ? 'default' : 'destructive'}>
+                  {status?.gateway ?? 'unknown'}
+                </Badge>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setRestartDialog(true)}
+                disabled={restart.isPending}
+              >
+                {restart.isPending ? 'Restarting...' : 'Restart'}
+              </Button>
+            </div>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setRestartDialog(true)}
-              disabled={restart.isPending}
+              className="w-full text-xs text-yellow-600 border-yellow-300 hover:bg-yellow-50 dark:hover:bg-yellow-950"
+              onClick={() => setCleanDialog(true)}
+              disabled={clean.isPending}
             >
-              {restart.isPending ? 'Restarting...' : 'Restart'}
+              {clean.isPending ? 'Cleaning...' : '🧹 Clean Stale Sessions'}
             </Button>
           </CardContent>
         </Card>
@@ -249,6 +267,28 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Clean Sessions Dialog */}
+      <Dialog open={cleanDialog} onOpenChange={setCleanDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clean Stale Sessions</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            ลบ session ค้างที่ทำให้ <span className="font-medium">Webchat ตอบผ่าน LINE</span> ผิดช่อง
+            โดยจะลบเฉพาะ <span className="font-mono text-xs">agent:*:main</span> ที่มี <span className="font-mono text-xs">lastChannel=line</span>
+            — ไม่กระทบ session ปกติและไม่ต้อง restart gateway
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCleanDialog(false)}>ยกเลิก</Button>
+            <Button
+              onClick={() => { setCleanDialog(false); clean.mutate() }}
+            >
+              Clean
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Restart Confirmation Dialog */}
       <Dialog open={restartDialog} onOpenChange={setRestartDialog}>

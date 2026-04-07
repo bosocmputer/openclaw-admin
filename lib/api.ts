@@ -200,6 +200,10 @@ export async function restartGateway(): Promise<void> {
   await api.post('/api/gateway/restart')
 }
 
+export async function cleanSessions(): Promise<void> {
+  await api.post('/api/gateway/clean-sessions')
+}
+
 export async function getTelegramBotInfo(): Promise<Record<string, string>> {
   const { data } = await api.get('/api/telegram/botinfo')
   return data
