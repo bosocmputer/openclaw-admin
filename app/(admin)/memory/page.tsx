@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import Link from 'next/link'
 
 interface MemoryAgentStatus {
   agentId: string
@@ -27,8 +28,8 @@ async function fetchMemoryContent(agentId: string, type: 'memory' | 'dreams'): P
 }
 
 function formatChars(n: number) {
-  if (n > 1000) return `${(n / 1000).toFixed(1)}k chars`
-  return `${n} chars`
+  if (n > 1000) return `${(n / 1000).toFixed(1)}k ตัวอักษร`
+  return `${n} ตัวอักษร`
 }
 
 export default function MemoryPage() {
@@ -55,13 +56,65 @@ export default function MemoryPage() {
     }
   }
 
+  const anyDreamingEnabled = agents.some(a => a.dreaming.enabled)
+  const anyMemoryExists = agents.some(a => a.memory.exists || a.dreams.exists)
+
   return (
     <div className="space-y-6 w-full">
       <div>
         <h1 className="text-2xl font-bold">Memory</h1>
         <p className="text-sm text-zinc-500 mt-1">
-          สถานะ MEMORY.md และ Dreams ของแต่ละ agent — อัปเดตทุก 30 วินาที
+          ความจำระยะยาวของ AI Agent — ข้อมูลที่ AI บันทึกไว้เพื่อใช้ในการสนทนาครั้งถัดไป
         </p>
+      </div>
+
+      {/* Explainer */}
+      <div className="rounded-lg border border-violet-200 bg-violet-50 dark:bg-violet-950/30 dark:border-violet-800 p-4 space-y-4">
+        <div>
+          <p className="font-semibold text-sm text-violet-800 dark:text-violet-200">Memory คืออะไร?</p>
+          <p className="text-sm text-violet-700 dark:text-violet-300 mt-1">
+            ปกติ AI จะ "ลืม" ทุกอย่างเมื่อ session ยาวขึ้นและถูก compaction
+            Memory คือระบบที่ให้ AI บันทึกข้อมูลสำคัญไว้ใน <span className="font-mono text-xs">MEMORY.md</span> เพื่อจำไว้ใช้ต่อในอนาคต
+            เช่น ชื่อลูกค้าประจำ, ความชอบ, ข้อตกลงพิเศษ
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="rounded-md bg-white dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 p-3 space-y-1">
+            <p className="font-semibold text-violet-700 dark:text-violet-300">🧠 MEMORY.md — ความจำถาวร</p>
+            <p className="text-violet-600 dark:text-violet-400">AI บันทึกเองอัตโนมัติระหว่างการสนทนา</p>
+            <p className="text-zinc-500 dark:text-zinc-400 italic">เช่น: "คุณสมชาย ชอบสินค้ายี่ห้อ A มักสั่งช่วงต้นเดือน"</p>
+          </div>
+          <div className="rounded-md bg-white dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 p-3 space-y-1">
+            <p className="font-semibold text-violet-700 dark:text-violet-300">💤 Dreams.md — บทสรุปอัตโนมัติ</p>
+            <p className="text-violet-600 dark:text-violet-400">AI สรุปบทเรียนจากการสนทนาที่ผ่านมาในช่วง off-peak</p>
+            <p className="text-zinc-500 dark:text-zinc-400 italic">เช่น: "สินค้าที่ถูกถามบ่อยที่สุดคือ น้ำมันเครื่อง และ ไส้กรอง"</p>
+          </div>
+        </div>
+
+        {!anyDreamingEnabled && (
+          <div className="border-t border-violet-200 dark:border-violet-800 pt-3 flex items-start gap-2">
+            <span className="text-amber-500 text-sm shrink-0">⚠️</span>
+            <div className="text-sm">
+              <p className="font-medium text-amber-700 dark:text-amber-400">ยังไม่ได้เปิดใช้งาน Memory/Dreaming</p>
+              <p className="text-amber-600 dark:text-amber-500 text-xs mt-0.5">
+                ทุก Agent ยังไม่ได้เปิด dreaming — AI จะยังไม่บันทึกความจำระยะยาว
+                เปิดใช้งานได้ที่หน้า{' '}
+                <Link href="/compaction" className="underline font-medium">Compaction</Link>
+                {' '}→ ส่วน Memory / Dreaming
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!anyMemoryExists && anyDreamingEnabled && (
+          <div className="border-t border-violet-200 dark:border-violet-800 pt-3 flex items-start gap-2">
+            <span className="text-blue-500 text-sm shrink-0">ℹ️</span>
+            <p className="text-sm text-blue-700 dark:text-blue-400">
+              Dreaming เปิดอยู่แล้ว — ไฟล์ Memory จะเริ่มสร้างหลังจาก AI มีการสนทนาและ dreaming phase ทำงานครั้งแรก
+            </p>
+          </div>
+        )}
       </div>
 
       {isLoading && <p className="text-sm text-zinc-400">กำลังโหลด...</p>}
@@ -72,20 +125,25 @@ export default function MemoryPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-mono">{agent.agentId}</CardTitle>
-                <Badge variant={agent.dreaming.enabled ? 'default' : 'secondary'} className="text-xs">
-                  dreaming {agent.dreaming.enabled ? 'on' : 'off'}
+                <Badge
+                  variant={agent.dreaming.enabled ? 'default' : 'secondary'}
+                  className={`text-xs ${agent.dreaming.enabled ? 'bg-violet-600' : ''}`}
+                >
+                  {agent.dreaming.enabled ? '💤 Dreaming เปิด' : 'Dreaming ปิด'}
                 </Badge>
               </div>
               <p className="text-xs text-zinc-400 font-mono">{agent.workspace}</p>
             </CardHeader>
             <CardContent className="space-y-3">
+
               {/* MEMORY.md */}
-              <div className="rounded-lg border p-3 space-y-1">
+              <div className="rounded-lg border p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
+                    <span className="text-sm">🧠</span>
                     <span className="text-sm font-medium">MEMORY.md</span>
                     <Badge variant={agent.memory.exists ? 'outline' : 'secondary'} className="text-xs">
-                      {agent.memory.exists ? formatChars(agent.memory.sizeChars) : 'ไม่มีไฟล์'}
+                      {agent.memory.exists ? formatChars(agent.memory.sizeChars) : 'ยังว่าง'}
                     </Badge>
                   </div>
                   {agent.memory.exists && (
@@ -95,24 +153,31 @@ export default function MemoryPage() {
                       className="text-xs h-6 px-2"
                       onClick={() => openView(agent.agentId, 'memory', `${agent.agentId} — MEMORY.md`)}
                     >
-                      ดู
+                      อ่าน
                     </Button>
                   )}
                 </div>
-                {agent.memory.preview && (
-                  <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap line-clamp-3">
+                {agent.memory.exists && agent.memory.preview ? (
+                  <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap line-clamp-3 bg-zinc-50 dark:bg-zinc-800/50 rounded p-2">
                     {agent.memory.preview}
                   </pre>
+                ) : (
+                  <p className="text-xs text-zinc-400 italic">
+                    {agent.dreaming.enabled
+                      ? 'AI ยังไม่ได้บันทึกความจำ — จะเริ่มสร้างหลังจากมีการสนทนา'
+                      : 'ต้องเปิด Dreaming ก่อนถึงจะมีไฟล์นี้'}
+                  </p>
                 )}
               </div>
 
-              {/* dreams.md */}
-              <div className="rounded-lg border p-3 space-y-1">
+              {/* Dreams.md */}
+              <div className="rounded-lg border p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">dreams.md</span>
+                    <span className="text-sm">💤</span>
+                    <span className="text-sm font-medium">Dreams.md</span>
                     <Badge variant={agent.dreams.exists ? 'outline' : 'secondary'} className="text-xs">
-                      {agent.dreams.exists ? formatChars(agent.dreams.sizeChars) : 'ไม่มีไฟล์'}
+                      {agent.dreams.exists ? formatChars(agent.dreams.sizeChars) : 'ยังว่าง'}
                     </Badge>
                   </div>
                   {agent.dreams.exists && (
@@ -120,18 +185,35 @@ export default function MemoryPage() {
                       size="sm"
                       variant="outline"
                       className="text-xs h-6 px-2"
-                      onClick={() => openView(agent.agentId, 'dreams', `${agent.agentId} — dreams.md`)}
+                      onClick={() => openView(agent.agentId, 'dreams', `${agent.agentId} — Dreams.md`)}
                     >
-                      ดู
+                      อ่าน
                     </Button>
                   )}
                 </div>
-                {agent.dreams.preview && (
-                  <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap line-clamp-2">
+                {agent.dreams.exists && agent.dreams.preview ? (
+                  <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap line-clamp-2 bg-zinc-50 dark:bg-zinc-800/50 rounded p-2">
                     {agent.dreams.preview}
                   </pre>
+                ) : (
+                  <p className="text-xs text-zinc-400 italic">
+                    {agent.dreaming.enabled
+                      ? 'AI ยังไม่ได้สรุปบทเรียน — จะสร้างหลังจาก dreaming phase ทำงาน'
+                      : 'ต้องเปิด Dreaming ก่อนถึงจะมีไฟล์นี้'}
+                  </p>
                 )}
               </div>
+
+              {!agent.dreaming.enabled && (
+                <div className="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 p-3 text-center">
+                  <p className="text-xs text-zinc-400">
+                    เปิด Dreaming ได้ที่{' '}
+                    <Link href="/compaction" className="text-violet-500 hover:underline font-medium">
+                      หน้า Compaction
+                    </Link>
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         ))}
