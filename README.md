@@ -2,7 +2,7 @@
 
 Web Admin Panel สำหรับจัดการ OpenClaw ERP Chatbot — ไม่ต้อง SSH server
 
-รองรับ **OpenClaw v2026.3.28+**
+รองรับ **OpenClaw v2026.4.6+**
 
 ## โครงสร้างระบบ
 
@@ -77,6 +77,9 @@ Browser → GET /api/proxy/api/status
 | Webchat | `/webchat` | ใช้งาน webchat ในหน้าเดียว (role: chat ใช้ได้) |
 | Monitor | `/monitor` | Live session event log (auto-refresh) — รองรับ Telegram, LINE, Webchat |
 | Compaction | `/compaction` | ตั้งค่า memory compaction (รองรับ fields ใหม่ v2026.3.28) |
+| Checkpoints | `/sessions` | ดูและ restore session compaction checkpoints ต่อ agent |
+| Webhooks | `/webhooks` | CRUD webhook routes สำหรับรับข้อมูลจากระบบภายนอก |
+| Memory | `/memory` | ดู MEMORY.md + dreams.md ต่อ agent (auto-refresh 30s) |
 | Analysis | `/analysis` | วิเคราะห์ token usage + สถิติรายงาน per agent |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
 | Guide | `/guide` | คู่มือผู้ใช้ (แสดง bot name จริงจาก config) |
@@ -101,6 +104,9 @@ openclaw-admin/
 │   │   ├── webchat/page.tsx
 │   │   ├── monitor/page.tsx
 │   │   ├── compaction/page.tsx
+│   │   ├── sessions/page.tsx       ← Session Checkpoints
+│   │   ├── webhooks/page.tsx       ← Webhooks CRUD
+│   │   ├── memory/page.tsx         ← Memory & Dreams viewer
 │   │   ├── analysis/page.tsx
 │   │   ├── logs/page.tsx
 │   │   ├── guide/page.tsx
@@ -139,7 +145,7 @@ openclaw-admin/
 
 - Docker + Docker Compose
 - **openclaw-api รันด้วย pm2 บน host อยู่แล้ว** (port 4000)
-- **OpenClaw Gateway v2026.3.28+**
+- **OpenClaw Gateway v2026.4.6+**
 - **cloudflared** — สำหรับ LINE webhook (LINE ต้องการ HTTPS): ดู INSTALL.md ขั้นตอน 11.9
 
 ### 1. ติดตั้ง Docker (ครั้งแรกเท่านั้น)

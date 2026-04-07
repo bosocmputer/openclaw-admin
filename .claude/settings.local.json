@@ -26,7 +26,10 @@
       "Bash(curl -s -X POST https://excel-template-interest-plastics.trycloudflare.com/line/webhook -H \"Content-Type: application/json\" -H \"x-line-signature: test\" -d '{\"\"destination\"\":\"\"test\"\",\"\"events\"\":[]}' -w \"\\\\nHTTP: %{http_code}\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(json.dumps\\(a, indent=2, ensure_ascii=False\\)\\) for a in d.get\\(''''agents'''',[]\\)]\")",
       "Bash(python3 -c \":*)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Bash(for agent:*)",
+      "Bash(do echo:*)",
+      "Bash(grep -r \"role.*=.*chat\\\\|chat.*role\" /Users/nontawatwongnuk/dev/openclaw-admin --include=*.ts --include=*.tsx --include=*.js)"
     ]
   }
 }

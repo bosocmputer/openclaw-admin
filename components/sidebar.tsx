@@ -45,6 +45,14 @@ const adminGroups: NavGroup[] = [
     label: 'Conversations',
     items: [
       { href: '/monitor', label: 'Live Sessions' },
+      { href: '/sessions', label: 'Checkpoints' },
+    ],
+  },
+  {
+    label: 'Integrations',
+    items: [
+      { href: '/webhooks', label: 'Webhooks' },
+      { href: '/memory', label: 'Memory' },
     ],
   },
   {

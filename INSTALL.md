@@ -431,6 +431,10 @@ password: superadmin
 2. ถ้าไม่ Valid กด **Auto Fix**
 3. กด **Restart Gateway**
 
+> **Clean Stale Sessions**: ถ้า Webchat ตอบซ้ำใน LINE — กด **Clean Stale Sessions** บน Dashboard
+> ระบบจะลบ `agent:*:main` sessions ที่มี `lastChannel=line` ค้างอยู่โดยอัตโนมัติ
+> (หรือรอ cron ที่รันทุกวัน 3:00 AM)
+
 ### 10.8 ตั้งค่า Webchat (ถ้าต้องการให้พนักงานแชทผ่านเว็บ)
 
 **สร้างห้องแชท:**
@@ -505,6 +509,83 @@ https://<tunnel-url>/line/webhook/<accountId>
 >
 > **สำคัญ — Webhook Path ต้องไม่ซ้ำ**:
 > ถ้า 2 OA ใช้ path เดียวกัน gateway จะ overwrite handler → OA แรกจะได้ 401 Unauthorized
+
+### 10.10 ตั้งค่า Webhooks (ถ้าต้องการรับข้อมูลจากระบบภายนอก)
+
+Webhooks plugin ให้ระบบภายนอก (เช่น ERP, LINE Notify) POST ข้อมูลเข้า agent โดยตรง
+
+**เปิดใช้งาน Webhooks ใน openclaw.json:**
+
+```bash
+nano ~/.openclaw/openclaw.json
+```
+
+เพิ่ม section `plugins` ที่ระดับ root:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "webhooks": {
+        "enabled": true,
+        "config": {
+          "routes": {}
+        }
+      }
+    }
+  }
+}
+```
+
+Restart gateway:
+
+```bash
+openclaw gateway restart
+```
+
+**เพิ่ม Webhook Route ผ่าน Web Admin:**
+
+1. เมนู **Webhooks** → กด **เพิ่ม Route ใหม่**
+2. กรอก Route Name (a-z0-9_- เท่านั้น เช่น `erp_notify`)
+3. กรอก Path (เช่น `/webhooks/erp_notify`)
+4. กรอก Session Key ที่ต้องการ inject เข้า (เช่น `agent:sale:main`)
+5. กรอก Secret สำหรับ authenticate (ส่งผ่าน header `X-Webhook-Secret`)
+6. กด **เพิ่ม**
+
+> ระบบภายนอก POST ไปที่ `https://<gateway-url>/webhooks/<path>` พร้อม `X-Webhook-Secret: <secret>`
+
+---
+
+### 10.11 ตรวจสอบ Session Checkpoints
+
+Session Checkpoints ถูกสร้างอัตโนมัติเมื่อ gateway ทำ compaction — ช่วย restore context ได้ถ้า compaction เสียหาย
+
+**ดู Checkpoints:**
+
+1. เมนู **Checkpoints**
+2. เลือก Agent จาก selector
+3. รายการ checkpoint แสดงขึ้นมา — กด **Restore** เพื่อ restore กลับ
+
+> ก่อน restore ระบบจะ backup session ปัจจุบันโดยอัตโนมัติ — การสนทนาหลัง checkpoint จะหายไป
+
+**ตั้งค่า Compaction (เพื่อสร้าง checkpoint):**
+
+1. เมนู **Compaction** → ตั้งค่า mode และ threshold
+2. gateway จะสร้าง `*.jsonl.reset.*` files อัตโนมัติเมื่อ compact
+
+---
+
+### 10.12 ตรวจสอบ Memory & Dreams
+
+ดูสถานะ MEMORY.md และ dreams.md ของแต่ละ agent:
+
+1. เมนู **Memory**
+2. แต่ละ agent card แสดง:
+   - **MEMORY.md** — ขนาด + preview 3 บรรทัดแรก + ปุ่ม **ดู** เพื่ออ่านเต็ม
+   - **dreams.md** — ขนาด + preview + ปุ่ม **ดู**
+   - Badge **dreaming on/off** — สถานะ `memory.dreaming.enabled`
+
+> หน้านี้ auto-refresh ทุก 30 วินาที
 
 ---
 

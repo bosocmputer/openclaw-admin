@@ -567,6 +567,76 @@ export async function getMonitorCost(days = 30): Promise<CostData> {
   return data
 }
 
+// ─── Webhooks ─────────────────────────────────────────────────────────────────
+
+export interface WebhookRoute {
+  path: string
+  sessionKey: string
+  secret: string
+  description?: string
+  enabled?: boolean
+}
+
+export async function getWebhooks(): Promise<Record<string, WebhookRoute>> {
+  const { data } = await api.get('/api/webhooks')
+  return data
+}
+
+export async function addWebhook(body: { name: string; path: string; sessionKey: string; secret: string; description?: string }): Promise<void> {
+  await api.post('/api/webhooks', body)
+}
+
+export async function deleteWebhook(name: string): Promise<void> {
+  await api.delete(`/api/webhooks/${name}`)
+}
+
+export async function patchWebhook(name: string, fields: { enabled?: boolean; description?: string }): Promise<void> {
+  await api.patch(`/api/webhooks/${name}`, fields)
+}
+
+// ─── Compaction Checkpoints ────────────────────────────────────────────────────
+
+export interface CompactionCheckpoint {
+  filename: string
+  sessionId: string
+  checkpointAt: string
+  sizeBytes: number
+}
+
+export async function getCompactionCheckpoints(agentId: string): Promise<CompactionCheckpoint[]> {
+  const { data } = await api.get(`/api/compaction/checkpoints/${agentId}`)
+  return data
+}
+
+export async function restoreCheckpoint(agentId: string, filename: string): Promise<void> {
+  await api.post('/api/compaction/restore', { agentId, filename })
+}
+
+// ─── Memory ────────────────────────────────────────────────────────────────────
+
+export interface MemoryAgentStatus {
+  agentId: string
+  workspace: string
+  memory: { exists: boolean; sizeChars: number; preview: string }
+  dreams: { exists: boolean; sizeChars: number; preview: string }
+  dreaming: { enabled: boolean; config: Record<string, unknown> | null }
+}
+
+export async function getMemoryStatus(): Promise<MemoryAgentStatus[]> {
+  const { data } = await api.get('/api/memory/status')
+  return data
+}
+
+export async function getMemoryContent(agentId: string): Promise<string> {
+  const { data } = await api.get(`/api/memory/${agentId}/memory`)
+  return data.content ?? ''
+}
+
+export async function getDreamsContent(agentId: string): Promise<string> {
+  const { data } = await api.get(`/api/memory/${agentId}/dreams`)
+  return data.content ?? ''
+}
+
 // ─── Alerting ─────────────────────────────────────────────────────────────────
 
 export interface AlertingConfig {

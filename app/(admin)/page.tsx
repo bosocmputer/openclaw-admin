@@ -11,11 +11,68 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
+import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
+
+const WHATS_NEW_VERSION = 'v2026.4.6'
+const WHATS_NEW_KEY = 'whats-new-dismissed-v2026.4.6'
+
+const whatsnewItems = [
+  {
+    icon: '🔗',
+    title: 'Webhooks — รับข้อมูลจากระบบภายนอกเข้า Agent โดยตรง',
+    desc: 'ตั้งค่า webhook route ให้ระบบ ERP หรือแอปอื่นๆ ส่ง HTTP POST มาที่ gateway แล้ว agent ของคุณจะได้รับข้อความนั้นทันที',
+    example: 'เช่น: ระบบ ERP ตัดยอดสต๊อกต่ำกว่า 10 ชิ้น → POST ไป /webhooks/stock_alert → agent "stock" แจ้งเตือนทีมคลังใน LINE ทันที',
+    href: '/webhooks',
+    badge: 'ใหม่',
+  },
+  {
+    icon: '💾',
+    title: 'Session Checkpoints — กู้คืน context หลัง compaction',
+    desc: 'ทุกครั้งที่ gateway ทำ compaction ระบบจะสำรอง session ไว้อัตโนมัติ คุณสามารถ restore กลับไปยังจุดก่อน compaction ได้ถ้า context หาย',
+    example: 'เช่น: agent "sale" compaction แล้ว AI ลืมข้อมูลลูกค้าที่คุยค้างไว้ → ไป Checkpoints → เลือก checkpoint → กด Restore → context กลับมาครบ',
+    href: '/sessions',
+    badge: 'ใหม่',
+  },
+  {
+    icon: '🧠',
+    title: 'Memory & Dreams — ดูความจำระยะยาวของ Agent',
+    desc: 'แต่ละ agent มี MEMORY.md เก็บข้อมูลสำคัญถาวร และ dreams.md เก็บบทสรุปจาก dreaming phase ดูสถานะและอ่านเนื้อหาได้โดยไม่ต้อง SSH',
+    example: 'เช่น: agent "admin" จำได้ว่า "ลูกค้า บ.ABC ชอบสินค้า X" → เก็บใน MEMORY.md → ไป Memory → กด ดู → อ่านความจำของ AI ได้เลย',
+    href: '/memory',
+    badge: 'ใหม่',
+  },
+  {
+    icon: '🧹',
+    title: 'Clean Stale Sessions — แก้ Webchat ตอบผิดช่อง',
+    desc: 'ปุ่มใหม่บน Dashboard — ถ้า Webchat ส่งข้อความแต่ reply ออกไปทาง LINE แทน กดปุ่มนี้เพื่อล้าง session ค้างได้ทันที โดยไม่ต้อง restart gateway',
+    example: 'เช่น: พนักงานคุยใน Webchat แต่ LINE OA ส่งข้อความออกไปด้วย → กด Clean Stale Sessions → ปัญหาหายทันที (ระบบยังรัน cron ล้างอัตโนมัติทุกคืน 3:00 น. ด้วย)',
+    href: null,
+    badge: 'ปรับปรุง',
+  },
+  {
+    icon: '📊',
+    title: 'Live Monitor — ดู AI ทำงาน real-time',
+    desc: 'หน้า Monitor แสดง session ทุกช่องทาง (Telegram / LINE / Webchat) พร้อมกัน เห็นได้ว่า AI กำลัง thinking, เรียก tool, หรือตอบอยู่ — อัปเดตทุก 3 วินาที',
+    example: 'เช่น: ลูกค้าถามราคาสินค้าใน LINE → Monitor แสดง tool_call: get_product_price → แสดง reply: "ราคา 250 บาท" → เห็นทั้งกระบวนการ',
+    href: '/monitor',
+    badge: 'มีอยู่แล้ว',
+  },
+]
 
 export default function DashboardPage() {
   const qc = useQueryClient()
   const [restartDialog, setRestartDialog] = useState(false)
   const [cleanDialog, setCleanDialog] = useState(false)
+  const [newsDismissed, setNewsDismissed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem(WHATS_NEW_KEY) === '1'
+  })
+  const [newsExpanded, setNewsExpanded] = useState(false)
+
+  function dismissNews() {
+    localStorage.setItem(WHATS_NEW_KEY, '1')
+    setNewsDismissed(true)
+  }
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],
@@ -114,6 +171,69 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-sm text-zinc-500 mt-1">OpenClaw ERP Chatbot Admin</p>
       </div>
+
+      {!newsDismissed && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-950/40">
+          <div className="flex items-center justify-between px-4 py-3 gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Sparkles className="size-4 text-indigo-500 shrink-0" />
+              <span className="font-semibold text-sm text-indigo-700 dark:text-indigo-300">
+                มีอะไรใหม่ใน {WHATS_NEW_VERSION}
+              </span>
+              <Badge variant="secondary" className="text-[10px] bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 border-0">
+                5 อัปเดต
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setNewsExpanded(v => !v)}
+                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+              >
+                {newsExpanded ? <><ChevronUp className="size-3" />ย่อ</> : <><ChevronDown className="size-3" />ดูทั้งหมด</>}
+              </button>
+              <button
+                type="button"
+                onClick={dismissNews}
+                className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                aria-label="ปิด"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {newsExpanded && (
+            <div className="border-t border-indigo-200 dark:border-indigo-800 px-4 py-3 space-y-4">
+              {whatsnewItems.map((item, i) => (
+                <div key={i} className="flex gap-3">
+                  <span className="text-xl shrink-0 mt-0.5">{item.icon}</span>
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{item.title}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                        item.badge === 'ใหม่'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                          : item.badge === 'ปรับปรุง'
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
+                          : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
+                      }`}>{item.badge}</span>
+                    </div>
+                    <p className="text-xs text-zinc-600 dark:text-zinc-400">{item.desc}</p>
+                    <p className="text-xs text-indigo-600 dark:text-indigo-400 italic">{item.example}</p>
+                    {item.href && (
+                      <a href={item.href} className="text-xs font-medium text-indigo-500 hover:underline">
+                        ไปที่หน้านี้ →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-zinc-400 pt-1">กด ✕ เพื่อปิดและไม่แสดงอีก</p>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
