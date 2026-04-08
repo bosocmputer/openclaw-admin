@@ -47,7 +47,10 @@ export default function CompactionPage() {
     if (!config) return
     const c = config.agents?.defaults?.compaction
     if (!c) return
-    const dreaming = (config as Record<string, unknown>)?.memory as Record<string, unknown> | undefined
+    const memoryCoreConfig = ((config as Record<string, unknown>)?.plugins as Record<string, unknown> | undefined)
+      ?.entries as Record<string, unknown> | undefined
+    const memoryCoreEntry = memoryCoreConfig?.['memory-core'] as Record<string, unknown> | undefined
+    const dreamingConfig = (memoryCoreEntry?.config as Record<string, unknown> | undefined)?.dreaming as Record<string, unknown> | undefined
     setForm({
       mode: (c.mode as CompactionForm['mode']) ?? 'safeguard',
       maxHistoryShare: typeof c.maxHistoryShare === 'number' ? c.maxHistoryShare : 0.5,
@@ -58,9 +61,7 @@ export default function CompactionPage() {
       model: typeof (c as Record<string, unknown>).model === 'string' ? (c as Record<string, unknown>).model as string : '',
       timeoutSeconds: typeof (c as Record<string, unknown>).timeoutSeconds === 'number' ? (c as Record<string, unknown>).timeoutSeconds as number : 0,
       customInstructions: typeof (c as Record<string, unknown>).customInstructions === 'string' ? (c as Record<string, unknown>).customInstructions as string : '',
-      dreamingEnabled: (dreaming as Record<string, unknown> | undefined)?.dreaming !== undefined
-        ? ((dreaming as Record<string, unknown>)?.dreaming as Record<string, unknown>)?.enabled === true
-        : false,
+      dreamingEnabled: dreamingConfig?.enabled === true,
     })
   }, [config])
 
@@ -100,9 +101,18 @@ export default function CompactionPage() {
             compaction: form.mode === 'off' ? undefined : compaction,
           },
         },
-        memory: {
-          ...((config as Record<string, unknown>).memory as object | undefined),
-          dreaming: { enabled: form.dreamingEnabled },
+        plugins: {
+          ...((config as Record<string, unknown>).plugins as object | undefined),
+          entries: {
+            ...(((config as Record<string, unknown>).plugins as Record<string, unknown> | undefined)?.entries as object | undefined),
+            'memory-core': {
+              ...(((((config as Record<string, unknown>).plugins as Record<string, unknown> | undefined)?.entries as Record<string, unknown> | undefined)?.['memory-core']) as object | undefined),
+              config: {
+                ...(((((config as Record<string, unknown>).plugins as Record<string, unknown> | undefined)?.entries as Record<string, unknown> | undefined)?.['memory-core'] as Record<string, unknown> | undefined)?.config as object | undefined),
+                dreaming: { enabled: form.dreamingEnabled },
+              },
+            },
+          },
         },
       }
       await putConfig(updated)
