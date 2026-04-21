@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-04-07 (รอบ 13 — OpenClaw v2026.4.6)
+> อัปเดต: 2026-04-21 (รอบ 14 — OpenClaw v2026.4.15)
 
 ---
 
@@ -41,7 +41,7 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
                                                         ▼
                                               ┌─────────────────┐
                                               │ openclaw-gateway │
-                                              │ systemd port 18789│
+                                              │ pm2 port 18789   │
                                               └────────┬────────┘
                                                        │ HTTP POST /call
                                                        │ Header: mcp-access-mode
@@ -66,9 +66,9 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
 
 | Service | Deploy | Port | Repo | อัปเดต |
 | ------- | ------ | ---- | ---- | ------ |
-| openclaw-gateway | systemd --user | 18789 | — | `openclaw gateway restart` |
-| openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull && npm install && pm2 restart openclaw-api` |
-| openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull && docker compose up -d --build` |
+| openclaw-gateway | pm2 (node dist/index.js) | 18789 | — | `pm2 restart openclaw-gateway` |
+| openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull origin main && npm install && pm2 restart openclaw-api` |
+| openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull origin main && docker compose up -d --build` |
 | PostgreSQL | Docker | 5432 | — (same compose) | restart อัตโนมัติกับ openclaw-admin |
 
 ---
