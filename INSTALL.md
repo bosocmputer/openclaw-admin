@@ -159,14 +159,19 @@ openclaw gateway status
 ถ้า gateway ไม่รัน ให้รันผ่าน **pm2** (แนะนำ — auto-restart เมื่อ reboot):
 
 ```bash
-pm2 start "openclaw gateway run --bind loopback --port 18789 --force" --name openclaw-gateway
+pm2 start $(npm root -g)/openclaw/dist/index.js \
+  --interpreter node \
+  --name openclaw-gateway \
+  -- gateway run --bind loopback --port 18789
 pm2 save
 ```
+
+> **หมายเหตุ**: ใช้ `node` รัน gateway โดยตรง — อย่าใช้ `openclaw gateway run` ผ่าน pm2 เพราะ CLI จะ exit หลัง spawn daemon ทำให้ pm2 restart วนไม่หยุด
 
 หรือรันแบบ background ชั่วคราว (ไม่ auto-restart):
 
 ```bash
-nohup openclaw gateway run --bind loopback --port 18789 --force > /tmp/openclaw-gateway.log 2>&1 &
+nohup openclaw gateway run --bind loopback --port 18789 > /tmp/openclaw-gateway.log 2>&1 &
 ```
 
 ตรวจสอบ:
@@ -815,7 +820,10 @@ docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin -c 
 ### ผ่าน pm2
 
 ```bash
-pm2 start "openclaw gateway run --bind loopback --port 18789 --force" --name openclaw-gateway
+pm2 start $(npm root -g)/openclaw/dist/index.js \
+  --interpreter node \
+  --name openclaw-gateway \
+  -- gateway run --bind loopback --port 18789
 pm2 save
 pm2 startup
 ```
