@@ -98,7 +98,7 @@ source ~/.bashrc
 แล้วติดตั้ง:
 
 ```bash
-npm install -g openclaw@2026.4.5 mcporter pm2
+npm install -g openclaw mcporter pm2
 ```
 
 ตรวจสอบ:
@@ -156,19 +156,26 @@ openclaw gateway status
 
 ถ้าเห็น `RPC probe: ok` — gateway รันอยู่แล้ว ไปขั้นตอน 6.3
 
-ถ้า gateway ไม่รัน ให้รันด้วย:
+ถ้า gateway ไม่รัน ให้รันผ่าน **pm2** (แนะนำ — auto-restart เมื่อ reboot):
 
 ```bash
-nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &
+pm2 start "openclaw gateway run --bind loopback --port 18789 --force" --name openclaw-gateway
+pm2 save
+```
+
+หรือรันแบบ background ชั่วคราว (ไม่ auto-restart):
+
+```bash
+nohup openclaw gateway run --bind loopback --port 18789 --force > /tmp/openclaw-gateway.log 2>&1 &
 ```
 
 ตรวจสอบ:
 
 ```bash
-ps aux | grep openclaw-gateway | grep -v grep
+ss -tlnp | grep 18789
 ```
 
-> **หมายเหตุ**: gateway ใน production ควรรันผ่าน systemd (`openclaw gateway install`) หรือ pm2 เพื่อ auto-restart เมื่อ reboot ดูวิธีที่ท้าย INSTALL.md
+> **หมายเหตุ**: ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` แทน `openclaw gateway restart` ทุกครั้ง
 
 ### 6.3 ตั้งค่า Hooks สำหรับ Webchat
 
@@ -198,6 +205,10 @@ nano ~/.openclaw/openclaw.json
 Restart gateway:
 
 ```bash
+# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
+pm2 restart openclaw-gateway
+
+# ถ้ารัน gateway แบบอื่น
 openclaw gateway restart
 ```
 
@@ -540,6 +551,10 @@ nano ~/.openclaw/openclaw.json
 Restart gateway:
 
 ```bash
+# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
+pm2 restart openclaw-gateway
+
+# ถ้ารัน gateway แบบอื่น
 openclaw gateway restart
 ```
 
@@ -613,7 +628,7 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
 
 ```bash
 cd ~/openclaw-api
-git pull
+git pull origin main
 npm install
 pm2 restart openclaw-api
 ```
@@ -622,7 +637,7 @@ pm2 restart openclaw-api
 
 ```bash
 cd ~/openclaw-admin
-git pull
+git pull origin main
 docker compose up -d --build
 ```
 
@@ -639,17 +654,21 @@ docker logs openclaw-admin-openclaw-admin-1 --tail 20
 
 ### Gateway ไม่ออนไลน์ (Dashboard แสดง offline)
 
+ถ้ารัน gateway ผ่าน pm2 (แนะนำ):
+
+```bash
+pm2 restart openclaw-gateway
+pm2 logs openclaw-gateway --lines 30
+```
+
+ถ้ารัน gateway แบบอื่น:
+
 ```bash
 openclaw gateway restart
 openclaw gateway status
 ```
 
-ถ้า restart ไม่ได้ผ่าน CLI ให้ kill แล้วรันใหม่:
-
-```bash
-kill $(pgrep -f openclaw-gateway)
-nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &
-```
+> **หมายเหตุ**: อย่าใช้ `kill` + `nohup` ถ้า gateway อยู่ใน pm2 เพราะ pm2 จะ restart ขึ้นมาใหม่อัตโนมัติอยู่แล้ว — การรัน `nohup` ซ้อนจะทำให้มี 2 process
 
 ### openclaw-api ไม่ตอบสนอง
 
@@ -697,7 +716,12 @@ grep -A5 '"hooks"' ~/.openclaw/openclaw.json
 3. Restart:
 
 ```bash
+# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
+pm2 restart openclaw-gateway
+
+# ถ้ารัน gateway แบบอื่น
 openclaw gateway restart
+
 pm2 restart openclaw-api --update-env
 ```
 
@@ -756,6 +780,10 @@ EOF
 แล้ว restart gateway:
 
 ```bash
+# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
+pm2 restart openclaw-gateway
+
+# ถ้ารัน gateway แบบอื่น
 openclaw gateway restart
 ```
 
@@ -787,14 +815,7 @@ docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin -c 
 ### ผ่าน pm2
 
 ```bash
-# หา path ของ openclaw
-ls /usr/lib/node_modules/openclaw/dist/index.js 2>/dev/null \
-  && echo "OK" || echo "path: $(npm root -g)/openclaw/dist/index.js"
-
-pm2 start /usr/lib/node_modules/openclaw/dist/index.js \
-  --name openclaw-gateway \
-  --interpreter node \
-  -- gateway --port 18789
+pm2 start "openclaw gateway run --bind loopback --port 18789 --force" --name openclaw-gateway
 pm2 save
 pm2 startup
 ```
