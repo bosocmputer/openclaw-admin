@@ -52,6 +52,30 @@ CREATE INDEX IF NOT EXISTS idx_audit_action    ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_webchat_messages_room_created ON webchat_messages(room_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_admin_users_username          ON admin_users(username);
 
+CREATE TABLE IF NOT EXISTS sale_orders (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  doc_no         VARCHAR(50),
+  source         VARCHAR(20) NOT NULL DEFAULT 'line',
+  agent_id       VARCHAR(50),
+  contact_name   VARCHAR(200),
+  contact_phone  VARCHAR(50),
+  items          JSONB       NOT NULL DEFAULT '[]',
+  total_amount   NUMERIC(12,2),
+  status         VARCHAR(20) NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending','success','failed')),
+  raw_request    JSONB,
+  raw_response   JSONB,
+  error_message  TEXT,
+  retry_count    INTEGER     NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sale_orders_status     ON sale_orders(status);
+CREATE INDEX IF NOT EXISTS idx_sale_orders_created    ON sale_orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sale_orders_agent      ON sale_orders(agent_id);
+CREATE INDEX IF NOT EXISTS idx_sale_orders_source     ON sale_orders(source);
+
 INSERT INTO admin_users (username, password, role, display_name)
 VALUES (
   'superadmin',

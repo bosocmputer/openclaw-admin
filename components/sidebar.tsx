@@ -49,6 +49,12 @@ const adminGroups: NavGroup[] = [
     ],
   },
   {
+    label: 'Business',
+    items: [
+      { href: '/orders', label: 'คำสั่งซื้อ' },
+    ],
+  },
+  {
     label: 'Integrations',
     items: [
       { href: '/webhooks', label: 'Webhooks' },

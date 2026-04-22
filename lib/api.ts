@@ -651,3 +651,56 @@ export async function getAlerting(): Promise<AlertingConfig> {
 export async function putAlerting(config: AlertingConfig): Promise<void> {
   await api.put('/api/alerting', config)
 }
+
+// ─── Sale Orders ──────────────────────────────────────────────────────────────
+
+export interface SaleOrderItem {
+  item_code: string
+  qty: number
+  unit_code: string
+  price: number
+}
+
+export interface SaleOrder {
+  id: string
+  doc_no: string | null
+  source: string
+  agent_id: string | null
+  contact_name: string | null
+  contact_phone: string | null
+  items: SaleOrderItem[]
+  total_amount: string | null
+  status: 'pending' | 'success' | 'failed'
+  raw_request: unknown
+  raw_response: unknown
+  error_message: string | null
+  retry_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface SaleOrdersResponse {
+  orders: SaleOrder[]
+  total: number
+}
+
+export async function getSaleOrders(params?: {
+  status?: string
+  source?: string
+  agent_id?: string
+  limit?: number
+  offset?: number
+}): Promise<SaleOrdersResponse> {
+  const { data } = await api.get('/api/sale-orders', { params })
+  return data
+}
+
+export async function getSaleOrder(id: string): Promise<SaleOrder> {
+  const { data } = await api.get(`/api/sale-orders/${id}`)
+  return data
+}
+
+export async function resendSaleOrder(id: string): Promise<{ ok: boolean; success: boolean; doc_no: string | null; error: string | null }> {
+  const { data } = await api.post(`/api/sale-orders/${id}/resend`)
+  return data
+}

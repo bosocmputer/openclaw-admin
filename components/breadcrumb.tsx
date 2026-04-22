@@ -20,6 +20,7 @@ const crumbMap: Array<{ match: (p: string) => boolean; crumb: Crumb }> = [
   { match: p => p.startsWith('/logs'),      crumb: { section: 'System',         label: 'Logs'         } },
   { match: p => p.startsWith('/members'),   crumb: { section: 'System',         label: 'Members'      } },
   { match: p => p.startsWith('/guide'),     crumb: { section: 'Help',           label: 'User Guide'   } },
+  { match: p => p.startsWith('/orders'),    crumb: { section: 'Business',       label: 'คำสั่งซื้อ'    } },
 ]
 
 export default function Breadcrumb() {
