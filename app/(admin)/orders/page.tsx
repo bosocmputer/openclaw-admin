@@ -69,7 +69,7 @@ export default function OrdersPage() {
           <p className="text-sm text-zinc-500 mt-0.5">รายการคำสั่งซื้อที่ AI สร้างผ่านระบบ</p>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setPage(0) }}>
+          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v ?? ''); setPage(0) }}>
             <SelectTrigger className="w-36">
               <SelectValue placeholder="สถานะทั้งหมด" />
             </SelectTrigger>
