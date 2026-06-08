@@ -209,6 +209,17 @@ export async function getTelegramBotInfo(): Promise<Record<string, string>> {
   return data
 }
 
+export interface TelegramBotStatus {
+  online: boolean
+  name: string | null
+  username: string | null
+}
+
+export async function getTelegramStatus(): Promise<Record<string, TelegramBotStatus>> {
+  const { data } = await api.get('/api/telegram/status')
+  return data
+}
+
 export async function getTelegramBindings(): Promise<{ accountId: string; agentId: string }[]> {
   const { data } = await api.get('/api/telegram/bindings')
   return data
@@ -640,7 +651,7 @@ export async function getDreamsContent(agentId: string): Promise<string> {
 // ─── Alerting ─────────────────────────────────────────────────────────────────
 
 export interface AlertingConfig {
-  telegram: { enabled: boolean; chatId: string }
+  telegram: { enabled: boolean; chatId: string; noResponseSec?: number }
 }
 
 export async function getAlerting(): Promise<AlertingConfig> {

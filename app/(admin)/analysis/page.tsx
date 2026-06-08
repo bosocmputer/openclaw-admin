@@ -372,7 +372,24 @@ function AlertingSection({ initialConfig }: { initialConfig: AlertingConfig }) {
               className="flex-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
           </div>
-          <p className="text-xs text-zinc-400">Bot token ใช้จาก Telegram channel ที่ตั้งค่าไว้แล้ว • แจ้งเตือนเมื่อ agent error หรือหยุดกลางคัน</p>
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-zinc-500 w-32 shrink-0">แจ้งถ้าไม่ตอบใน</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={300}
+                step={5}
+                title="แจ้งเตือนถ้า agent ไม่ตอบนานกว่า N วินาที (0 = ปิด)"
+                value={config.telegram.noResponseSec ?? 0}
+                onChange={e => setConfig(c => ({ ...c, telegram: { ...c.telegram, noResponseSec: Number(e.target.value) } }))}
+                className="w-24 text-sm border border-zinc-300 dark:border-zinc-600 rounded px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+              />
+              <span className="text-sm text-zinc-500">วินาที</span>
+              <span className="text-xs text-zinc-400">(0 = ปิด)</span>
+            </div>
+          </div>
+          <p className="text-xs text-zinc-400">Bot token ใช้จาก Telegram channel ที่ตั้งค่าไว้แล้ว • แจ้งเตือนเมื่อ agent error, หยุดกลางคัน, หรือคิดนานเกินกำหนด</p>
           <div className="flex items-center gap-2">
             <button
               onClick={handleSave}

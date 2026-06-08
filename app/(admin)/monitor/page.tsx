@@ -157,16 +157,21 @@ export default function MonitorPage() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('ALL')
+  const [channelFilter, setChannelFilter] = useState<'ALL' | 'line' | 'telegram' | 'webchat'>('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
   const [expandedIdxSet, setExpandedIdxSet] = useState<Set<number>>(new Set())
   const [expandAll, setExpandAll] = useState(false)
   const [replayOpen, setReplayOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // ข้อ 2: adaptive refresh — เร็วขึ้นเมื่อมี active session
+  const [activeCountForRefetch, setActiveCountForRefetch] = useState(0)
+  const refetchInterval = paused ? false : activeCountForRefetch > 0 ? 1500 : 5000
+
   const { data, dataUpdatedAt } = useQuery({
     queryKey: ['monitor'],
     queryFn: getMonitorEvents,
-    refetchInterval: paused ? false : 3000,
+    refetchInterval,
   })
 
   useEffect(() => {
@@ -184,6 +189,11 @@ export default function MonitorPage() {
   const groups = data ? buildGroups(data) : []
   const stats = data?.stats
   const activeCount = groups.filter(g => g.state === 'thinking' || g.state === 'tool_call').length
+
+  // sync activeCount → refetch interval
+  useEffect(() => {
+    setActiveCountForRefetch(activeCount)
+  }, [activeCount])
 
   const selectedGroup = groups.find(g => g.sessionKey === selectedKey) ?? null
   const effectiveKey = selectedGroup ? selectedKey : null
@@ -221,6 +231,8 @@ export default function MonitorPage() {
 
   const q = search.toLowerCase()
   const filtered = events.filter(e => {
+    // ข้อ 1: channel filter
+    if (channelFilter !== 'ALL' && e.channel !== channelFilter) return false
     if (stateFilter !== 'ALL') {
       const typeMap: Record<string, string[]> = {
         thinking: ['thinking'], tool: ['tool'], replied: ['reply'], error: ['error'], message: ['message'],
@@ -317,7 +329,30 @@ export default function MonitorPage() {
           </Button>
         )}
 
-        {/* Filter pills */}
+        {/* Channel filter — ข้อ 1 */}
+        <div className="flex gap-1 flex-wrap">
+          {([
+            { id: 'ALL',      label: 'ทุก channel' },
+            { id: 'line',     label: '📱 LINE' },
+            { id: 'telegram', label: '✈️ Telegram' },
+            { id: 'webchat',  label: '💬 Webchat' },
+          ] as { id: 'ALL' | 'line' | 'telegram' | 'webchat'; label: string }[]).map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => { setChannelFilter(s.id); setExpandedIdxSet(new Set()); setExpandAll(false) }}
+              className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                channelFilter === s.id
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'border-input text-muted-foreground hover:border-foreground/40'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Event type filter pills */}
         <div className="flex gap-1 flex-wrap">
           {[
             { id: 'ALL',      label: 'ทั้งหมด' },

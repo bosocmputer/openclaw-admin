@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getStatus, getAgents, getConfig, restartGateway, cleanSessions, getDoctorStatus, runDoctorFix,
-  getMembers, getWebchatRooms, getChatUsers, getLineConfig, getLineBotInfo,
+  getMembers, getWebchatRooms, getChatUsers, getLineConfig, getLineBotInfo, getTelegramStatus,
+  type TelegramBotStatus,
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -106,6 +107,14 @@ export default function DashboardPage() {
     queryKey: ['line-botinfo'],
     queryFn: getLineBotInfo,
     enabled: !!lineConfig?.line,
+    retry: false,
+  })
+
+  // ข้อ 4: Telegram bot status realtime (refresh ทุก 30s)
+  const { data: telegramStatus } = useQuery({
+    queryKey: ['telegram-status'],
+    queryFn: getTelegramStatus,
+    refetchInterval: 30000,
     retry: false,
   })
 
@@ -276,9 +285,23 @@ export default function DashboardPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-500">Telegram Bots</CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{botToken ? botCount : '-'}</p>
-            <p className="text-xs text-zinc-500">{botToken ? `${botCount} bot${botCount > 1 ? 's' : ''} configured` : 'No bot configured'}</p>
+          <CardContent className="space-y-1.5">
+            {telegramStatus && Object.keys(telegramStatus).length > 0 ? (
+              Object.entries(telegramStatus as Record<string, TelegramBotStatus>).map(([id, s]) => (
+                <div key={id} className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${s.online ? 'bg-green-500' : 'bg-red-400'}`} />
+                  <span className="text-xs truncate text-zinc-700 dark:text-zinc-300">
+                    {s.name ?? id}
+                    {id !== 'default' && <span className="text-zinc-400 ml-1">({id})</span>}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <>
+                <p className="text-2xl font-bold">{botToken ? botCount : '-'}</p>
+                <p className="text-xs text-zinc-500">{botToken ? `${botCount} bot${botCount > 1 ? 's' : ''} configured` : 'No bot configured'}</p>
+              </>
+            )}
           </CardContent>
         </Card>
 
