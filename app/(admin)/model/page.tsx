@@ -354,31 +354,11 @@ export default function ModelPage() {
                         </Button>
                       </div>
                     </div>
-                    <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 p-3 text-xs text-amber-700 dark:text-amber-400 space-y-1">
+                    <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 p-3 text-xs text-amber-700 dark:text-amber-400 space-y-1.5">
                       <p className="font-medium">ขั้นตอนที่ 2 — หลัง Login</p>
-                      <p>Browser จะ redirect ไปที่ <span className="font-mono">localhost:53692</span> และแสดง error — <strong>ปกติ</strong></p>
-                      <p>Copy <strong>URL ทั้งหมด</strong> จาก address bar มาวางด้านล่าง</p>
-                    </div>
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-medium">ขั้นตอนที่ 3 — วาง URL จาก address bar</p>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={oauthRedirectUrl}
-                          onChange={e => setOauthRedirectUrl(e.target.value)}
-                          placeholder="http://localhost:53692/callback?code=...&state=..."
-                          title="วาง redirect URL จาก browser address bar"
-                          className="flex-1 text-xs font-mono border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-orange-400"
-                        />
-                        <Button
-                          size="sm"
-                          className="bg-orange-600 hover:bg-orange-700 text-white shrink-0"
-                          disabled={!oauthRedirectUrl.trim() || oauthStep === 'submitting'}
-                          onClick={handleOAuthSubmit}
-                        >
-                          {oauthStep === 'submitting' ? 'กำลังเชื่อมต่อ...' : 'ยืนยัน'}
-                        </Button>
-                      </div>
+                      <p>Browser จะ redirect ไปที่ <span className="font-mono bg-amber-100 dark:bg-amber-900 px-1 rounded">localhost:53692</span> และแสดง error — <strong>ปกติ</strong></p>
+                      <p>ใน address bar ให้เปลี่ยน <span className="font-mono bg-amber-100 dark:bg-amber-900 px-1 rounded">localhost:53692</span> เป็น <span className="font-mono bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 px-1 rounded">{typeof window !== 'undefined' ? window.location.host : 'chang168.thddns.net:3000'}</span> แล้วกด Enter</p>
+                      <p className="text-zinc-500">ระบบจะเชื่อมต่อให้อัตโนมัติ ไม่ต้อง copy อะไร</p>
                     </div>
                     {oauthError && <p className="text-xs text-red-500">✗ {oauthError}</p>}
                     <button
