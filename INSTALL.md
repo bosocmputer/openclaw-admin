@@ -866,8 +866,8 @@ systemctl --user start openclaw-gateway.service
 
 ```bash
 # 1. อัปเดต OpenClaw CLI + migrate config
-npm install -g openclaw@latest
-openclaw doctor --fix
+npm install -g openclaw@2026.6.1
+openclaw doctor --fix          # ← ต้องใส่ --fix ด้วย ไม่งั้นแค่ report ไม่ migrate
 
 # 2. เช็คชื่อ gateway process แล้ว restart
 pm2 list                            # ดูชื่อ process ที่รัน gateway อยู่
