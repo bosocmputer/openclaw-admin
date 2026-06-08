@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { submitAnthropicOAuth } from '@/lib/api'
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackInner() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing')
@@ -12,7 +12,6 @@ export default function OAuthCallbackPage() {
 
   useEffect(() => {
     const code = searchParams.get('code')
-    const state = searchParams.get('state')
 
     if (!code) {
       setStatus('error')
@@ -20,7 +19,6 @@ export default function OAuthCallbackPage() {
       return
     }
 
-    // ส่ง URL ทั้งหมดไปให้ openclaw-api แปลง
     const currentUrl = window.location.href
     submitAnthropicOAuth(currentUrl)
       .then(() => {
@@ -65,5 +63,17 @@ export default function OAuthCallbackPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function OAuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <OAuthCallbackInner />
+    </Suspense>
   )
 }
