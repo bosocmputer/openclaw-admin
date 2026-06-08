@@ -2,7 +2,7 @@
 
 Web Admin Panel สำหรับจัดการ OpenClaw ERP Chatbot — ไม่ต้อง SSH server
 
-รองรับ **OpenClaw v2026.4.15+**
+รองรับ **OpenClaw v2026.6.1+**
 
 ## โครงสร้างระบบ
 
@@ -146,7 +146,7 @@ openclaw-admin/
 
 - Docker + Docker Compose
 - **openclaw-api รันด้วย pm2 บน host อยู่แล้ว** (port 4000)
-- **OpenClaw Gateway v2026.4.15+**
+- **OpenClaw Gateway v2026.6.1+**
 - **cloudflared** — สำหรับ LINE webhook (LINE ต้องการ HTTPS): ดู INSTALL.md ขั้นตอน 11.9
 
 ### 1. ติดตั้ง Docker (ครั้งแรกเท่านั้น)

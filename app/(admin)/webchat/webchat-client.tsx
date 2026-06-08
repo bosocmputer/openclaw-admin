@@ -80,10 +80,10 @@ export default function WebchatClient({ username, role }: Props) {
   const abortRef = useRef<AbortController | null>(null)
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // clear optimistic เมื่อ history update
+  // clear optimistic เมื่อ history มี reply ของเราแล้ว (ไม่ clear ขณะกำลัง sending)
   useEffect(() => {
-    if (history.length > 0) setOptimisticMsgs([])
-  }, [history])
+    if (history.length > 0 && !sending) setOptimisticMsgs([])
+  }, [history, sending])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })

@@ -20,6 +20,8 @@ interface CompactionForm {
   timeoutSeconds: number
   customInstructions: string
   dreamingEnabled: boolean
+  memoryReindex: 'async' | 'await' | 'off'
+  auditRetries: boolean
 }
 
 const DEFAULTS: CompactionForm = {
@@ -33,6 +35,8 @@ const DEFAULTS: CompactionForm = {
   timeoutSeconds: 0,
   customInstructions: '',
   dreamingEnabled: false,
+  memoryReindex: 'async',
+  auditRetries: false,
 }
 
 export default function CompactionPage() {
@@ -62,6 +66,10 @@ export default function CompactionPage() {
       timeoutSeconds: typeof (c as Record<string, unknown>).timeoutSeconds === 'number' ? (c as Record<string, unknown>).timeoutSeconds as number : 0,
       customInstructions: typeof (c as Record<string, unknown>).customInstructions === 'string' ? (c as Record<string, unknown>).customInstructions as string : '',
       dreamingEnabled: dreamingConfig?.enabled === true,
+      memoryReindex: (['async', 'await', 'off'].includes((c as Record<string, unknown>).memoryReindex as string)
+        ? (c as Record<string, unknown>).memoryReindex as 'async' | 'await' | 'off'
+        : 'async'),
+      auditRetries: (c as Record<string, unknown>).auditRetries === true,
     })
   }, [config])
 
@@ -88,6 +96,12 @@ export default function CompactionPage() {
       }
       if (form.customInstructions.trim()) {
         compaction.customInstructions = form.customInstructions.trim()
+      }
+      if (form.memoryReindex !== 'async') {
+        compaction.memoryReindex = form.memoryReindex
+      }
+      if (form.auditRetries) {
+        compaction.auditRetries = true
       }
       // ลบ key ที่เป็น undefined ออก
       Object.keys(compaction).forEach(k => compaction[k] === undefined && delete compaction[k])
@@ -410,6 +424,57 @@ export default function CompactionPage() {
                 จำกัดเวลาต่อ compaction operation — ใส่ 0 เพื่อใช้ค่า default ของ OpenClaw
               </p>
             </div>
+
+            {/* memoryReindex — v2026.6.1+ */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Memory Reindex หลัง Compact</label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { value: 'async', label: 'Async', desc: 'reindex ใน background (default)' },
+                  { value: 'await', label: 'Await', desc: 'รอ reindex เสร็จก่อน (fresh สุด)' },
+                  { value: 'off', label: 'Off', desc: 'ไม่ reindex (latency ต่ำสุด)' },
+                ] as { value: CompactionForm['memoryReindex']; label: string; desc: string }[]).map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, memoryReindex: opt.value }))}
+                    className={`text-left px-3 py-2 rounded-md border text-xs transition-colors ${
+                      form.memoryReindex === opt.value
+                        ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800'
+                        : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
+                    }`}
+                  >
+                    <p className="font-medium">{opt.label}</p>
+                    <p className="text-zinc-500 mt-0.5">{opt.desc}</p>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-500 bg-zinc-50 dark:bg-zinc-900 rounded px-3 py-2">
+                ควบคุมการ sync memory index หลัง compact — <strong>Async</strong> เหมาะสำหรับการใช้งานปกติ, <strong>Await</strong> ใช้เมื่อต้องการความแม่นยำสูงสุด
+              </p>
+            </div>
+
+            {/* auditRetries — safeguard mode only, v2026.6.1+ */}
+            {form.mode === 'safeguard' && (
+              <div className="flex items-center justify-between border rounded-md px-4 py-3">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium">Safeguard Audit Retries</p>
+                  <p className="text-xs text-zinc-500">ตรวจสอบคุณภาพ summary และ retry อัตโนมัติถ้าไม่ผ่าน — ใช้ token มากขึ้นแต่สรุปแม่นยำกว่า (v2026.6.1+)</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label={`Audit Retries: ${form.auditRetries ? 'เปิด' : 'ปิด'}`}
+                  onClick={() => setForm(f => ({ ...f, auditRetries: !f.auditRetries }))}
+                  className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                    form.auditRetries ? 'bg-zinc-900 dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-700'
+                  }`}
+                >
+                  <span className={`inline-block h-4 w-4 rounded-full bg-white dark:bg-zinc-900 transition-transform ${
+                    form.auditRetries ? 'translate-x-6' : 'translate-x-1'
+                  }`} />
+                </button>
+              </div>
+            )}
 
             {/* customInstructions */}
             <div className="space-y-2">
