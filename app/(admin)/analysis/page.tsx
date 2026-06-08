@@ -386,7 +386,7 @@ function AlertingSection({ initialConfig }: { initialConfig: AlertingConfig }) {
                 className="w-24 text-sm border border-zinc-300 dark:border-zinc-600 rounded px-3 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
               />
               <span className="text-sm text-zinc-500">วินาที</span>
-              <span className="text-xs text-zinc-400">(0 = ปิด)</span>
+              <span className="text-xs text-zinc-400">(0 = ปิด, ขั้นต่ำแนะนำ 60s)</span>
             </div>
           </div>
           <p className="text-xs text-zinc-400">Bot token ใช้จาก Telegram channel ที่ตั้งค่าไว้แล้ว • แจ้งเตือนเมื่อ agent error, หยุดกลางคัน, หรือคิดนานเกินกำหนด</p>
