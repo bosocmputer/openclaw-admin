@@ -13,39 +13,31 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { toast } from 'sonner'
 import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 
-const WHATS_NEW_VERSION = 'v2026.4.6'
-const WHATS_NEW_KEY = 'whats-new-dismissed-v2026.4.6'
+const WHATS_NEW_VERSION = 'v2026.6.1'
+const WHATS_NEW_KEY = 'whats-new-dismissed-v2026.6.1'
 
 const whatsnewItems = [
   {
-    icon: '🔗',
-    title: 'Webhooks — รับข้อมูลจากระบบภายนอกเข้า Agent โดยตรง',
-    desc: 'ตั้งค่า webhook route ให้ระบบ ERP หรือแอปอื่นๆ ส่ง HTTP POST มาที่ gateway แล้ว agent ของคุณจะได้รับข้อความนั้นทันที',
-    example: 'เช่น: ระบบ ERP ตัดยอดสต๊อกต่ำกว่า 10 ชิ้น → POST ไป /webhooks/stock_alert → agent "stock" แจ้งเตือนทีมคลังใน LINE ทันที',
-    href: '/webhooks',
-    badge: 'ใหม่',
-  },
-  {
-    icon: '💾',
-    title: 'Session Checkpoints — กู้คืน context หลัง compaction',
-    desc: 'ทุกครั้งที่ gateway ทำ compaction ระบบจะสำรอง session ไว้อัตโนมัติ คุณสามารถ restore กลับไปยังจุดก่อน compaction ได้ถ้า context หาย',
-    example: 'เช่น: agent "sale" compaction แล้ว AI ลืมข้อมูลลูกค้าที่คุยค้างไว้ → ไป Checkpoints → เลือก checkpoint → กด Restore → context กลับมาครบ',
-    href: '/sessions',
-    badge: 'ใหม่',
+    icon: '🐛',
+    title: 'Webchat ตอบกลับถูก message แล้ว',
+    desc: 'แก้ bug ที่ทำให้ Webchat ส่ง reply ของ message ก่อนหน้ากลับมาให้ message ใหม่ โดยเฉพาะเมื่อส่งข้อความติดกันเร็ว',
+    example: 'เช่น: ถาม A → ถาม B → เคยได้รับ reply ของ A ซ้ำ → ตอนนี้ได้ reply ของ B ถูกต้องแล้ว',
+    href: '/webchat',
+    badge: 'แก้ bug',
   },
   {
     icon: '🧠',
-    title: 'Memory & Dreams — ดูความจำระยะยาวของ Agent',
-    desc: 'แต่ละ agent มี MEMORY.md เก็บข้อมูลสำคัญถาวร และ dreams.md เก็บบทสรุปจาก dreaming phase ดูสถานะและอ่านเนื้อหาได้โดยไม่ต้อง SSH',
-    example: 'เช่น: agent "admin" จำได้ว่า "ลูกค้า บ.ABC ชอบสินค้า X" → เก็บใน MEMORY.md → ไป Memory → กด ดู → อ่านความจำของ AI ได้เลย',
-    href: '/memory',
+    title: 'Compaction — Memory Reindex และ Audit Retries',
+    desc: 'เพิ่มการตั้งค่าใหม่ 2 อย่าง: Memory Reindex ควบคุมการ sync memory หลัง compact (async/await/off) และ Safeguard Audit Retries ตรวจสอบคุณภาพ summary อัตโนมัติ',
+    example: 'เช่น: ตั้ง Memory Reindex = await เพื่อให้ memory พร้อมใช้ทันทีหลัง compact ไม่ต้องรอ background sync',
+    href: '/compaction',
     badge: 'ใหม่',
   },
   {
-    icon: '🧹',
-    title: 'Clean Stale Sessions — แก้ Webchat ตอบผิดช่อง',
-    desc: 'ปุ่มใหม่บน Dashboard — ถ้า Webchat ส่งข้อความแต่ reply ออกไปทาง LINE แทน กดปุ่มนี้เพื่อล้าง session ค้างได้ทันที โดยไม่ต้อง restart gateway',
-    example: 'เช่น: พนักงานคุยใน Webchat แต่ LINE OA ส่งข้อความออกไปด้วย → กด Clean Stale Sessions → ปัญหาหายทันที (ระบบยังรัน cron ล้างอัตโนมัติทุกคืน 3:00 น. ด้วย)',
+    icon: '⚡',
+    title: 'OpenClaw Gateway v2026.6.1',
+    desc: 'Telegram delivery reliable ขึ้น, Webchat prompt cache stable, MCP tool results ไม่ทำให้ Anthropic 400 error, memory concurrent writes ปลอดภัยขึ้น',
+    example: 'เช่น: agent ใช้ MCP tools ที่ return รูปภาพ/audio → ไม่พัง Anthropic session อีกต่อไป',
     href: null,
     badge: 'ปรับปรุง',
   },
