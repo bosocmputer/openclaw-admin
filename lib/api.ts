@@ -131,6 +131,18 @@ export async function testProvider(provider: string, apiKey: string, signal?: Ab
   return !!data.ok
 }
 
+// ─── Anthropic OAuth ──────────────────────────────────────────────────────────
+
+export async function startAnthropicOAuth(): Promise<{ url: string; instructions: string }> {
+  const { data } = await api.post('/api/auth/anthropic/start')
+  return data
+}
+
+export async function submitAnthropicOAuth(redirectUrl: string): Promise<{ message: string }> {
+  const { data } = await api.post('/api/auth/anthropic/submit', { redirectUrl })
+  return data
+}
+
 export interface OpenRouterModel {
   id: string
   name: string

@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getConfig, putConfig, getModels, testProvider, restartGateway, PROVIDERS, type ProviderConfig } from '@/lib/api'
+import { getConfig, putConfig, getModels, testProvider, restartGateway, startAnthropicOAuth, submitAnthropicOAuth, PROVIDERS, type ProviderConfig } from '@/lib/api'
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -44,6 +44,12 @@ export default function ModelPage() {
   const [testing, setTesting] = useState(false)
   const savedProviderRef = useRef<string>('')
   const savedModelRef = useRef<string>('')
+
+  // Anthropic OAuth state
+  const [oauthStep, setOauthStep] = useState<'idle' | 'waiting' | 'submitting' | 'done'>('idle')
+  const [oauthUrl, setOauthUrl] = useState('')
+  const [oauthRedirectUrl, setOauthRedirectUrl] = useState('')
+  const [oauthError, setOauthError] = useState('')
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
   const { data: fetchedModels, isLoading: modelsLoading, isError: modelsError } = useQuery({
@@ -100,6 +106,37 @@ export default function ModelPage() {
       setTesting(false)
     }
   }
+
+  async function handleOAuthStart() {
+    setOauthError('')
+    setOauthStep('waiting')
+    try {
+      const { url } = await startAnthropicOAuth()
+      setOauthUrl(url)
+    } catch {
+      setOauthError('ไม่สามารถเริ่ม OAuth ได้ — กรุณาลองใหม่')
+      setOauthStep('idle')
+    }
+  }
+
+  async function handleOAuthSubmit() {
+    if (!oauthRedirectUrl.trim()) return
+    setOauthError('')
+    setOauthStep('submitting')
+    try {
+      const result = await submitAnthropicOAuth(oauthRedirectUrl.trim())
+      setOauthStep('done')
+      setOauthRedirectUrl('')
+      setOauthUrl('')
+      qc.invalidateQueries({ queryKey: ['config'] })
+      toast.success(result.message)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string }
+      setOauthError(err?.response?.data?.error || err?.message || 'เกิดข้อผิดพลาด')
+      setOauthStep('waiting')
+    }
+  }
+
 
   const [savedOnce, setSavedOnce] = useState(false)
 
@@ -272,6 +309,95 @@ export default function ModelPage() {
                 <p className="text-sm text-green-700 dark:text-green-400">
                   ✓ <strong>{selectedProvider.label}</strong> ไม่ต้องใช้ API Key — เลือก Model แล้วบันทึกได้เลย
                 </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Anthropic OAuth — Claude Pro/Max subscription */}
+          {selectedProvider.id === 'anthropic' && (
+            <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-orange-700 dark:text-orange-400">
+                  🔐 มี Claude Pro/Max? เชื่อมต่อได้เลยโดยไม่ต้องซื้อ API Key
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {oauthStep === 'idle' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-orange-400 text-orange-700 hover:bg-orange-100 dark:hover:bg-orange-900"
+                    onClick={handleOAuthStart}
+                  >
+                    เชื่อมต่อ Anthropic Account (OAuth)
+                  </Button>
+                )}
+
+                {(oauthStep === 'waiting' || oauthStep === 'submitting') && (
+                  <div className="space-y-3">
+                    <div className="rounded-md bg-white dark:bg-zinc-900 border p-3 space-y-2">
+                      <p className="text-xs font-medium">ขั้นตอนที่ 1 — เปิด URL นี้ในหน้าต่างใหม่</p>
+                      <div className="flex gap-2">
+                        <input
+                          readOnly
+                          value={oauthUrl}
+                          title="Anthropic OAuth URL"
+                          className="flex-1 text-xs font-mono border rounded px-2 py-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-600 truncate"
+                        />
+                        <Button size="sm" variant="outline" className="text-xs shrink-0"
+                          onClick={() => { navigator.clipboard.writeText(oauthUrl); toast('Copy แล้ว') }}>
+                          Copy
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-xs shrink-0"
+                          onClick={() => window.open(oauthUrl, '_blank')}>
+                          เปิด
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 p-3 text-xs text-amber-700 dark:text-amber-400 space-y-1">
+                      <p className="font-medium">ขั้นตอนที่ 2 — หลัง Login</p>
+                      <p>Browser จะ redirect ไปที่ <span className="font-mono">localhost:53692</span> และแสดง error — <strong>ปกติ</strong></p>
+                      <p>Copy <strong>URL ทั้งหมด</strong> จาก address bar มาวางด้านล่าง</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium">ขั้นตอนที่ 3 — วาง URL จาก address bar</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={oauthRedirectUrl}
+                          onChange={e => setOauthRedirectUrl(e.target.value)}
+                          placeholder="http://localhost:53692/callback?code=...&state=..."
+                          title="วาง redirect URL จาก browser address bar"
+                          className="flex-1 text-xs font-mono border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-orange-400"
+                        />
+                        <Button
+                          size="sm"
+                          className="bg-orange-600 hover:bg-orange-700 text-white shrink-0"
+                          disabled={!oauthRedirectUrl.trim() || oauthStep === 'submitting'}
+                          onClick={handleOAuthSubmit}
+                        >
+                          {oauthStep === 'submitting' ? 'กำลังเชื่อมต่อ...' : 'ยืนยัน'}
+                        </Button>
+                      </div>
+                    </div>
+                    {oauthError && <p className="text-xs text-red-500">✗ {oauthError}</p>}
+                    <button
+                      type="button"
+                      className="text-xs text-zinc-400 hover:text-zinc-600 underline"
+                      onClick={() => { setOauthStep('idle'); setOauthUrl(''); setOauthRedirectUrl(''); setOauthError('') }}
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                )}
+
+                {oauthStep === 'done' && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-green-600 dark:text-green-400">✓ เชื่อมต่อ Anthropic Account สำเร็จ</span>
+                    <button type="button" className="text-xs text-zinc-400 underline"
+                      onClick={() => setOauthStep('idle')}>เชื่อมต่อใหม่</button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
