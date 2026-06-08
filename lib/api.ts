@@ -139,7 +139,8 @@ export async function startAnthropicOAuth(): Promise<{ url: string; instructions
 }
 
 export async function submitAnthropicOAuth(redirectUrl: string): Promise<{ message: string }> {
-  const { data } = await api.post('/api/auth/anthropic/submit', { redirectUrl })
+  // ใช้ /api/oauth/submit แทน proxy เพราะ callback page ไม่มี session
+  const { data } = await api.post('/api/oauth/submit', { redirectUrl })
   return data
 }
 
