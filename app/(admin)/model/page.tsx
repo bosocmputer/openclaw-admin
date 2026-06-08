@@ -137,6 +137,25 @@ export default function ModelPage() {
     }
   }
 
+  async function handleAnthropicLogout() {
+    if (!config) return
+    try {
+      const updated = { ...config, env: { ...config.env, ANTHROPIC_API_KEY: '' } }
+      await import('@/lib/api').then(m => m.putConfig(updated))
+      qc.invalidateQueries({ queryKey: ['config'] })
+      setApiKey('')
+      setOauthStep('idle')
+      toast.success('ยกเลิกการเชื่อมต่อ Anthropic Account แล้ว')
+    } catch {
+      toast.error('เกิดข้อผิดพลาด')
+    }
+  }
+
+  // ตรวจว่า Anthropic key ที่มีอยู่เป็น OAuth token ไหม
+  const currentAnthropicKey = config?.env?.ANTHROPIC_API_KEY ?? ''
+  const isAnthropicOAuth = currentAnthropicKey.includes('sk-ant-oat')
+  const isAnthropicConnected = currentAnthropicKey.length > 0
+
 
   const [savedOnce, setSavedOnce] = useState(false)
 
@@ -322,7 +341,30 @@ export default function ModelPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {oauthStep === 'idle' && (
+                {/* แสดงสถานะปัจจุบัน */}
+                {isAnthropicConnected && oauthStep === 'idle' && (
+                  <div className="flex items-center justify-between rounded-md bg-white dark:bg-zinc-900 border px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${isAnthropicOAuth ? 'bg-green-500' : 'bg-blue-400'}`} />
+                      <span className="text-xs text-zinc-700 dark:text-zinc-300">
+                        {isAnthropicOAuth ? 'เชื่อมต่อด้วย OAuth (Claude Pro/Max)' : 'ใช้ API Key ธรรมดา'}
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="text-xs h-7"
+                        onClick={handleOAuthStart}>
+                        เชื่อมต่อใหม่
+                      </Button>
+                      <Button size="sm" variant="outline"
+                        className="text-xs h-7 text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950"
+                        onClick={handleAnthropicLogout}>
+                        Logout
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {!isAnthropicConnected && oauthStep === 'idle' && (
                   <Button
                     variant="outline"
                     size="sm"
