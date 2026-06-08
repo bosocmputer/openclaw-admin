@@ -855,3 +855,62 @@ systemctl --user start openclaw-gateway.service
 | OpenRouter API Key | |
 | MCP Server URL | |
 | LINE Tunnel URL | (เปลี่ยนทุก restart) |
+
+---
+
+## อัปเดตระบบ (สำหรับเครื่องที่ติดตั้งไว้แล้ว)
+
+> ใช้เมื่อมี version ใหม่ของ openclaw-admin, openclaw-api หรือ openclaw CLI
+
+### ขั้นตอนการ update ทั้งระบบ
+
+```bash
+# 1. อัปเดต OpenClaw CLI + migrate config
+npm install -g openclaw@latest
+openclaw doctor --fix
+
+# 2. เช็คชื่อ gateway process แล้ว restart
+pm2 list                            # ดูชื่อ process ที่รัน gateway อยู่
+pm2 restart <ชื่อ-gateway-process>  # restart ตามชื่อที่เห็น
+
+# 3. อัปเดต openclaw-api
+cd ~/openclaw-api
+git pull
+pm2 restart openclaw-api
+
+# 4. อัปเดต openclaw-admin (rebuild Docker)
+cd ~/openclaw-admin
+git pull
+docker compose up -d --build
+```
+
+> **หมายเหตุ**: `docker compose up -d --build` ใช้เวลาประมาณ 3–5 นาที รอจนขึ้น `Started` ก่อนใช้งาน
+
+### อัปเดตเฉพาะ openclaw-admin (ไม่ต้อง update CLI)
+
+```bash
+cd ~/openclaw-admin
+git pull
+docker compose up -d --build
+```
+
+### อัปเดตเฉพาะ openclaw-api
+
+```bash
+cd ~/openclaw-api
+git pull
+pm2 restart openclaw-api
+```
+
+### ตรวจสอบสถานะหลัง update
+
+```bash
+# เช็ค Docker container
+docker ps | grep openclaw
+
+# เช็ค pm2
+pm2 list
+
+# เช็ค openclaw version
+openclaw --version
+```
