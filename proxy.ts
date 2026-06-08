@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { decrypt } from '@/lib/session'
 
-const PUBLIC_ROUTES = ['/login', '/oauth/callback']
+const PUBLIC_ROUTES = ['/login', '/oauth/callback', '/callback']
 
 // route ที่ role=chat เข้าได้
 const CHAT_ALLOWED = ['/webchat', '/api']
