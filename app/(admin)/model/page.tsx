@@ -33,6 +33,44 @@ const RECOMMENDED = [
   { id: 'openrouter/qwen/qwen3.5-122b-a10b',      label: 'ดีที่สุด',    desc: 'Qwen 3.5 122B — ประสิทธิภาพสูงสุด' },
 ]
 
+// Anthropic models สำหรับ OAuth (Pro/Max subscription)
+// ราคาต่อ 1M tokens (input/output) จาก platform.claude.com/docs
+const ANTHROPIC_MODELS = [
+  {
+    id: 'claude-haiku-4-5',
+    label: 'Claude Haiku 4.5',
+    badge: 'ประหยัดสุด ⚡',
+    badgeCls: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+    desc: 'เร็วที่สุด ประหยัดสุด — เหมาะกับงาน FAQ, สอบถามข้อมูลทั่วไป',
+    inputPrice: '$1',
+    outputPrice: '$5',
+    context: '200K tokens',
+    recommended: false,
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6',
+    badge: 'แนะนำ ⭐',
+    badgeCls: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    desc: 'สมดุลความเร็ว/ความฉลาด — เหมาะกับงาน ERP, วิเคราะห์ข้อมูล, ตอบคำถามซับซ้อน',
+    inputPrice: '$3',
+    outputPrice: '$15',
+    context: '1M tokens',
+    recommended: true,
+  },
+  {
+    id: 'claude-opus-4-8',
+    label: 'Claude Opus 4.8',
+    badge: 'ฉลาดสุด 🧠',
+    badgeCls: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+    desc: 'ฉลาดที่สุด — เหมาะกับงาน reasoning ซับซ้อน, เขียนโค้ด, วิเคราะห์เชิงลึก',
+    inputPrice: '$5',
+    outputPrice: '$25',
+    context: '1M tokens',
+    recommended: false,
+  },
+]
+
 export default function ModelPage() {
   const qc = useQueryClient()
   const [selectedProvider, setSelectedProvider] = useState<ProviderConfig>(PROVIDERS[0])
@@ -278,8 +316,8 @@ export default function ModelPage() {
         {/* คอลัมน์ซ้าย */}
         <div className="space-y-4">
 
-          {/* ขั้นตอน 2: API Key (ซ่อนถ้าไม่ต้องการ key) */}
-          {!selectedProvider.noApiKey && (
+          {/* ขั้นตอน 2: API Key (ซ่อนถ้าไม่ต้องการ key หรือใช้ Anthropic OAuth) */}
+          {!selectedProvider.noApiKey && !(selectedProvider.id === 'anthropic' && isAnthropicOAuth) && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">ขั้นตอนที่ 2 — ใส่ API Key</CardTitle>
@@ -420,6 +458,46 @@ export default function ModelPage() {
                       onClick={() => setOauthStep('idle')}>เชื่อมต่อใหม่</button>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Anthropic model list — แสดงเมื่อใช้ OAuth */}
+          {selectedProvider.id === 'anthropic' && isAnthropicOAuth && oauthStep === 'idle' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">เลือก Claude Model</CardTitle>
+                <p className="text-xs text-zinc-500 mt-1">
+                  ราคาต่อ 1 ล้าน tokens (input/output) — ใช้ quota จาก Pro/Max subscription ของคุณ
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {ANTHROPIC_MODELS.map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSelectedModelId(m.id)}
+                    className={`w-full text-left px-4 py-3 rounded-md border text-sm transition-colors ${
+                      selectedModelId === m.id
+                        ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800'
+                        : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-medium">{m.label}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${m.badgeCls}`}>{m.badge}</span>
+                    </div>
+                    <p className="text-xs text-zinc-500 mb-1.5">{m.desc}</p>
+                    <div className="flex gap-3 text-xs text-zinc-400">
+                      <span>📥 {m.inputPrice}/1M input</span>
+                      <span>📤 {m.outputPrice}/1M output</span>
+                      <span>📋 Context {m.context}</span>
+                    </div>
+                  </button>
+                ))}
+                <p className="text-xs text-zinc-400 pt-1">
+                  💡 <strong>Claude Pro/Max subscription</strong> — ราคาด้านบนสำหรับ API key ธรรมดา ถ้าใช้ subscription จะถูกหักจาก quota ของ plan ครับ
+                </p>
               </CardContent>
             </Card>
           )}
