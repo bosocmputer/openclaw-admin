@@ -19,7 +19,7 @@ export async function proxy(req: NextRequest) {
   if (!session && !isPublic) {
     return NextResponse.redirect(new URL('/login', req.url))
   }
-  if (session && isPublic && !ALWAYS_ALLOW.includes(path)) {
+  if (session && isPublic && !ALWAYS_ALLOW.includes(path) && !PUBLIC_API_PREFIXES.some(p => path.startsWith(p))) {
     // role=chat → redirect /webchat, อื่นๆ → /
     const dest = session.role === 'chat' ? '/webchat' : '/'
     return NextResponse.redirect(new URL(dest, req.url))
