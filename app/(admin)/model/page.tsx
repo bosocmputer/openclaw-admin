@@ -175,6 +175,8 @@ export default function ModelPage() {
       setOauthUrl('')
       await qc.invalidateQueries({ queryKey: ['config'] })
       await qc.refetchQueries({ queryKey: ['config'] })
+      // reset เป็น idle เพื่อให้ model list แสดง
+      setOauthStep('idle')
       toast.success(data.message || 'เชื่อมต่อ Anthropic Account สำเร็จ')
     } catch (e: unknown) {
       const err = e as Error
@@ -205,7 +207,8 @@ export default function ModelPage() {
         },
       }
       await import('@/lib/api').then(m => m.putConfig(updated))
-      qc.invalidateQueries({ queryKey: ['config'] })
+      await qc.invalidateQueries({ queryKey: ['config'] })
+      await qc.refetchQueries({ queryKey: ['config'] })
       setApiKey('')
       setOauthStep('idle')
       setSelectedModelId('')
