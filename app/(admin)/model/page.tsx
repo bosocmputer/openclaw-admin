@@ -496,7 +496,7 @@ export default function ModelPage() {
                   </button>
                 ))}
                 <p className="text-xs text-zinc-400 pt-1">
-                  💡 <strong>Claude Pro/Max subscription</strong> — ราคาด้านบนสำหรับ API key ธรรมดา ถ้าใช้ subscription จะถูกหักจาก quota ของ plan ครับ
+                  💡 ราคาด้านบนเป็น <strong>ราคา API ปกติ</strong> — แต่คุณใช้ OAuth (Pro/Max subscription) ซึ่ง<strong>ไม่เสียเงินเพิ่ม</strong> การใช้งานจะถูกหักจาก usage quota ของ plan ที่คุณจ่ายรายเดือนอยู่แล้วครับ
                 </p>
               </CardContent>
             </Card>
