@@ -472,6 +472,13 @@ export default function ModelPage() {
                 </p>
               </CardHeader>
               <CardContent className="space-y-2">
+                {/* Banner ชัดเจนว่าไม่เสียเงินเพิ่ม */}
+                <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-3 py-2 flex items-center gap-2 mb-3">
+                  <span className="text-green-600 dark:text-green-400 text-base">✅</span>
+                  <p className="text-xs text-green-700 dark:text-green-400 font-medium">
+                    ใช้ Claude Pro/Max subscription — <strong>ไม่มีค่าใช้จ่ายเพิ่ม</strong> เลือก model ได้เลย
+                  </p>
+                </div>
                 {ANTHROPIC_MODELS.map(m => (
                   <button
                     key={m.id}
@@ -489,15 +496,12 @@ export default function ModelPage() {
                     </div>
                     <p className="text-xs text-zinc-500 mb-1.5">{m.desc}</p>
                     <div className="flex gap-3 text-xs text-zinc-400">
-                      <span>📥 {m.inputPrice}/1M input</span>
-                      <span>📤 {m.outputPrice}/1M output</span>
+                      <span>⚡ {m.id === 'claude-haiku-4-5' ? 'เร็วที่สุด' : m.id === 'claude-sonnet-4-6' ? 'เร็ว' : 'ปานกลาง'}</span>
+                      <span>🧠 {m.id === 'claude-haiku-4-5' ? 'ฉลาดพอ' : m.id === 'claude-sonnet-4-6' ? 'ฉลาดมาก' : 'ฉลาดสุด'}</span>
                       <span>📋 Context {m.context}</span>
                     </div>
                   </button>
                 ))}
-                <p className="text-xs text-zinc-400 pt-1">
-                  💡 ราคาด้านบนเป็น <strong>ราคา API ปกติ</strong> — แต่คุณใช้ OAuth (Pro/Max subscription) ซึ่ง<strong>ไม่เสียเงินเพิ่ม</strong> การใช้งานจะถูกหักจาก usage quota ของ plan ที่คุณจ่ายรายเดือนอยู่แล้วครับ
-                </p>
               </CardContent>
             </Card>
           )}
