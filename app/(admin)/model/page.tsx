@@ -462,37 +462,63 @@ export default function ModelPage() {
 
                 {(oauthStep === 'waiting' || oauthStep === 'submitting') && (
                   <div className="space-y-3">
-                    <div className="rounded-md bg-white dark:bg-zinc-900 border p-3 space-y-2">
-                      <p className="text-xs font-medium">ขั้นตอนที่ 1 — เปิด URL นี้ในหน้าต่างใหม่</p>
-                      <div className="flex gap-2">
-                        <input
-                          readOnly
-                          value={oauthUrl}
-                          title="Anthropic OAuth URL"
-                          className="flex-1 text-xs font-mono border rounded px-2 py-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-600 truncate"
-                        />
-                        <Button size="sm" variant="outline" className="text-xs shrink-0"
-                          onClick={() => { navigator.clipboard.writeText(oauthUrl); toast('Copy แล้ว') }}>
-                          Copy
-                        </Button>
-                        <Button size="sm" variant="outline" className="text-xs shrink-0"
-                          onClick={() => window.open(oauthUrl, '_blank')}>
-                          เปิด
-                        </Button>
+                    {/* Step 1 */}
+                    <div className="flex gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center">1</span>
+                      <div className="flex-1 space-y-2">
+                        <p className="text-xs font-medium">เปิด URL นี้แล้ว Login ด้วย Claude account</p>
+                        <div className="flex gap-2">
+                          <input readOnly value={oauthUrl} title="Anthropic OAuth URL"
+                            className="flex-1 text-xs font-mono border rounded px-2 py-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-600 truncate" />
+                          <Button size="sm" variant="outline" className="text-xs shrink-0"
+                            onClick={() => window.open(oauthUrl, '_blank')}>เปิด</Button>
+                        </div>
                       </div>
                     </div>
-                    <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 p-3 text-xs text-amber-700 dark:text-amber-400 space-y-1.5">
-                      <p className="font-medium">ขั้นตอนที่ 2 — หลัง Login</p>
-                      <p>Browser จะ redirect ไปที่ <span className="font-mono bg-amber-100 dark:bg-amber-900 px-1 rounded">localhost:53692</span> และแสดง error — <strong>ปกติ</strong></p>
-                      <p>ใน address bar ให้เปลี่ยน <span className="font-mono bg-amber-100 dark:bg-amber-900 px-1 rounded">localhost:53692</span> เป็น <span className="font-mono bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 px-1 rounded">{typeof window !== 'undefined' ? window.location.host : 'chang168.thddns.net:3000'}</span> แล้วกด Enter</p>
-                      <p className="text-zinc-500">ระบบจะเชื่อมต่อให้อัตโนมัติ ไม่ต้อง copy อะไร</p>
+
+                    {/* Step 2 */}
+                    <div className="flex gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center">2</span>
+                      <div className="flex-1">
+                        <p className="text-xs font-medium mb-1">หลัง Login เสร็จ — Copy URL ทั้งหมดจาก address bar</p>
+                        <div className="rounded-md bg-zinc-50 dark:bg-zinc-900 border px-3 py-2 text-xs text-zinc-500 space-y-1">
+                          <p>Browser จะขึ้น <span className="text-red-500 font-medium">"This site can't be reached"</span> — <strong>ปกติ ไม่ต้องตกใจ</strong></p>
+                          <p>URL ใน address bar จะมีหน้าตาแบบนี้:</p>
+                          <p className="font-mono text-zinc-400 break-all text-xs bg-zinc-100 dark:bg-zinc-800 rounded px-2 py-1">
+                            http://localhost:53692/callback?code=<span className="text-orange-500">XXXXX</span>&state=<span className="text-orange-500">XXXXX</span>
+                          </p>
+                          <p>→ <strong>Click address bar → Ctrl+A → Ctrl+C</strong> (Select All แล้ว Copy)</p>
+                        </div>
+                      </div>
                     </div>
-                    {oauthError && <p className="text-xs text-red-500">✗ {oauthError}</p>}
-                    <button
-                      type="button"
-                      className="text-xs text-zinc-400 hover:text-zinc-600 underline"
-                      onClick={() => { setOauthStep('idle'); setOauthUrl(''); setOauthRedirectUrl(''); setOauthError('') }}
-                    >
+
+                    {/* Step 3 */}
+                    <div className="flex gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center">3</span>
+                      <div className="flex-1 space-y-1.5">
+                        <p className="text-xs font-medium">วาง URL ที่ copy มา แล้วกด ยืนยัน</p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={oauthRedirectUrl}
+                            onChange={e => setOauthRedirectUrl(e.target.value)}
+                            placeholder="http://localhost:53692/callback?code=...&state=..."
+                            title="วาง redirect URL จาก browser address bar"
+                            className="flex-1 text-xs font-mono border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-orange-400"
+                          />
+                          <Button size="sm"
+                            className="bg-orange-600 hover:bg-orange-700 text-white shrink-0"
+                            disabled={!oauthRedirectUrl.trim() || oauthStep === 'submitting'}
+                            onClick={handleOAuthSubmit}>
+                            {oauthStep === 'submitting' ? 'กำลังเชื่อมต่อ...' : 'ยืนยัน'}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {oauthError && <p className="text-xs text-red-500 pl-9">✗ {oauthError}</p>}
+                    <button type="button" className="text-xs text-zinc-400 hover:text-zinc-600 underline pl-9"
+                      onClick={() => { setOauthStep('idle'); setOauthUrl(''); setOauthRedirectUrl(''); setOauthError('') }}>
                       ยกเลิก
                     </button>
                   </div>
