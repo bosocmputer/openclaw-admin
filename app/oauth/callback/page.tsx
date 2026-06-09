@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { submitAnthropicOAuth } from '@/lib/api'
 
 function OAuthCallbackInner() {
   const searchParams = useSearchParams()
@@ -20,15 +19,22 @@ function OAuthCallbackInner() {
     }
 
     const currentUrl = window.location.href
-    submitAnthropicOAuth(currentUrl)
-      .then(() => {
+    // เรียกตรง (ไม่ผ่าน /api/proxy) เพราะ callback page ไม่มี session
+    fetch('/api/oauth/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirectUrl: currentUrl }),
+    })
+      .then(async r => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
         setStatus('success')
         setTimeout(() => router.push('/model'), 2000)
       })
       .catch((e: unknown) => {
-        const err = e as { response?: { data?: { error?: string } }; message?: string }
+        const err = e as Error
         setStatus('error')
-        setErrorMsg(err?.response?.data?.error || err?.message || 'เกิดข้อผิดพลาด')
+        setErrorMsg(err?.message || 'เกิดข้อผิดพลาด')
       })
   }, [searchParams, router])
 
