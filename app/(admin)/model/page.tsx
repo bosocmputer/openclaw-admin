@@ -162,15 +162,22 @@ export default function ModelPage() {
     setOauthError('')
     setOauthStep('submitting')
     try {
-      const result = await submitAnthropicOAuth(oauthRedirectUrl.trim())
+      // fetch โดยตรง ไม่ผ่าน /api/proxy
+      const res = await fetch('/api/oauth/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ redirectUrl: oauthRedirectUrl.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
       setOauthStep('done')
       setOauthRedirectUrl('')
       setOauthUrl('')
       qc.invalidateQueries({ queryKey: ['config'] })
-      toast.success(result.message)
+      toast.success(data.message || 'เชื่อมต่อ Anthropic Account สำเร็จ')
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } }; message?: string }
-      setOauthError(err?.response?.data?.error || err?.message || 'เกิดข้อผิดพลาด')
+      const err = e as Error
+      setOauthError(err?.message || 'เกิดข้อผิดพลาด')
       setOauthStep('waiting')
     }
   }
