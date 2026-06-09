@@ -124,7 +124,14 @@ export default function ModelPage() {
     setSelectedModelId(selectedProvider.id === savedProviderRef.current ? savedModelRef.current : '')
   }, [selectedProvider]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fullModel = selectedModelId ? `${selectedProvider.modelPrefix}/${selectedModelId}` : ''
+  // Anthropic OAuth token → ไม่ใส่ prefix (openclaw รู้จัก claude-* โดยตรง)
+  // Anthropic API key ปกติ → ใส่ prefix anthropic/
+  // Provider อื่น → ใส่ prefix ตามปกติ
+  const fullModel = selectedModelId
+    ? (selectedProvider.id === 'anthropic' && isAnthropicOAuth
+        ? selectedModelId
+        : `${selectedProvider.modelPrefix}/${selectedModelId}`)
+    : ''
   const currentModel = config?.agents?.defaults?.model?.primary ?? '-'
   const modelList: { id: string; name: string; pricing?: { prompt: string; completion: string } }[] = fetchedModels ?? []
   const selectedModelInfo = modelList.find(m => m.id === selectedModelId)
