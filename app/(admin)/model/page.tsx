@@ -128,10 +128,8 @@ export default function ModelPage() {
   // Anthropic API key ปกติ → ใส่ prefix anthropic/
   // Provider อื่น → ใส่ prefix ตามปกติ
   const fullModel = selectedModelId
-    ? (selectedProvider.id === 'anthropic' && isAnthropicOAuth
-        ? selectedModelId
-        : `${selectedProvider.modelPrefix}/${selectedModelId}`)
-    : ''
+    ? ''
+    : ''  // placeholder — คำนวณด้านล่างหลัง isAnthropicOAuth
   const currentModel = config?.agents?.defaults?.model?.primary ?? '-'
   const modelList: { id: string; name: string; pricing?: { prompt: string; completion: string } }[] = fetchedModels ?? []
   const selectedModelInfo = modelList.find(m => m.id === selectedModelId)
@@ -246,6 +244,13 @@ export default function ModelPage() {
   const currentAnthropicKey = config?.env?.ANTHROPIC_API_KEY ?? ''
   const isAnthropicOAuth = currentAnthropicKey.includes('sk-ant-oat')
   const isAnthropicConnected = currentAnthropicKey.length > 0
+
+  // fullModel คำนวณหลัง isAnthropicOAuth เพื่อหลีกเลี่ยง used before declaration
+  const fullModel = selectedModelId
+    ? (selectedProvider.id === 'anthropic' && isAnthropicOAuth
+        ? selectedModelId
+        : `${selectedProvider.modelPrefix}/${selectedModelId}`)
+    : ''
 
 
   const [savedOnce, setSavedOnce] = useState(false)
