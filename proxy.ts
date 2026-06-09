@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { decrypt } from '@/lib/session'
 
 const PUBLIC_ROUTES = ['/login', '/oauth/callback', '/callback']
+const PUBLIC_API_PREFIXES = ['/api/oauth/']
 
 // route ที่ role=chat เข้าได้
 const CHAT_ALLOWED = ['/webchat', '/api']
 
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname
-  const isPublic = PUBLIC_ROUTES.includes(path)
+  const isPublic = PUBLIC_ROUTES.includes(path) || PUBLIC_API_PREFIXES.some(p => path.startsWith(p))
 
   const token = req.cookies.get('session')?.value
   const session = await decrypt(token)
