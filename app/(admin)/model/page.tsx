@@ -127,9 +127,7 @@ export default function ModelPage() {
   // Anthropic OAuth token → ไม่ใส่ prefix (openclaw รู้จัก claude-* โดยตรง)
   // Anthropic API key ปกติ → ใส่ prefix anthropic/
   // Provider อื่น → ใส่ prefix ตามปกติ
-  const fullModel = selectedModelId
-    ? ''
-    : ''  // placeholder — คำนวณด้านล่างหลัง isAnthropicOAuth
+  // (คำนวณหลัง isAnthropicOAuth — ดูด้านล่าง)
   const currentModel = config?.agents?.defaults?.model?.primary ?? '-'
   const modelList: { id: string; name: string; pricing?: { prompt: string; completion: string } }[] = fetchedModels ?? []
   const selectedModelInfo = modelList.find(m => m.id === selectedModelId)
