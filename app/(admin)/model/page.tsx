@@ -264,7 +264,9 @@ export default function ModelPage() {
     mutationFn: async ({ saveKey, saveModel }: { saveKey: boolean; saveModel: boolean }) => {
       if (!config) return
       const updated = { ...config }
-      if (saveKey && !selectedProvider.noApiKey) {
+      // ไม่ save key เมื่อ Anthropic OAuth active — ป้องกัน OpenRouter key ทับ OAuth token
+      const shouldSaveKey = saveKey && !selectedProvider.noApiKey && !(selectedProvider.id === 'anthropic' && isAnthropicOAuth)
+      if (shouldSaveKey) {
         updated.env = { ...config.env, [selectedProvider.envKey]: apiKey.trim() }
       }
       if (saveModel && fullModel) {
@@ -286,7 +288,10 @@ export default function ModelPage() {
   })
 
   const currentKeyInConfig = config?.env?.[selectedProvider.envKey] ?? ''
-  const keyChanged = !selectedProvider.noApiKey && apiKey.trim() !== currentKeyInConfig
+  // ไม่นับว่า key เปลี่ยนเมื่อ Anthropic OAuth active (input ถูกซ่อน ค่าใน state อาจเป็น key เก่า)
+  const keyChanged = !selectedProvider.noApiKey
+    && !(selectedProvider.id === 'anthropic' && isAnthropicOAuth)
+    && apiKey.trim() !== currentKeyInConfig
   const modelChanged = !!fullModel && fullModel !== currentModel
 
   const PROVIDER_INFO: Record<string, { desc: string; keyUrl?: string; keyHint?: string }> = {
