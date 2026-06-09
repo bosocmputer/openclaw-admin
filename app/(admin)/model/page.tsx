@@ -173,7 +173,8 @@ export default function ModelPage() {
       setOauthStep('done')
       setOauthRedirectUrl('')
       setOauthUrl('')
-      qc.invalidateQueries({ queryKey: ['config'] })
+      await qc.invalidateQueries({ queryKey: ['config'] })
+      await qc.refetchQueries({ queryKey: ['config'] })
       toast.success(data.message || 'เชื่อมต่อ Anthropic Account สำเร็จ')
     } catch (e: unknown) {
       const err = e as Error
