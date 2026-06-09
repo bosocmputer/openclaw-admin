@@ -574,11 +574,24 @@ export default function ModelPage() {
                 </p>
               </CardHeader>
               <CardContent className="space-y-2">
-                {/* Banner ชัดเจนว่าไม่เสียเงินเพิ่ม */}
-                <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-3 py-2 flex items-center gap-2 mb-3">
-                  <span className="text-green-600 dark:text-green-400 text-base">✅</span>
-                  <p className="text-xs text-green-700 dark:text-green-400 font-medium">
-                    ใช้ Claude Pro/Max subscription — <strong>ไม่มีค่าใช้จ่ายเพิ่ม</strong> เลือก model ได้เลย
+                {/* Info: Usage Credits */}
+                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 px-3 py-2.5 space-y-1 mb-3">
+                  <p className="text-xs font-medium text-blue-700 dark:text-blue-400">ℹ️ ข้อมูลเกี่ยวกับค่าใช้จ่าย</p>
+                  <p className="text-xs text-blue-600 dark:text-blue-300">
+                    การใช้งานผ่าน OAuth ใช้ <strong>Usage Credits</strong> ใน claude.ai account ของคุณ
+                    — ไม่ใช่ weekly session limit ที่เห็นในหน้าแชทปกติ
+                  </p>
+                  <p className="text-xs text-blue-500 dark:text-blue-400">
+                    ตรวจสอบและเติม credits ได้ที่{' '}
+                    <a
+                      href="https://claude.ai/settings/usage"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline font-medium hover:text-blue-700"
+                    >
+                      claude.ai/settings/usage
+                    </a>
+                    {' '}→ หัวข้อ &ldquo;Usage credits&rdquo;
                   </p>
                 </div>
                 {ANTHROPIC_MODELS.map(m => (
