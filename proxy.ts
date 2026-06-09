@@ -3,6 +3,8 @@ import { decrypt } from '@/lib/session'
 
 const PUBLIC_ROUTES = ['/login', '/oauth/callback', '/callback']
 const PUBLIC_API_PREFIXES = ['/api/oauth/']
+// routes เหล่านี้ไม่ redirect แม้ว่าจะมี session อยู่แล้ว
+const ALWAYS_ALLOW = ['/oauth/callback', '/callback']
 
 // route ที่ role=chat เข้าได้
 const CHAT_ALLOWED = ['/webchat', '/api']
@@ -17,7 +19,7 @@ export async function proxy(req: NextRequest) {
   if (!session && !isPublic) {
     return NextResponse.redirect(new URL('/login', req.url))
   }
-  if (session && isPublic) {
+  if (session && isPublic && !ALWAYS_ALLOW.includes(path)) {
     // role=chat → redirect /webchat, อื่นๆ → /
     const dest = session.role === 'chat' ? '/webchat' : '/'
     return NextResponse.redirect(new URL(dest, req.url))
