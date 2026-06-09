@@ -178,8 +178,11 @@ export default function ModelPage() {
       setOauthUrl('')
       await qc.invalidateQueries({ queryKey: ['config'] })
       await qc.refetchQueries({ queryKey: ['config'] })
-      // reset เป็น idle เพื่อให้ model list แสดง
+      // switch ไป Anthropic provider + reset step เพื่อให้ model list แสดง
+      const anthropicProvider = PROVIDERS.find(p => p.id === 'anthropic')
+      if (anthropicProvider) setSelectedProvider(anthropicProvider)
       setOauthStep('idle')
+      setSelectedModelId('')
       toast.success(data.message || 'เชื่อมต่อ Anthropic Account สำเร็จ')
     } catch (e: unknown) {
       const err = e as Error
