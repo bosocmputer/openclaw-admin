@@ -72,11 +72,11 @@ export default function LogsPage() {
   const lastUpdate = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH') : '-'
 
   return (
-    <div className="space-y-4 w-full">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full gap-3">
+      <div className="shrink-0 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Logs</h1>
-          <p className="text-sm text-zinc-500 mt-1">Gateway log แบบ live — อัปเดตทุก 3 วินาที</p>
+          <h1 className="text-xl font-bold leading-none">Logs</h1>
+          <p className="text-xs text-zinc-500 mt-0.5">Gateway log แบบ live — อัปเดตทุก 3 วินาที</p>
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-400">
           <span>อัปเดตล่าสุด: {lastUpdate}</span>
@@ -91,7 +91,7 @@ export default function LogsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2 items-center">
+      <div className="shrink-0 flex gap-2 items-center flex-wrap">
         <Input
           placeholder="ค้นหา message หรือ subsystem..."
           value={filter}
@@ -140,10 +140,11 @@ export default function LogsPage() {
           />
           Auto scroll
         </label>
+        <span className="text-xs text-zinc-500 ml-auto">{filtered.length} entries</span>
       </div>
 
       {/* Log panel */}
-      <div className="border rounded-xl bg-zinc-950 text-xs font-mono h-[580px] overflow-y-auto p-3 space-y-0.5">
+      <div className="flex-1 min-h-0 border rounded-xl bg-zinc-950 text-xs font-mono overflow-y-auto p-3 space-y-0.5">
         {filtered.length === 0 && (
           <p className="text-zinc-500 py-4 text-center">ไม่มี log ที่ตรงเงื่อนไข</p>
         )}
@@ -163,8 +164,6 @@ export default function LogsPage() {
         ))}
         <div ref={bottomRef} />
       </div>
-
-      <p className="text-xs text-zinc-400">{filtered.length} entries</p>
     </div>
   )
 }
