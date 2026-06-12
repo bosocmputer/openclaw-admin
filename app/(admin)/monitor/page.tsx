@@ -41,7 +41,9 @@ interface FlatEvent {
   inputTokens?: number
   outputTokens?: number
   cost?: number
+  toolName?: string
   toolResult?: string
+  turnTotalCost?: number  // ยอดรวม cost ทั้ง turn (message → reply)
 }
 
 interface SessionGroup {
@@ -52,6 +54,7 @@ interface SessionGroup {
   state: string
   lastMessageAt: string | null
   elapsed: number
+  sessionCost: number
   events: FlatEvent[]
 }
 
@@ -108,6 +111,7 @@ function buildGroups(data: MonitorData): SessionGroup[] {
         const events: FlatEvent[] = []
 
         const evList = session.events as MonitorEvent[]
+        let turnCost = 0
         for (let i = 0; i < evList.length; i++) {
           const e = evList[i]
           const isLast = i === evList.length - 1
@@ -115,11 +119,17 @@ function buildGroups(data: MonitorData): SessionGroup[] {
 
           if (e.type === 'message') {
             lastMsgTs = e.ts
+            turnCost = 0
           } else if (e.type === 'reply' && lastMsgTs) {
             const diff = tsToSec(e.ts) - tsToSec(lastMsgTs)
             const real = diff < 0 ? diff + 86400 : diff
             if (real >= 0 && real < 3600) responseDuration = real
             lastMsgTs = null
+          }
+
+          // สะสม cost ทุก LLM call ในรอบนี้ (thinking + reply)
+          if ((e.type === 'thinking' || e.type === 'reply') && e.cost) {
+            turnCost += e.cost
           }
 
           events.push({
@@ -130,14 +140,18 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             inputTokens: (e as MonitorEvent).inputTokens,
             outputTokens: (e as MonitorEvent).outputTokens,
             cost: (e as MonitorEvent).cost,
+            toolName: (e as MonitorEvent).toolName,
             toolResult: (e as MonitorEvent).toolResult,
+            turnTotalCost: e.type === 'reply' && turnCost > 0 ? turnCost : undefined,
           })
         }
 
         groups.push({
           sessionKey: session.sessionKey, agentId: agent.id, channel: ch,
           user: session.user, state: session.state,
-          lastMessageAt: session.lastMessageAt, elapsed: session.elapsed ?? 0, events,
+          lastMessageAt: session.lastMessageAt, elapsed: session.elapsed ?? 0,
+          sessionCost: session.cost ?? 0,
+          events,
         })
       }
     }
@@ -309,9 +323,10 @@ export default function MonitorPage() {
             const st = stateInfo(g.state)
             const ch = g.channel === 'telegram' ? 'tg' : g.channel === 'line' ? 'line' : 'web'
             const elapsed = (g.state === 'thinking' || g.state === 'tool_call') && g.elapsed > 0 ? ` ${g.elapsed}s` : ''
+            const costStr = g.sessionCost > 0 ? ` $${g.sessionCost.toFixed(4)}` : ''
             return (
               <option key={g.sessionKey} value={g.sessionKey}>
-                {st.label}{elapsed} · {g.agentId} · {ch} · {g.user.replace('direct:', '')}
+                {st.label}{elapsed} · {g.agentId} · {ch} · {g.user.replace('direct:', '')}{costStr}
               </option>
             )
           })}
@@ -394,6 +409,11 @@ export default function MonitorPage() {
         )}
         <span className="text-xs text-muted-foreground ml-auto">
           {filtered.length} events{filtered.length !== events.length ? ` / ${events.length}` : ''}
+          {selectedGroup && selectedGroup.sessionCost > 0 && (
+            <span className="ml-2 text-yellow-500 font-medium" title="Total cost ของ session นี้">
+              💰 ${selectedGroup.sessionCost.toFixed(4)}
+            </span>
+          )}
         </span>
       </div>
 
@@ -497,15 +517,37 @@ export default function MonitorPage() {
                     </span>
                   )}
                   <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
-                  <span className={`flex-1 text-zinc-300 ${isExp ? '' : 'truncate'}`} title={isExp ? undefined : e.text}>
-                    {isExp ? null : e.text}
+                  <span className={`flex-1 text-zinc-300 min-w-0 ${isExp ? '' : 'truncate'}`} title={isExp ? undefined : e.text}>
+                    {isExp ? null : (
+                      e.type === 'tool' && e.toolName
+                        ? <><span className="text-purple-300 font-medium">{e.toolName}</span>{e.text && e.text !== 'exec' ? <span className="text-zinc-500 ml-1 text-xs">{e.text}</span> : null}</>
+                        : e.text
+                    )}
                     {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
                   </span>
+                  {/* tool event: แสดง duration */}
+                  {e.type === 'tool' && e.latency != null && (
+                    <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
+                      <span className={durationColor(e.latency)}>{e.latency}s</span>
+                    </span>
+                  )}
+                  {/* thinking event: แสดง cost ต่อ LLM call */}
+                  {e.type === 'thinking' && (e.latency != null || e.cost) && (
+                    <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
+                      {e.latency != null && <span className={durationColor(e.latency)}>{e.latency}s</span>}
+                      {e.inputTokens ? <span title={`In: ${e.inputTokens?.toLocaleString()} Out: ${e.outputTokens?.toLocaleString()}`}>{(((e.inputTokens ?? 0) + (e.outputTokens ?? 0)) / 1000).toFixed(1)}K</span> : null}
+                      {e.cost ? <span className="text-yellow-500/70">${e.cost.toFixed(4)}</span> : null}
+                    </span>
+                  )}
+                  {/* reply event: แสดง latency + tokens + turnTotalCost (ยอดรวมทั้ง turn) */}
                   {e.type === 'reply' && (e.latency != null || e.inputTokens) && (
                     <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
                       {e.latency != null && <span className={durationColor(e.latency)}>{e.latency}s</span>}
                       {e.inputTokens ? <span title={`In: ${e.inputTokens?.toLocaleString()} Out: ${e.outputTokens?.toLocaleString()}`}>{(((e.inputTokens ?? 0) + (e.outputTokens ?? 0)) / 1000).toFixed(1)}K</span> : null}
-                      {e.cost ? <span className="text-yellow-600">${e.cost.toFixed(4)}</span> : null}
+                      {e.turnTotalCost
+                        ? <span className="text-yellow-400 font-medium" title={`รวม turn: $${e.turnTotalCost.toFixed(4)}${e.cost && e.cost !== e.turnTotalCost ? ` (call นี้: $${e.cost.toFixed(4)})` : ''}`}>${e.turnTotalCost.toFixed(4)}</span>
+                        : e.cost ? <span className="text-yellow-600">${e.cost.toFixed(4)}</span> : null
+                      }
                     </span>
                   )}
                   {e.type === 'reply' && e.responseDuration != null && (
