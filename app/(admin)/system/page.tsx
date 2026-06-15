@@ -185,6 +185,7 @@ export default function SystemPage() {
                 <th className="px-4 py-2 text-left font-medium">Access Mode</th>
                 <th className="px-4 py-2 text-left font-medium">MCP URL</th>
                 <th className="px-4 py-2 text-left font-medium">Tools</th>
+                <th className="px-4 py-2 text-left font-medium">Source</th>
                 <th className="px-4 py-2 text-left font-medium">SOUL</th>
                 <th className="px-4 py-2 text-left font-medium">Auth</th>
               </tr>
@@ -196,13 +197,16 @@ export default function SystemPage() {
                   <td className="px-4 py-3 font-mono text-xs">{agent.accessMode}</td>
                   <td className="max-w-[360px] break-all px-4 py-3 font-mono text-xs text-zinc-500">{agent.mcpUrl}</td>
                   <td className="px-4 py-3">{agent.toolCount}</td>
+                  <td className="px-4 py-3">
+                    <Badge variant={agent.toolSource === 'live' ? 'default' : 'outline'}>{agent.toolSource ?? '-'}</Badge>
+                  </td>
                   <td className="px-4 py-3"><StatusBadge status={agent.soulStatus} /></td>
                   <td className="px-4 py-3"><StatusBadge status={agent.authStatus} /></td>
                 </tr>
               ))}
               {!health?.agents?.length && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-zinc-400">No agents found</td>
+                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-zinc-400">No agents found</td>
                 </tr>
               )}
             </tbody>

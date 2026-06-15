@@ -5,8 +5,8 @@ import {
   getAgentSoul, putAgentSoul,
   getAgentMcp, putAgentMcp,
   getAgentUsers, addAgentUser, deleteAgentUser,
-  restartGateway, testAgentMcp, api,
-  type McpConfig, type McpTool,
+  restartGateway, testAgentMcp, getAgentSoulTemplate, resetAgentSessions,
+  type AgentSoulTemplate, type McpConfig, type McpTool,
 } from '@/lib/api'
 import { useState, useEffect, use } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -57,17 +57,54 @@ function lineCount(text: string) {
   return text ? text.split('\n').length : 0
 }
 
+interface SoulContract {
+  version?: string
+  accessMode?: string
+  toolSource?: string
+  generatedAt?: string
+  allowedTools?: string[]
+  allowedToolsHash?: string
+}
+
+function extractSoulContract(text: string): SoulContract | null {
+  const match = text.match(/OPENCLAW_SOUL_CONTRACT\s+({[\s\S]*?})\s*-->/)
+  if (!match) return null
+  try { return JSON.parse(match[1]) as SoulContract } catch { return null }
+}
+
+function contractChanged(current: SoulContract | null, next: SoulContract | null) {
+  if (!next) return false
+  if (!current) return true
+  return current.version !== next.version ||
+    current.accessMode !== next.accessMode ||
+    current.allowedToolsHash !== next.allowedToolsHash ||
+    current.toolSource !== next.toolSource
+}
+
+function contractLabel(contract: SoulContract | null) {
+  if (!contract) return 'no contract'
+  const count = contract.allowedTools?.length ?? 0
+  return `${contract.accessMode ?? 'unknown'} · ${contract.toolSource ?? 'unknown'} · ${count} tools · ${contract.allowedToolsHash ?? 'no hash'}`
+}
+
+function diffSummary(currentText: string, nextText: string, currentContract: SoulContract | null, nextContract: SoulContract | null) {
+  const currentSections = new Set(Array.from(currentText.matchAll(/^##\s+(.+)$/gm)).map(m => m[1].trim()))
+  const nextSections = new Set(Array.from(nextText.matchAll(/^##\s+(.+)$/gm)).map(m => m[1].trim()))
+  const added = [...nextSections].filter(s => !currentSections.has(s))
+  const removed = [...currentSections].filter(s => !nextSections.has(s))
+  const lineDelta = lineCount(nextText) - lineCount(currentText)
+  const changed = contractChanged(currentContract, nextContract)
+  return { added, removed, lineDelta, contractChanged: changed }
+}
+
 function SoulPanel({ agentId }: { agentId: string }) {
   const qc = useQueryClient()
   const [soul, setSoul] = useState('')
   const [dirty, setDirty] = useState(false)
   const [loadingTemplate, setLoadingTemplate] = useState(false)
   const [persona, setPersona] = useState('professional')
-  const [pendingTemplate, setPendingTemplate] = useState<{
-    soul: string
-    accessMode: string
-    personaLabel: string
-  } | null>(null)
+  const [pendingTemplate, setPendingTemplate] = useState<(AgentSoulTemplate & { personaLabel: string }) | null>(null)
+  const [resetSessionsAfterSave, setResetSessionsAfterSave] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['soul', agentId],
@@ -87,21 +124,32 @@ function SoulPanel({ agentId }: { agentId: string }) {
   }, [data])
 
   const save = useMutation({
-    mutationFn: () => putAgentSoul(agentId, soul),
-    onSuccess: () => {
+    mutationFn: async () => {
+      await putAgentSoul(agentId, soul)
+      if (!resetSessionsAfterSave) return { reset: null }
+      const reset = await resetAgentSessions(agentId)
+      await restartGateway()
+      return { reset }
+    },
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['soul', agentId] })
       setDirty(false)
-      toast.success('SOUL saved')
+      setResetSessionsAfterSave(false)
+      if (result.reset) {
+        toast.success(`SOUL saved — reset ${result.reset.removed} session(s) และ restart gateway แล้ว`)
+      } else {
+        toast.success('SOUL saved')
+      }
     },
     onError: () => toast.error('Failed to save SOUL'),
   })
 
-  async function loadTemplate() {
+  async function loadTemplate(refreshTools = false) {
     setLoadingTemplate(true)
     try {
-      const { data } = await api.get(`/api/agents/${agentId}/soul/template`, { params: { persona } })
+      const data = await getAgentSoulTemplate(agentId, persona, refreshTools)
       const personaLabel = PERSONAS.find(p => p.value === persona)?.label ?? persona
-      setPendingTemplate({ soul: data.soul, accessMode: data.accessMode, personaLabel })
+      setPendingTemplate({ ...data, personaLabel })
     } catch {
       toast.error('Failed to load template')
     } finally {
@@ -111,8 +159,10 @@ function SoulPanel({ agentId }: { agentId: string }) {
 
   function applyPendingTemplate() {
     if (!pendingTemplate) return
+    const shouldReset = contractChanged(extractSoulContract(soul), extractSoulContract(pendingTemplate.soul))
     setSoul(pendingTemplate.soul)
     setDirty(true)
+    setResetSessionsAfterSave(shouldReset)
     toast.success(`Template applied — mode "${pendingTemplate.accessMode}" / บุคลิก "${pendingTemplate.personaLabel}" — กด Save เพื่อบันทึก`)
     setPendingTemplate(null)
   }
@@ -121,6 +171,9 @@ function SoulPanel({ agentId }: { agentId: string }) {
   const pendingLegacyPatterns = pendingTemplate ? findLegacySoulPatterns(pendingTemplate.soul) : []
   const currentLines = lineCount(soul)
   const nextLines = pendingTemplate ? lineCount(pendingTemplate.soul) : 0
+  const currentContract = extractSoulContract(soul)
+  const pendingContract = pendingTemplate ? extractSoulContract(pendingTemplate.soul) : null
+  const pendingDiff = pendingTemplate ? diffSummary(soul, pendingTemplate.soul, currentContract, pendingContract) : null
 
   return (
     <>
@@ -144,8 +197,11 @@ function SoulPanel({ agentId }: { agentId: string }) {
                     <option key={p.value} value={p.value}>{p.label} — {p.desc}</option>
                   ))}
                 </select>
-                <Button variant="outline" size="sm" onClick={loadTemplate} disabled={loadingTemplate}>
+                <Button variant="outline" size="sm" onClick={() => loadTemplate(false)} disabled={loadingTemplate}>
                   {loadingTemplate ? 'Loading...' : 'Load Template'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => loadTemplate(true)} disabled={loadingTemplate}>
+                  Refresh Tools
                 </Button>
               </div>
             </div>
@@ -174,11 +230,21 @@ function SoulPanel({ agentId }: { agentId: string }) {
           <Button onClick={() => save.mutate()} disabled={save.isPending || !dirty} className="shrink-0">
             {save.isPending ? 'Saving...' : 'Save SOUL'}
           </Button>
+          {dirty && (
+            <label className="flex items-center gap-2 text-xs text-zinc-500">
+              <input
+                type="checkbox"
+                checked={resetSessionsAfterSave}
+                onChange={e => setResetSessionsAfterSave(e.target.checked)}
+              />
+              Reset active sessions หลัง Save และ restart gateway
+            </label>
+          )}
         </CardContent>
       </Card>
 
       <Dialog open={!!pendingTemplate} onOpenChange={open => { if (!open) setPendingTemplate(null) }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-3xl max-h-[86vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Apply SOUL Template?</DialogTitle>
             <DialogDescription>
@@ -187,22 +253,78 @@ function SoulPanel({ agentId }: { agentId: string }) {
           </DialogHeader>
           {pendingTemplate && (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div className="rounded-md border bg-zinc-50 p-3 dark:bg-zinc-900">
                   <p className="text-zinc-500">Current</p>
                   <p className="mt-1 font-mono">{currentLines} lines</p>
                   <p className="mt-1 break-words text-amber-600">{legacyPatterns.length ? `legacy: ${legacyPatterns.join(', ')}` : 'no legacy pattern'}</p>
+                  <p className="mt-1 break-words text-zinc-500">{contractLabel(currentContract)}</p>
                 </div>
                 <div className="rounded-md border bg-zinc-50 p-3 dark:bg-zinc-900">
                   <p className="text-zinc-500">Template</p>
                   <p className="mt-1 font-mono">{nextLines} lines</p>
                   <p className="mt-1 break-words text-emerald-600">{pendingLegacyPatterns.length ? `legacy: ${pendingLegacyPatterns.join(', ')}` : 'native MCP template'}</p>
+                  <p className="mt-1 break-words text-zinc-500">{contractLabel(pendingContract)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="rounded-md border p-2">
+                  <p className="text-zinc-500">Mode</p>
+                  <p className="font-mono font-medium">{pendingTemplate.accessMode}</p>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="text-zinc-500">Tool Source</p>
+                  <p className={pendingTemplate.toolSource === 'live' ? 'text-emerald-600 font-medium' : 'text-amber-600 font-medium'}>{pendingTemplate.toolSource}</p>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="text-zinc-500">Tools</p>
+                  <p className="font-mono font-medium">{pendingTemplate.tools.length}</p>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="text-zinc-500">Persona</p>
+                  <p className="font-medium">{pendingTemplate.personaLabel}</p>
+                </div>
+              </div>
+              {pendingTemplate.warnings.length > 0 && (
+                <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <div className="space-y-1">
+                    {pendingTemplate.warnings.map((w, i) => <p key={i} className="break-words">{w}</p>)}
+                  </div>
+                </div>
+              )}
+              {pendingDiff && (
+                <div className="rounded-md border bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
+                  <p className="font-medium">Diff summary</p>
+                  <p className="mt-1 text-zinc-500">Line delta: {pendingDiff.lineDelta >= 0 ? '+' : ''}{pendingDiff.lineDelta} · Contract {pendingDiff.contractChanged ? 'changed' : 'unchanged'}</p>
+                  {pendingDiff.added.length > 0 && <p className="mt-1 break-words text-emerald-600">Added sections: {pendingDiff.added.join(', ')}</p>}
+                  {pendingDiff.removed.length > 0 && <p className="mt-1 break-words text-amber-600">Removed sections: {pendingDiff.removed.join(', ')}</p>}
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="rounded-md border p-3">
+                  <p className="font-medium text-emerald-600">Allowed capabilities</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {pendingTemplate.capabilities.map(c => <Badge key={c.id} variant="secondary" className="max-w-full truncate">{c.label}</Badge>)}
+                  </div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="font-medium text-amber-600">Denied capabilities</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {pendingTemplate.deniedCapabilities.map(c => <Badge key={c.id} variant="outline" className="max-w-full truncate">{c.label}</Badge>)}
+                  </div>
                 </div>
               </div>
               <div className="rounded-md border bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
-                <p>Mode: <span className="font-mono font-medium">{pendingTemplate.accessMode}</span></p>
-                <p>Persona: <span className="font-medium">{pendingTemplate.personaLabel}</span></p>
-                <p className="mt-1 text-zinc-500">ระบบจะ auto-backup SOUL เดิมเมื่อกด Save และ content เปลี่ยนจากเดิม</p>
+                <p className="font-medium">Allowed tools preview</p>
+                <div className="mt-2 max-h-32 overflow-y-auto font-mono text-[11px] text-zinc-600 dark:text-zinc-300">
+                  {pendingTemplate.tools.map(t => (
+                    <p key={t.name} className="truncate">
+                      {t.name}{t.required?.length ? ` (${t.required.join(', ')})` : ''}
+                    </p>
+                  ))}
+                </div>
+                <p className="mt-2 text-zinc-500">ระบบจะ auto-backup SOUL เดิมเมื่อกด Save และ content เปลี่ยนจากเดิม</p>
               </div>
             </div>
           )}

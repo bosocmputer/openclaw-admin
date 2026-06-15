@@ -323,10 +323,56 @@ export async function runDoctorFix(): Promise<void> {
 export interface McpTool {
   name: string
   description: string
+  required?: string[]
+  args?: string[]
 }
 
-export async function testAgentMcp(agentId: string, accessMode: string): Promise<{ ok: boolean; serverName: string; accessMode: string; tools: McpTool[]; raw?: string; error?: string }> {
+export interface AgentCapability {
+  id: string
+  label: string
+  description: string
+  toolNames: string[]
+  missingToolNames: string[]
+  summary: string
+}
+
+export interface AgentSoulTemplate {
+  soul: string
+  accessMode: string
+  persona: string
+  mcpUrl?: string | null
+  toolSource: 'live' | 'fallback'
+  tools: McpTool[]
+  capabilities: AgentCapability[]
+  deniedCapabilities: AgentCapability[]
+  warnings: string[]
+  generatedAt: string
+  cache?: { hit: boolean; ttlSeconds: number }
+}
+
+export async function testAgentMcp(agentId: string, accessMode: string): Promise<{
+  ok: boolean
+  serverName: string
+  accessMode: string
+  tools: McpTool[]
+  capabilities?: AgentCapability[]
+  deniedCapabilities?: AgentCapability[]
+  toolSource?: 'live' | 'fallback'
+  warnings?: string[]
+  raw?: string
+  error?: string
+}> {
   const { data } = await api.post(`/api/agents/${agentId}/mcp/test`, { accessMode })
+  return data
+}
+
+export async function getAgentSoulTemplate(agentId: string, persona: string, refreshTools = false): Promise<AgentSoulTemplate> {
+  const { data } = await api.get(`/api/agents/${agentId}/soul/template`, { params: { persona, refreshTools } })
+  return data
+}
+
+export async function resetAgentSessions(agentId: string): Promise<{ ok: boolean; removed: number; backupPath: string | null }> {
+  const { data } = await api.post(`/api/agents/${agentId}/sessions/reset-active`, { reason: 'soul-template-contract-change' })
   return data
 }
 
@@ -495,6 +541,7 @@ export interface MonitorSession {
   cost: number
   inputTokens?: number
   outputTokens?: number
+  warnings?: { type: string; toolName?: string; count?: number; summary: string }[]
   events: MonitorEvent[]
 }
 
@@ -551,6 +598,7 @@ export interface SessionReplay {
   sessionId: string
   agentId: string
   messages: SessionReplayMessage[]
+  warnings?: { type: string; toolName?: string; count?: number; summary: string }[]
   stats: {
     turns: number
     inputTokens: number
@@ -611,6 +659,7 @@ export interface SystemHealthAgent {
   accessMode: string
   mcpUrl: string
   toolCount: number
+  toolSource?: string
   soulStatus: SystemCheckStatus
   authStatus: SystemCheckStatus
 }
@@ -628,6 +677,12 @@ export interface SupportBundle {
   generatedAt: string
   durationMs: number
   health: SystemHealth
+  recentToolLoopWarnings?: {
+    agentId: string
+    sessionKey: string
+    toolName: string
+    count: number
+  }[]
   repos: {
     name: string
     cwd: string

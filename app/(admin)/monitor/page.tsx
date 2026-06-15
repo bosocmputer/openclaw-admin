@@ -81,6 +81,7 @@ function typeBadge(type: string) {
     case 'thinking': return { icon: '💭', cls: 'text-yellow-500' }
     case 'tool':     return { icon: '🔧', cls: 'text-purple-400' }
     case 'reply':    return { icon: '✅', cls: 'text-green-400' }
+    case 'warning':  return { icon: '⚠', cls: 'text-amber-400' }
     case 'error':    return { icon: '❌', cls: 'text-red-400' }
     default:         return { icon: '·',  cls: 'text-zinc-600' }
   }
@@ -250,6 +251,7 @@ export default function MonitorPage() {
     if (stateFilter !== 'ALL') {
       const typeMap: Record<string, string[]> = {
         thinking: ['thinking'], tool: ['tool'], replied: ['reply'], error: ['error'], message: ['message'],
+        warning: ['warning'],
       }
       if (!(typeMap[stateFilter] ?? []).includes(e.type)) return false
     }
@@ -374,6 +376,7 @@ export default function MonitorPage() {
             { id: 'message',  label: '📩 msg' },
             { id: 'thinking', label: '💭 think' },
             { id: 'tool',     label: '🔧 tool' },
+            { id: 'warning',  label: '⚠ warn' },
             { id: 'replied',  label: '✅ reply' },
             { id: 'error',    label: '❌ error' },
           ].map(s => (
@@ -434,6 +437,13 @@ export default function MonitorPage() {
                 <span className="text-yellow-500">${replayData.stats.totalCost.toFixed(4)}</span>
                 <span>avg {replayData.stats.avgLatency}s</span>
               </div>
+              {replayData.warnings && replayData.warnings.length > 0 && (
+                <div className="rounded border border-amber-800 bg-amber-950/40 p-2 text-amber-200">
+                  {replayData.warnings.map((w, i) => (
+                    <p key={i} className="break-all">{w.summary}</p>
+                  ))}
+                </div>
+              )}
               {/* Messages */}
               {replayData.messages.map((msg, mi) => (
                 <div key={mi} className={`rounded p-2 ${msg.role === 'user' ? 'bg-zinc-900 border border-zinc-800' : 'bg-zinc-950'}`}>
@@ -484,6 +494,7 @@ export default function MonitorPage() {
             if (e.isLive)                   rowCls = 'row-live'
             else if (e.type === 'thinking') rowCls = isExp ? 'bg-yellow-950/30' : 'bg-yellow-950/15 hover:bg-yellow-950/25'
             else if (e.type === 'tool')     rowCls = isExp ? 'bg-purple-950/30' : 'bg-purple-950/15 hover:bg-purple-950/25'
+            else if (e.type === 'warning')  rowCls = isExp ? 'bg-amber-950/35' : 'bg-amber-950/20 hover:bg-amber-950/30'
             else if (e.type === 'error')    rowCls = isExp ? 'bg-red-950/35' : 'bg-red-950/20 hover:bg-red-950/30'
             else if (isExp)                 rowCls = 'bg-zinc-800'
 
