@@ -16,6 +16,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
 
@@ -27,12 +29,45 @@ const PERSONAS = [
   { value: 'strict',       label: 'เน้นข้อมูล',  desc: 'ข้อมูลล้วน ไม่คุย off-topic' },
 ]
 
+const DEFAULT_MCP_URL = 'http://192.168.2.248:3515/sse'
+const ACCESS_MODES = [
+  { value: 'admin',    label: 'admin',    desc: 'เห็นทุกอย่าง รวมถึงรายงานและวิเคราะห์' },
+  { value: 'sales',    label: 'sales',    desc: 'แผนกขาย' },
+  { value: 'purchase', label: 'purchase', desc: 'แผนกจัดซื้อ' },
+  { value: 'stock',    label: 'stock',    desc: 'แผนกคลังสินค้า' },
+  { value: 'general',  label: 'general',  desc: 'ทั่วไป (ค่าเริ่มต้น)' },
+]
+
+const LEGACY_SOUL_PATTERNS = [
+  { label: 'curl', re: /\bcurl\b/i },
+  { label: '/call', re: /\/call\b/i },
+  { label: 'exec tool', re: /exec\s+tool/i },
+  { label: 'mcporter', re: /mcporter/i },
+]
+
+function defaultAccessMode(agentId: string) {
+  return ACCESS_MODES.some(m => m.value === agentId) ? agentId : 'general'
+}
+
+function findLegacySoulPatterns(text: string) {
+  return LEGACY_SOUL_PATTERNS.filter(p => p.re.test(text)).map(p => p.label)
+}
+
+function lineCount(text: string) {
+  return text ? text.split('\n').length : 0
+}
+
 function SoulPanel({ agentId }: { agentId: string }) {
   const qc = useQueryClient()
   const [soul, setSoul] = useState('')
   const [dirty, setDirty] = useState(false)
   const [loadingTemplate, setLoadingTemplate] = useState(false)
   const [persona, setPersona] = useState('professional')
+  const [pendingTemplate, setPendingTemplate] = useState<{
+    soul: string
+    accessMode: string
+    personaLabel: string
+  } | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['soul', agentId],
@@ -65,10 +100,8 @@ function SoulPanel({ agentId }: { agentId: string }) {
     setLoadingTemplate(true)
     try {
       const { data } = await api.get(`/api/agents/${agentId}/soul/template`, { params: { persona } })
-      setSoul(data.soul)
-      setDirty(true)
       const personaLabel = PERSONAS.find(p => p.value === persona)?.label ?? persona
-      toast.success(`โหลด template — mode "${data.accessMode}" / บุคลิก "${personaLabel}" — กด Save เพื่อบันทึก`)
+      setPendingTemplate({ soul: data.soul, accessMode: data.accessMode, personaLabel })
     } catch {
       toast.error('Failed to load template')
     } finally {
@@ -76,50 +109,110 @@ function SoulPanel({ agentId }: { agentId: string }) {
     }
   }
 
+  function applyPendingTemplate() {
+    if (!pendingTemplate) return
+    setSoul(pendingTemplate.soul)
+    setDirty(true)
+    toast.success(`Template applied — mode "${pendingTemplate.accessMode}" / บุคลิก "${pendingTemplate.personaLabel}" — กด Save เพื่อบันทึก`)
+    setPendingTemplate(null)
+  }
+
+  const legacyPatterns = findLegacySoulPatterns(soul)
+  const pendingLegacyPatterns = pendingTemplate ? findLegacySoulPatterns(pendingTemplate.soul) : []
+  const currentLines = lineCount(soul)
+  const nextLines = pendingTemplate ? lineCount(pendingTemplate.soul) : 0
+
   return (
-    <Card className="flex flex-col h-full">
-      <CardHeader className="pb-2 shrink-0">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-base">SOUL</CardTitle>
-            <p className="text-xs text-zinc-500 mt-0.5">System prompt ที่กำหนดบุคลิก ขอบเขต และพฤติกรรมของ agent</p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {dirty && <Badge variant="outline" className="text-amber-600 border-amber-400">Unsaved</Badge>}
-            <div className="flex items-center gap-1.5">
-              <select
-                value={persona}
-                onChange={e => setPersona(e.target.value)}
-                title="เลือกบุคลิก agent"
-                className="h-8 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm px-2 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-400"
-              >
-                {PERSONAS.map(p => (
-                  <option key={p.value} value={p.value}>{p.label} — {p.desc}</option>
-                ))}
-              </select>
-              <Button variant="outline" size="sm" onClick={loadTemplate} disabled={loadingTemplate}>
-                {loadingTemplate ? 'Loading...' : 'Load Template'}
-              </Button>
+    <>
+      <Card className="flex flex-col h-full">
+        <CardHeader className="pb-2 shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">SOUL</CardTitle>
+              <p className="text-xs text-zinc-500 mt-0.5">System prompt ที่กำหนดบุคลิก ขอบเขต และพฤติกรรมของ agent</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {dirty && <Badge variant="outline" className="text-amber-600 border-amber-400">Unsaved</Badge>}
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={persona}
+                  onChange={e => setPersona(e.target.value)}
+                  title="เลือกบุคลิก agent"
+                  className="h-8 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm px-2 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                >
+                  {PERSONAS.map(p => (
+                    <option key={p.value} value={p.value}>{p.label} — {p.desc}</option>
+                  ))}
+                </select>
+                <Button variant="outline" size="sm" onClick={loadTemplate} disabled={loadingTemplate}>
+                  {loadingTemplate ? 'Loading...' : 'Load Template'}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col flex-1 gap-3 min-h-0">
-        {isLoading ? (
-          <p className="text-sm text-zinc-400">Loading...</p>
-        ) : (
-          <Textarea
-            value={soul}
-            onChange={e => { setSoul(e.target.value); setDirty(true) }}
-            className="font-mono text-xs flex-1 resize-none min-h-[400px]"
-            placeholder="# Agent Name&#10;คุณคือผู้ช่วย AI ..."
-          />
-        )}
-        <Button onClick={() => save.mutate()} disabled={save.isPending || !dirty} className="shrink-0">
-          {save.isPending ? 'Saving...' : 'Save SOUL'}
-        </Button>
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent className="flex flex-col flex-1 gap-3 min-h-0">
+          {legacyPatterns.length > 0 && (
+            <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <div>
+                <p className="font-medium">SOUL ยังมี legacy MCP pattern: {legacyPatterns.join(', ')}</p>
+                <p className="mt-0.5">ใช้ native MCP ผ่าน openclaw.json และ header mcp-access-mode แทน curl, /call, exec tool, หรือ mcporter</p>
+              </div>
+            </div>
+          )}
+          {isLoading ? (
+            <p className="text-sm text-zinc-400">Loading...</p>
+          ) : (
+            <Textarea
+              value={soul}
+              onChange={e => { setSoul(e.target.value); setDirty(true) }}
+              className="font-mono text-xs flex-1 resize-none min-h-[400px]"
+              placeholder="# Agent Name&#10;คุณคือผู้ช่วย AI ..."
+            />
+          )}
+          <Button onClick={() => save.mutate()} disabled={save.isPending || !dirty} className="shrink-0">
+            {save.isPending ? 'Saving...' : 'Save SOUL'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!pendingTemplate} onOpenChange={open => { if (!open) setPendingTemplate(null) }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Apply SOUL Template?</DialogTitle>
+            <DialogDescription>
+              Template จะทับข้อความใน textarea เท่านั้น ยังไม่บันทึกลง server จนกด Save SOUL
+            </DialogDescription>
+          </DialogHeader>
+          {pendingTemplate && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-md border bg-zinc-50 p-3 dark:bg-zinc-900">
+                  <p className="text-zinc-500">Current</p>
+                  <p className="mt-1 font-mono">{currentLines} lines</p>
+                  <p className="mt-1 break-words text-amber-600">{legacyPatterns.length ? `legacy: ${legacyPatterns.join(', ')}` : 'no legacy pattern'}</p>
+                </div>
+                <div className="rounded-md border bg-zinc-50 p-3 dark:bg-zinc-900">
+                  <p className="text-zinc-500">Template</p>
+                  <p className="mt-1 font-mono">{nextLines} lines</p>
+                  <p className="mt-1 break-words text-emerald-600">{pendingLegacyPatterns.length ? `legacy: ${pendingLegacyPatterns.join(', ')}` : 'native MCP template'}</p>
+                </div>
+              </div>
+              <div className="rounded-md border bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
+                <p>Mode: <span className="font-mono font-medium">{pendingTemplate.accessMode}</span></p>
+                <p>Persona: <span className="font-medium">{pendingTemplate.personaLabel}</span></p>
+                <p className="mt-1 text-zinc-500">ระบบจะ auto-backup SOUL เดิมเมื่อกด Save และ content เปลี่ยนจากเดิม</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingTemplate(null)}>Cancel</Button>
+            <Button onClick={applyPendingTemplate}>Apply Template</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -235,8 +328,8 @@ function UsersPanel({ agentId }: { agentId: string }) {
 // ── MCP Panel ─────────────────────────────────────────────
 function McpPanel({ agentId }: { agentId: string }) {
   const qc = useQueryClient()
-  const [url, setUrl] = useState('')
-  const [accessMode, setAccessMode] = useState('general')
+  const [url, setUrl] = useState(DEFAULT_MCP_URL)
+  const [accessMode, setAccessMode] = useState(defaultAccessMode(agentId))
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
   const [mcpTesting, setMcpTesting] = useState(false)
@@ -253,16 +346,19 @@ function McpPanel({ agentId }: { agentId: string }) {
     if (mcp) {
       const server = Object.values(mcp.mcpServers ?? {})[0]
       if (server) {
-        setUrl(server.url ?? '')
+        setUrl(server.url || DEFAULT_MCP_URL)
         // รองรับทั้ง headers (ใหม่) และ env (เก่า) เพื่อ backward compat
-        setAccessMode(server.headers?.['mcp-access-mode'] ?? server.env?.MCP_ACCESS_MODE ?? 'general')
+        setAccessMode(server.headers?.['mcp-access-mode'] ?? server.env?.MCP_ACCESS_MODE ?? defaultAccessMode(agentId))
+      } else {
+        setUrl(DEFAULT_MCP_URL)
+        setAccessMode(defaultAccessMode(agentId))
       }
     }
-  }, [mcp])
+  }, [agentId, mcp])
 
   const save = useMutation({
     mutationFn: async () => {
-      const serverName = Object.keys(mcp?.mcpServers ?? {})[0] ?? 'mcp'
+      const serverName = Object.keys(mcp?.mcpServers ?? {})[0] ?? agentId
       const newMcp: McpConfig = {
         mcpServers: {
           [serverName]: {
@@ -301,13 +397,6 @@ function McpPanel({ agentId }: { agentId: string }) {
     } finally { setMcpTesting(false) }
   }
 
-  const ACCESS_MODES = [
-    { value: 'admin',    label: 'admin',    desc: 'เห็นทุกอย่าง รวมถึงรายงานและวิเคราะห์' },
-    { value: 'sales',    label: 'sales',    desc: 'แผนกขาย' },
-    { value: 'purchase', label: 'purchase', desc: 'แผนกจัดซื้อ' },
-    { value: 'stock',    label: 'stock',    desc: 'แผนกคลังสินค้า' },
-    { value: 'general',  label: 'general',  desc: 'ทั่วไป (ค่าเริ่มต้น)' },
-  ]
   const currentMode = ACCESS_MODES.find(m => m.value === accessMode)
 
   return (
@@ -322,7 +411,7 @@ function McpPanel({ agentId }: { agentId: string }) {
           <Label className="text-xs">MCP Server URL</Label>
           <div className="flex gap-2">
             <Input value={url} onChange={e => { setUrl(e.target.value); setTestResult('idle') }}
-              placeholder="http://host:port/sse" className="text-sm font-mono" />
+              placeholder={DEFAULT_MCP_URL} className="text-sm font-mono" />
             <Button variant="outline" size="sm" onClick={testConnection} disabled={testing || !url} className="shrink-0">
               {testing ? '...' : 'Ping'}
             </Button>
@@ -351,9 +440,10 @@ function McpPanel({ agentId }: { agentId: string }) {
               ))}
             </SelectContent>
           </Select>
-          {currentMode && (
-            <p className="text-xs text-zinc-400 font-mono">MCP_ACCESS_MODE=<span className="text-zinc-600 dark:text-zinc-300 font-medium">{accessMode}</span></p>
-          )}
+          <p className="text-xs text-zinc-400">
+            ส่งสิทธิ์เป็น header <span className="font-mono text-zinc-600 dark:text-zinc-300">mcp-access-mode: {accessMode}</span>
+            {currentMode ? <span> — {currentMode.desc}</span> : null}
+          </p>
         </div>
 
         {/* Actions */}

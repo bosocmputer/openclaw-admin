@@ -7,7 +7,12 @@ const PUBLIC_API_PREFIXES = ['/api/oauth/']
 const ALWAYS_ALLOW = ['/oauth/callback', '/callback']
 
 // route ที่ role=chat เข้าได้
-const CHAT_ALLOWED = ['/webchat', '/api']
+const CHAT_ALLOWED_ROUTES = ['/webchat']
+const CHAT_ALLOWED_API_PREFIXES = [
+  '/api/proxy/api/webchat/rooms',
+  '/api/proxy/api/webchat/history',
+  '/api/proxy/api/webchat/send',
+]
 
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname
@@ -26,7 +31,9 @@ export async function proxy(req: NextRequest) {
   }
   // role=chat พยายามเข้า route อื่น → redirect /webchat
   if (session?.role === 'chat') {
-    const allowed = CHAT_ALLOWED.some(r => path === r || path.startsWith(r + '/'))
+    const allowedRoute = CHAT_ALLOWED_ROUTES.some(r => path === r || path.startsWith(r + '/'))
+    const allowedApi = CHAT_ALLOWED_API_PREFIXES.some(r => path === r || path.startsWith(r + '/'))
+    const allowed = allowedRoute || allowedApi
     if (!allowed) return NextResponse.redirect(new URL('/webchat', req.url))
   }
   return NextResponse.next()

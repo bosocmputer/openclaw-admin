@@ -18,7 +18,7 @@ openclaw-api    ← Express.js (pm2 บน host)
     │
     ├── ~/.openclaw/openclaw.json
     ├── ~/.openclaw/workspace-*/SOUL.md
-    ├── ~/.openclaw/workspace-*/config/mcporter.json
+    ├── ~/.openclaw/openclaw.json mcp.servers
     └── openclaw CLI (gateway restart, doctor)
 
 openclaw-gateway ← pm2 (port 18789)
@@ -83,6 +83,7 @@ Browser → GET /api/proxy/api/status
 | Memory | `/memory` | ดู daily memory files + MEMORY.md + dreams.md ต่อ agent (auto-refresh 30s) |
 | Analysis | `/analysis` | วิเคราะห์ token usage + สถิติรายงาน per agent |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
+| System Check | `/system` | Health matrix, remediation commands, copy support bundle |
 | Guide | `/guide` | คู่มือผู้ใช้ (แสดง bot name จริงจาก config) |
 | Members | `/members` | จัดการผู้ใช้ระบบ (superadmin เท่านั้น) |
 

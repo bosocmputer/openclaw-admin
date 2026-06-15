@@ -16,6 +16,7 @@ const crumbMap: Array<{ match: (p: string) => boolean; crumb: Crumb }> = [
   { match: p => p.startsWith('/webchat'),   crumb: { section: 'Channels',       label: 'Webchat'      } },
   { match: p => p.startsWith('/chats'),     crumb: { section: 'Conversations',  label: 'Chat History' } },
   { match: p => p.startsWith('/monitor'),   crumb: { section: 'Conversations',  label: 'Live Sessions'} },
+  { match: p => p.startsWith('/system'),    crumb: { section: 'System',         label: 'System Check' } },
   { match: p => p.startsWith('/analysis'),  crumb: { section: 'System',         label: 'Analysis'     } },
   { match: p => p.startsWith('/logs'),      crumb: { section: 'System',         label: 'Logs'         } },
   { match: p => p.startsWith('/members'),   crumb: { section: 'System',         label: 'Members'      } },

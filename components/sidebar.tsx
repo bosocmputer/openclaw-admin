@@ -64,6 +64,7 @@ const adminGroups: NavGroup[] = [
   {
     label: 'System',
     items: [
+      { href: '/system', label: 'System Check' },
       { href: '/analysis', label: 'Analysis' },
       { href: '/logs', label: 'Logs' },
     ],

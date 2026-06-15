@@ -591,6 +591,71 @@ export async function getMonitorCost(days = 30): Promise<CostData> {
   return data
 }
 
+// ─── System Health ───────────────────────────────────────────────────────────
+
+export type SystemCheckStatus = 'ok' | 'warn' | 'fail' | 'info'
+export type SystemCheckSeverity = 'critical' | 'warn' | 'info'
+
+export interface SystemHealthCheck {
+  id: string
+  label: string
+  status: SystemCheckStatus
+  severity: SystemCheckSeverity
+  summary: string
+  durationMs: number
+  remediation?: string
+}
+
+export interface SystemHealthAgent {
+  id: string
+  accessMode: string
+  mcpUrl: string
+  toolCount: number
+  soulStatus: SystemCheckStatus
+  authStatus: SystemCheckStatus
+}
+
+export interface SystemHealth {
+  ok: boolean
+  status: 'ok' | 'warn' | 'fail'
+  generatedAt: string
+  cache: { hit: boolean; ttlSeconds: number }
+  checks: SystemHealthCheck[]
+  agents: SystemHealthAgent[]
+}
+
+export interface SupportBundle {
+  generatedAt: string
+  durationMs: number
+  health: SystemHealth
+  repos: {
+    name: string
+    cwd: string
+    branch?: string
+    head?: string
+    status?: string[]
+    error?: string
+  }[]
+  processStatus: {
+    name: string
+    pid: number
+    status?: string
+    restarts?: number
+    uptime?: number
+  }[]
+  runtime: { node: string; platform: string; arch: string }
+}
+
+export async function getSystemHealth(refresh = false): Promise<SystemHealth> {
+  const { data } = await api.get('/api/system/health', { params: refresh ? { refresh: true } : {} })
+  return data
+}
+
+export async function getSupportBundle(): Promise<SupportBundle> {
+  const { data } = await api.get('/api/system/support-bundle')
+  return data
+}
+
 // ─── Webhooks ─────────────────────────────────────────────────────────────────
 
 export interface WebhookRoute {
