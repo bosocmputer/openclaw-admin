@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getMonitorEvents, getSessionReplay, type MonitorData, type MonitorEvent } from '@/lib/api'
+import { Activity, AlertTriangle, CheckCircle2, Clock3, Pause, Play, ShieldAlert } from 'lucide-react'
+import { getMonitorEvents, getMonitorLatency, getSessionReplay, type MonitorData, type MonitorEvent, type MonitorLatencyData, type MonitorLatencyTurn } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -73,6 +74,79 @@ function durationColor(sec: number) {
   if (sec < 5) return 'text-green-400'
   if (sec < 15) return 'text-yellow-400'
   return 'text-red-400'
+}
+
+function msText(ms: number | null | undefined) {
+  if (ms == null) return '-'
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
+}
+
+function msColor(ms: number | null | undefined, warnAt: number, failAt: number) {
+  if (ms == null) return 'text-zinc-500'
+  if (ms <= warnAt) return 'text-green-400'
+  if (ms <= failAt) return 'text-yellow-400'
+  return 'text-red-400'
+}
+
+function latencyStatusClass(status: string) {
+  switch (status) {
+    case 'ok': return 'text-green-400 border-green-500/30 bg-green-500/10'
+    case 'slow': return 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'
+    case 'stuck': return 'text-red-400 border-red-500/30 bg-red-500/10'
+    case 'warn': return 'text-amber-400 border-amber-500/30 bg-amber-500/10'
+    case 'suppressed': return 'text-zinc-300 border-zinc-600 bg-zinc-800'
+    default: return 'text-zinc-400 border-zinc-700 bg-zinc-900'
+  }
+}
+
+function latencyStatusLabel(status: string) {
+  switch (status) {
+    case 'ok': return 'ok'
+    case 'slow': return 'slow'
+    case 'stuck': return 'stuck'
+    case 'pending': return 'pending'
+    case 'warn': return 'warn'
+    case 'suppressed': return 'suppressed'
+    default: return status || '-'
+  }
+}
+
+function rootCauseLabel(rootCause?: string) {
+  switch (rootCause) {
+    case 'completed': return 'ตอบสำเร็จ'
+    case 'model_latency': return 'model ช้า'
+    case 'model_pending': return 'model ยังไม่จบ'
+    case 'model_running': return 'model กำลังทำงาน'
+    case 'tool_or_mcp_latency': return 'tool หรือ MCP ช้า'
+    case 'tool_or_mcp_pending': return 'tool หรือ MCP ค้าง'
+    case 'queue_or_context_pending': return 'คิวหรือ context ค้าง'
+    case 'ack_failed': return 'ack ส่งไม่สำเร็จ'
+    case 'stale_reply_suppressed': return 'ตัด reply เก่า'
+    case 'stock_price_denial': return 'deny ราคา stock'
+    case 'native_command': return 'native command'
+    case 'queue_coalesced': return 'รวมข้อความซ้ำ'
+    default: return rootCause || '-'
+  }
+}
+
+function turnTimeLabel(startedAt?: string) {
+  if (!startedAt) return '-'
+  const date = new Date(startedAt)
+  if (Number.isNaN(date.getTime())) return startedAt
+  return date.toLocaleTimeString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+function isNoiseEvent(e: FlatEvent) {
+  const text = `${e.type} ${e.text} ${e.toolName ?? ''}`.toLowerCase()
+  return text.includes('delivery-mirror') ||
+    text.includes('tool-policy removed') ||
+    text.includes('allowlist contains unknown entries')
 }
 
 function typeBadge(type: string) {
@@ -166,6 +240,158 @@ function buildGroups(data: MonitorData): SessionGroup[] {
   })
 }
 
+function MetricCard({ label, value, tone, sub }: { label: string; value: string; tone: string; sub?: string }) {
+  return (
+    <div className="min-h-[68px] rounded-md border border-zinc-800 bg-zinc-900/70 px-3 py-2">
+      <p className="text-[11px] text-zinc-500">{label}</p>
+      <p className={`mt-1 text-lg font-semibold leading-none ${tone}`}>{value}</p>
+      {sub && <p className="mt-1 truncate text-[11px] text-zinc-500">{sub}</p>}
+    </div>
+  )
+}
+
+function LatencyTurnRow({ turn }: { turn: MonitorLatencyTurn }) {
+  const toolCount = turn.toolCalls.reduce((sum, call) => sum + (call.count ?? 1), 0)
+  return (
+    <div className="grid grid-cols-[72px_76px_1fr_64px_64px_72px] items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-300 max-md:grid-cols-[68px_1fr_62px]">
+      <span className="font-mono text-zinc-500">{turnTimeLabel(turn.startedAt)}</span>
+      <span className="truncate text-zinc-400 max-md:hidden">{turn.agentId ?? '-'}</span>
+      <span className="min-w-0 truncate" title={turn.rootCause}>
+        <span className={`mr-1 rounded border px-1.5 py-0.5 ${latencyStatusClass(turn.status)}`}>{latencyStatusLabel(turn.status)}</span>
+        {rootCauseLabel(turn.rootCause)}
+      </span>
+      <span className={msColor(turn.ackMs, 1000, 1500)}>ack {msText(turn.ackMs)}</span>
+      <span className={`max-md:hidden ${msColor(turn.modelMs, 6000, 9000)}`}>model {msText(turn.modelMs)}</span>
+      <span className={msColor(turn.finalMs, turn.mediaCount ? 25000 : 8000, turn.mediaCount ? 30000 : 10000)}>
+        final {msText(turn.finalMs)}
+      </span>
+      {toolCount > 0 && <span className="col-span-full text-[11px] text-purple-300">tool calls: {toolCount}</span>}
+    </div>
+  )
+}
+
+function LatencyPanel({ data }: { data?: MonitorLatencyData }) {
+  const summary = data?.summary
+  const turns = data?.turns ?? []
+  const slowest = data?.slowest ?? []
+  const latestProblem = turns.find(t => t.status === 'stuck' || t.status === 'slow' || t.status === 'warn')
+  const pendingCount = summary?.byStatus?.pending ?? 0
+  const stuckCount = summary?.byStatus?.stuck ?? 0
+  const slowCount = summary?.byStatus?.slow ?? 0
+  const warnCount = summary?.byStatus?.warn ?? 0
+  const rootCauseCounts = turns.reduce<Record<string, number>>((acc, turn) => {
+    const key = turn.rootCause || 'unknown'
+    acc[key] = (acc[key] ?? 0) + 1
+    return acc
+  }, {})
+  const topRootCauses = Object.entries(rootCauseCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+  const ackOk = summary?.slo?.ackP95Ok
+  const finalOk = summary?.slo?.finalTextP95Ok
+  const panelTone = stuckCount > 0 || warnCount > 0
+    ? 'border-red-900/60 bg-red-950/20'
+    : slowCount > 0 || pendingCount > 0
+      ? 'border-amber-900/60 bg-amber-950/20'
+      : 'border-zinc-800 bg-zinc-950'
+
+  return (
+    <section className={`shrink-0 rounded-lg border px-3 py-3 ${panelTone}`}>
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-[190px] flex-1">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-zinc-300" aria-hidden="true" />
+            <p className="text-sm font-semibold text-zinc-100">Telegram latency</p>
+          </div>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            {data?.windowMinutes ?? 60} min · {summary?.count ?? 0} turns · generated {data?.generatedAt ? turnTimeLabel(data.generatedAt) : '-'}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className={`rounded border px-2 py-1 text-[11px] ${ackOk === false ? latencyStatusClass('slow') : ackOk === true ? latencyStatusClass('ok') : 'border-zinc-800 bg-zinc-900 text-zinc-400'}`}>
+              ack SLO {ackOk === null || ackOk === undefined ? '-' : ackOk ? 'ผ่าน' : 'ไม่ผ่าน'}
+            </span>
+            <span className={`rounded border px-2 py-1 text-[11px] ${finalOk === false ? latencyStatusClass('slow') : finalOk === true ? latencyStatusClass('ok') : 'border-zinc-800 bg-zinc-900 text-zinc-400'}`}>
+              final SLO {finalOk === null || finalOk === undefined ? '-' : finalOk ? 'ผ่าน' : 'ไม่ผ่าน'}
+            </span>
+          </div>
+        </div>
+        <div className="grid flex-[2] grid-cols-2 gap-2 min-[920px]:grid-cols-4">
+          <MetricCard label="ack p95" value={msText(summary?.ackP95Ms)} tone={msColor(summary?.ackP95Ms, 1000, 1500)} sub={`p50 ${msText(summary?.ackP50Ms)}`} />
+          <MetricCard label="final p95" value={msText(summary?.finalP95Ms)} tone={msColor(summary?.finalP95Ms, 8000, 10000)} sub={`p50 ${msText(summary?.finalP50Ms)}`} />
+          <MetricCard label="slow / stuck" value={`${slowCount + stuckCount}`} tone={stuckCount > 0 ? 'text-red-400' : slowCount > 0 ? 'text-yellow-400' : 'text-green-400'} sub={`pending ${pendingCount}`} />
+          <MetricCard label="root cause" value={latestProblem ? rootCauseLabel(latestProblem.rootCause) : 'clear'} tone={latestProblem ? 'text-amber-300' : 'text-green-400'} sub={latestProblem?.agentId ?? 'no active issue'} />
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 min-[1040px]:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+        <div className="min-w-0">
+          <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
+            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Slowest turns</span>
+          </div>
+          <div className="space-y-1.5">
+            {slowest.length > 0 ? slowest.slice(0, 4).map(turn => (
+              <LatencyTurnRow key={turn.turnId} turn={turn} />
+            )) : (
+              <div className="flex min-h-[44px] items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 text-[11px] text-zinc-500">
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-400" aria-hidden="true" />
+                ยังไม่มี final turn ที่ช้าในช่วงเวลานี้
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="min-w-0">
+          <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
+            <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Root causes</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {topRootCauses.length > 0 ? topRootCauses.map(([cause, count]) => (
+              <span key={cause} className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300">
+                {rootCauseLabel(cause)} <span className="text-zinc-500">×{count}</span>
+              </span>
+            )) : (
+              <span className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-500">ยังไม่มี telemetry</span>
+            )}
+          </div>
+
+          {(data?.warnings?.length ?? 0) > 0 && (
+            <div className="mt-2 space-y-1">
+              {data?.warnings?.slice(0, 3).map((warning, index) => (
+                <div key={`${warning.type}-${index}`} className="flex items-start gap-1.5 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 break-words">{warning.summary}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {latestProblem && (
+            <div className="mt-2 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-100">
+              <span className="font-semibold">ล่าสุด:</span> {latencyStatusLabel(latestProblem.status)} · {latestProblem.agentId ?? '-'} · {rootCauseLabel(latestProblem.rootCause)} · final {msText(latestProblem.finalMs)}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function NoiseToggle({ hiddenCount, checked, onChange }: { hiddenCount: number; checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
+      Show noise
+      {hiddenCount > 0 && (
+        <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-500">
+          {hiddenCount} hidden
+        </span>
+      )}
+    </label>
+  )
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function MonitorPage() {
   const [paused, setPaused] = useState(false)
@@ -174,6 +400,7 @@ export default function MonitorPage() {
   const [stateFilter, setStateFilter] = useState('ALL')
   const [channelFilter, setChannelFilter] = useState<'ALL' | 'line' | 'telegram' | 'webchat'>('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
+  const [showNoise, setShowNoise] = useState(false)
   const [expandedIdxSet, setExpandedIdxSet] = useState<Set<number>>(new Set())
   const [expandAll, setExpandAll] = useState(false)
   const [replayOpen, setReplayOpen] = useState(false)
@@ -187,6 +414,11 @@ export default function MonitorPage() {
     queryKey: ['monitor'],
     queryFn: getMonitorEvents,
     refetchInterval,
+  })
+  const { data: latencyData } = useQuery({
+    queryKey: ['monitor-latency', 'telegram', 60],
+    queryFn: () => getMonitorLatency({ minutes: 60, channel: 'telegram' }),
+    refetchInterval: paused ? false : 15000,
   })
 
   useEffect(() => {
@@ -245,7 +477,7 @@ export default function MonitorPage() {
   }
 
   const q = search.toLowerCase()
-  const filtered = events.filter(e => {
+  const filteredWithNoise = events.filter(e => {
     // ข้อ 1: channel filter
     if (channelFilter !== 'ALL' && e.channel !== channelFilter) return false
     if (stateFilter !== 'ALL') {
@@ -258,6 +490,8 @@ export default function MonitorPage() {
     if (q) return e.text.toLowerCase().includes(q) || e.agentId.includes(q) || e.user.includes(q)
     return true
   })
+  const hiddenNoiseCount = filteredWithNoise.filter(isNoiseEvent).length
+  const filtered = showNoise ? filteredWithNoise : filteredWithNoise.filter(e => !isNoiseEvent(e))
 
   function handleToggleExpandAll() {
     if (expandAll) {
@@ -307,9 +541,12 @@ export default function MonitorPage() {
           ● {paused ? 'Paused' : 'Live'}
         </span>
         <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
+          {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
           {paused ? 'Resume' : 'Pause'}
         </Button>
       </div>
+
+      <LatencyPanel data={latencyData} />
 
       {/* ── Row 2: Session dropdown + filters + search + autoscroll ──────── */}
       <div className="shrink-0 flex items-center gap-2 flex-wrap">
@@ -405,6 +642,7 @@ export default function MonitorPage() {
           <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
           Auto scroll
         </label>
+        <NoiseToggle hiddenCount={hiddenNoiseCount} checked={showNoise} onChange={setShowNoise} />
         {!replayOpen && filtered.length > 0 && (
           <Button size="sm" variant="outline" className="h-8 text-xs px-2.5" onClick={handleToggleExpandAll}>
             {expandAll ? '▲ Collapse All' : '▼ Expand All'}

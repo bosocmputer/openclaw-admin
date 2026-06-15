@@ -574,6 +574,44 @@ export async function getMonitorEvents(): Promise<MonitorData> {
   return data
 }
 
+export interface MonitorLatencyTurn {
+  turnId: string
+  agentId?: string
+  channel: 'telegram'
+  startedAt?: string
+  chatIdRedacted?: string
+  mediaCount?: number
+  ackMs: number | null
+  contextMs: number | null
+  modelMs: number | null
+  finalMs: number | null
+  status: 'ok' | 'slow' | 'pending' | 'stuck' | 'warn' | 'suppressed'
+  rootCause: string
+  toolCalls: { count?: number | null; elapsedMs?: number | null }[]
+}
+
+export interface MonitorLatencyData {
+  generatedAt: string
+  windowMinutes: number
+  summary: {
+    count: number
+    ackP50Ms: number | null
+    ackP95Ms: number | null
+    finalP50Ms: number | null
+    finalP95Ms: number | null
+    byStatus: Record<string, number>
+    slo: { ackP95Ok: boolean | null; finalTextP95Ok: boolean | null }
+  }
+  turns: MonitorLatencyTurn[]
+  slowest: MonitorLatencyTurn[]
+  warnings: { type: string; summary: string }[]
+}
+
+export async function getMonitorLatency(params: { minutes?: number; agent?: string; channel?: 'telegram' } = {}): Promise<MonitorLatencyData> {
+  const { data } = await api.get('/api/monitor/latency', { params })
+  return data
+}
+
 // ─── Session Replay ────────────────────────────────────────────────────────────
 
 export interface SessionReplayToolCall {
@@ -677,6 +715,14 @@ export interface SupportBundle {
   generatedAt: string
   durationMs: number
   health: SystemHealth
+  releaseState?: {
+    generatedAt: string
+    metadataPath: string
+    config?: { path: string; sha256?: string | null }
+    distFiles?: { name: string; path: string; size?: number; mtime?: string; sha256?: string | null; missing?: boolean }[]
+  }
+  latencySummary?: MonitorLatencyData['summary']
+  recentSlowTurns?: MonitorLatencyTurn[]
   recentToolLoopWarnings?: {
     agentId: string
     sessionKey: string
