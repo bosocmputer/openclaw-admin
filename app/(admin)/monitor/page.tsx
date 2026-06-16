@@ -1,138 +1,46 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, CheckCircle2, Clock3, Pause, Play, ShieldAlert } from 'lucide-react'
-import { getMonitorEvents, getMonitorLatency, getSessionReplay, type MonitorData, type MonitorEvent, type MonitorLatencyData, type MonitorLatencyTurn } from '@/lib/api'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
+import {
+  Activity,
+  AlertTriangle,
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Gauge,
+  MessageSquare,
+  Pause,
+  Play,
+  Search,
+  ShieldAlert,
+  Wrench,
+} from 'lucide-react'
+import {
+  getMonitorConversations,
+  getMonitorLatency,
+  getSessionReplay,
+  type MonitorConversationTurn,
+  type MonitorLatencyData,
+} from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
-// ─── Time helpers ──────────────────────────────────────────────────────────────
-function tsToThai(ts: string): string {
-  if (!ts) return ''
-  const parts = ts.split(':')
-  if (parts.length < 3) return ts
-  let h = parseInt(parts[0]) + 7
-  const m = parts[1]
-  const s = parts[2].slice(0, 2)
-  if (h >= 24) h -= 24
-  return `${String(h).padStart(2, '0')}:${m}:${s}`
-}
-
-function tsToSec(ts: string): number {
-  const p = ts.split(':')
-  if (p.length < 3) return 0
-  return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60 + parseFloat(p[2])
-}
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
-interface FlatEvent {
-  ts: string
-  tsThai: string
-  type: string
-  text: string
-  agentId: string
-  channel: 'webchat' | 'telegram' | 'line'
-  user: string
-  sessionKey: string
-  isLive: boolean
-  responseDuration?: number
-  latency?: number
-  inputTokens?: number
-  outputTokens?: number
-  cost?: number
-  toolName?: string
-  toolResult?: string
-  turnTotalCost?: number  // ยอดรวม cost ทั้ง turn (message → reply)
-}
-
-interface SessionGroup {
-  sessionKey: string
-  agentId: string
-  channel: 'webchat' | 'telegram' | 'line'
-  user: string
-  state: string
-  lastMessageAt: string | null
-  elapsed: number
-  sessionCost: number
-  events: FlatEvent[]
-}
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
-function stateInfo(state: string) {
-  switch (state) {
-    case 'thinking':  return { label: 'กำลังคิด',   dot: 'bg-yellow-400', cls: 'text-yellow-400' }
-    case 'tool_call': return { label: 'ค้นข้อมูล', dot: 'bg-purple-400', cls: 'text-purple-400' }
-    case 'replied':   return { label: 'ตอบแล้ว',   dot: 'bg-green-400',  cls: 'text-green-400'  }
-    case 'error':     return { label: 'Error',      dot: 'bg-red-400',    cls: 'text-red-400'    }
-    default:          return { label: 'รอ',         dot: 'bg-zinc-600',   cls: 'text-zinc-500'   }
-  }
-}
-
-function durationColor(sec: number) {
-  if (sec < 5) return 'text-green-400'
-  if (sec < 15) return 'text-yellow-400'
-  return 'text-red-400'
-}
+type ChannelFilter = 'ALL' | 'telegram' | 'line' | 'webchat'
+type RouteFilter = 'ALL' | 'tool_path' | 'model_path' | 'capability_denied' | 'native'
 
 function msText(ms: number | null | undefined) {
   if (ms == null) return '-'
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
 }
 
-function msColor(ms: number | null | undefined, warnAt: number, failAt: number) {
-  if (ms == null) return 'text-zinc-500'
-  if (ms <= warnAt) return 'text-green-400'
-  if (ms <= failAt) return 'text-yellow-400'
-  return 'text-red-400'
-}
-
-function latencyStatusClass(status: string) {
-  switch (status) {
-    case 'ok': return 'text-green-400 border-green-500/30 bg-green-500/10'
-    case 'slow': return 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'
-    case 'stuck': return 'text-red-400 border-red-500/30 bg-red-500/10'
-    case 'warn': return 'text-amber-400 border-amber-500/30 bg-amber-500/10'
-    case 'suppressed': return 'text-zinc-300 border-zinc-600 bg-zinc-800'
-    default: return 'text-zinc-400 border-zinc-700 bg-zinc-900'
-  }
-}
-
-function latencyStatusLabel(status: string) {
-  switch (status) {
-    case 'ok': return 'ok'
-    case 'slow': return 'slow'
-    case 'stuck': return 'stuck'
-    case 'pending': return 'pending'
-    case 'warn': return 'warn'
-    case 'suppressed': return 'suppressed'
-    default: return status || '-'
-  }
-}
-
-function rootCauseLabel(rootCause?: string) {
-  switch (rootCause) {
-    case 'completed': return 'ตอบสำเร็จ'
-    case 'model_latency': return 'model ช้า'
-    case 'model_pending': return 'model ยังไม่จบ'
-    case 'model_running': return 'model กำลังทำงาน'
-    case 'tool_or_mcp_latency': return 'tool หรือ MCP ช้า'
-    case 'tool_or_mcp_pending': return 'tool หรือ MCP ค้าง'
-    case 'queue_or_context_pending': return 'คิวหรือ context ค้าง'
-    case 'ack_failed': return 'ack ส่งไม่สำเร็จ'
-    case 'stale_reply_suppressed': return 'ตัด reply เก่า'
-    case 'stock_price_denial': return 'deny ราคา stock'
-    case 'native_command': return 'native command'
-    case 'queue_coalesced': return 'รวมข้อความซ้ำ'
-    default: return rootCause || '-'
-  }
-}
-
-function turnTimeLabel(startedAt?: string) {
-  if (!startedAt) return '-'
-  const date = new Date(startedAt)
-  if (Number.isNaN(date.getTime())) return startedAt
+function turnTimeLabel(value?: string) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
   return date.toLocaleTimeString('th-TH', {
     timeZone: 'Asia/Bangkok',
     hour: '2-digit',
@@ -142,107 +50,68 @@ function turnTimeLabel(startedAt?: string) {
   })
 }
 
-function isNoiseEvent(e: FlatEvent) {
-  const text = `${e.type} ${e.text} ${e.toolName ?? ''}`.toLowerCase()
-  return text.includes('delivery-mirror') ||
-    text.includes('tool-policy removed') ||
-    text.includes('allowlist contains unknown entries')
-}
-
-function typeBadge(type: string) {
-  switch (type) {
-    case 'message':  return { icon: '📩', cls: 'text-zinc-400' }
-    case 'thinking': return { icon: '💭', cls: 'text-yellow-500' }
-    case 'tool':     return { icon: '🔧', cls: 'text-purple-400' }
-    case 'reply':    return { icon: '✅', cls: 'text-green-400' }
-    case 'warning':  return { icon: '⚠', cls: 'text-amber-400' }
-    case 'error':    return { icon: '❌', cls: 'text-red-400' }
-    default:         return { icon: '·',  cls: 'text-zinc-600' }
+function routeLabel(route: string) {
+  switch (route) {
+    case 'tool_path': return 'Tool path'
+    case 'model_path': return 'Model path'
+    case 'capability_denied': return 'Denied'
+    case 'native': return 'Native'
+    case 'quality_fallback': return 'Quality fallback'
+    default: return route || '-'
   }
 }
 
-const AGENT_COLORS = ['text-blue-400', 'text-emerald-400', 'text-orange-400', 'text-pink-400', 'text-cyan-400', 'text-violet-400']
-const agentColorMap: Record<string, string> = {}
-let agentColorIdx = 0
-function agentColor(id: string) {
-  if (!agentColorMap[id]) { agentColorMap[id] = AGENT_COLORS[agentColorIdx++ % AGENT_COLORS.length] }
-  return agentColorMap[id]
-}
-
-// ─── Data transform ────────────────────────────────────────────────────────────
-function buildGroups(data: MonitorData): SessionGroup[] {
-  const groups: SessionGroup[] = []
-
-  for (const agent of data.agents) {
-    const channels: Array<{ ch: 'webchat' | 'telegram' | 'line'; sessions: NonNullable<typeof agent.channels.webchat> }> = [
-      { ch: 'webchat',  sessions: agent.channels.webchat  ?? [] },
-      { ch: 'telegram', sessions: agent.channels.telegram ?? [] },
-      { ch: 'line',     sessions: agent.channels.line     ?? [] },
-    ]
-    for (const { ch, sessions } of channels) {
-      for (const session of sessions) {
-        const isActive = session.state === 'thinking' || session.state === 'tool_call'
-        let lastMsgTs: string | null = null
-        const events: FlatEvent[] = []
-
-        const evList = session.events as MonitorEvent[]
-        let turnCost = 0
-        for (let i = 0; i < evList.length; i++) {
-          const e = evList[i]
-          const isLast = i === evList.length - 1
-          let responseDuration: number | undefined
-
-          if (e.type === 'message') {
-            lastMsgTs = e.ts
-            turnCost = 0
-          } else if (e.type === 'reply' && lastMsgTs) {
-            const diff = tsToSec(e.ts) - tsToSec(lastMsgTs)
-            const real = diff < 0 ? diff + 86400 : diff
-            if (real >= 0 && real < 3600) responseDuration = real
-            lastMsgTs = null
-          }
-
-          // สะสม cost ทุก LLM call ในรอบนี้ (thinking + reply)
-          if ((e.type === 'thinking' || e.type === 'reply') && e.cost) {
-            turnCost += e.cost
-          }
-
-          events.push({
-            ts: e.ts, tsThai: tsToThai(e.ts), type: e.type, text: e.text,
-            agentId: agent.id, channel: ch, user: session.user,
-            sessionKey: session.sessionKey, isLive: isActive && isLast, responseDuration,
-            latency: (e as MonitorEvent).latency,
-            inputTokens: (e as MonitorEvent).inputTokens,
-            outputTokens: (e as MonitorEvent).outputTokens,
-            cost: (e as MonitorEvent).cost,
-            toolName: (e as MonitorEvent).toolName,
-            toolResult: (e as MonitorEvent).toolResult,
-            turnTotalCost: e.type === 'reply' && turnCost > 0 ? turnCost : undefined,
-          })
-        }
-
-        groups.push({
-          sessionKey: session.sessionKey, agentId: agent.id, channel: ch,
-          user: session.user, state: session.state,
-          lastMessageAt: session.lastMessageAt, elapsed: session.elapsed ?? 0,
-          sessionCost: session.cost ?? 0,
-          events,
-        })
-      }
-    }
+function routeClass(route: string) {
+  switch (route) {
+    case 'tool_path': return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+    case 'model_path': return 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+    case 'capability_denied': return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+    case 'native': return 'border-zinc-600 bg-zinc-800 text-zinc-200'
+    case 'quality_fallback': return 'border-purple-500/30 bg-purple-500/10 text-purple-300'
+    default: return 'border-zinc-700 bg-zinc-900 text-zinc-300'
   }
-
-  return groups.sort((a, b) => {
-    const o = (s: string) => (s === 'thinking' || s === 'tool_call' ? 0 : s === 'replied' ? 1 : s === 'error' ? 2 : 3)
-    const d = o(a.state) - o(b.state)
-    if (d !== 0) return d
-    return (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')
-  })
 }
 
-function MetricCard({ label, value, tone, sub }: { label: string; value: string; tone: string; sub?: string }) {
+function statusClass(status: string) {
+  switch (status) {
+    case 'ok': return 'text-emerald-300'
+    case 'pending': return 'text-yellow-300'
+    case 'warn': return 'text-amber-300'
+    case 'error': return 'text-red-300'
+    default: return 'text-zinc-400'
+  }
+}
+
+function durationClass(ms: number | null | undefined) {
+  if (ms == null) return 'text-zinc-500'
+  if (ms <= 5000) return 'text-emerald-300'
+  if (ms <= 10000) return 'text-yellow-300'
+  return 'text-red-300'
+}
+
+function compactText(value: string, fallback: string) {
+  const text = value.replace(/\s+/g, ' ').trim()
+  return text || fallback
+}
+
+function turnMatchesQuery(turn: MonitorConversationTurn, query: string) {
+  if (!query) return true
+  const q = query.toLowerCase()
+  return [
+    turn.agentId,
+    turn.channel,
+    turn.user,
+    turn.intent,
+    turn.route,
+    turn.userText,
+    turn.finalText,
+    ...turn.toolPath.map(tool => `${tool.name} ${tool.resultSummary ?? ''}`),
+  ].filter(Boolean).some(value => String(value).toLowerCase().includes(q))
+}
+
+function SummaryCard({ label, value, sub, tone = 'text-zinc-100' }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
-    <div className="min-h-[68px] rounded-md border border-zinc-800 bg-zinc-900/70 px-3 py-2">
+    <div className="min-h-[72px] rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
       <p className="text-[11px] text-zinc-500">{label}</p>
       <p className={`mt-1 text-lg font-semibold leading-none ${tone}`}>{value}</p>
       {sub && <p className="mt-1 truncate text-[11px] text-zinc-500">{sub}</p>}
@@ -250,591 +119,414 @@ function MetricCard({ label, value, tone, sub }: { label: string; value: string;
   )
 }
 
-function LatencyTurnRow({ turn }: { turn: MonitorLatencyTurn }) {
-  const toolCount = turn.toolCalls.reduce((sum, call) => sum + (call.count ?? 1), 0)
+function ConversationTurnCard({
+  turn,
+  expanded,
+  onToggle,
+  onReplay,
+}: {
+  turn: MonitorConversationTurn
+  expanded: boolean
+  onToggle: () => void
+  onReplay: () => void
+}) {
+  const hasTools = turn.toolPath.length > 0
+  const hasWarnings = turn.warnings.length > 0
+  const canReplay = turn.source === 'session' && Boolean(turn.sessionKey && turn.agentId)
+  const userText = compactText(turn.userText, '(no user text captured)')
+  const finalText = compactText(turn.finalText, turn.status === 'pending' ? 'ยังไม่มีคำตอบสุดท้าย' : '(no final reply captured)')
+
   return (
-    <div className="grid grid-cols-[72px_76px_1fr_64px_64px_72px] items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-300 max-md:grid-cols-[68px_1fr_62px]">
-      <span className="font-mono text-zinc-500">{turnTimeLabel(turn.startedAt)}</span>
-      <span className="truncate text-zinc-400 max-md:hidden">{turn.agentId ?? '-'}</span>
-      <span className="min-w-0 truncate" title={turn.rootCause}>
-        <span className={`mr-1 rounded border px-1.5 py-0.5 ${latencyStatusClass(turn.status)}`}>{latencyStatusLabel(turn.status)}</span>
-        {rootCauseLabel(turn.rootCause)}
-      </span>
-      <span className={msColor(turn.ackMs, 1000, 1500)}>ack {msText(turn.ackMs)}</span>
-      <span className={`max-md:hidden ${msColor(turn.modelMs, 6000, 9000)}`}>model {msText(turn.modelMs)}</span>
-      <span className={msColor(turn.finalMs, turn.mediaCount ? 25000 : 8000, turn.mediaCount ? 30000 : 10000)}>
-        final {msText(turn.finalMs)}
-      </span>
-      {toolCount > 0 && <span className="col-span-full text-[11px] text-purple-300">tool calls: {toolCount}</span>}
-    </div>
+    <article className="rounded-md border border-zinc-800 bg-zinc-950">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-zinc-900/60"
+      >
+        <span className="mt-0.5 text-zinc-500">
+          {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs text-zinc-500">{turnTimeLabel(turn.startedAt)}</span>
+            <span className={`rounded border px-2 py-0.5 text-[11px] ${routeClass(turn.route)}`}>{routeLabel(turn.route)}</span>
+            <span className={`text-xs font-medium ${statusClass(turn.status)}`}>{turn.status}</span>
+            <span className={`text-xs ${durationClass(turn.durationMs)}`}>{msText(turn.durationMs)}</span>
+            {hasTools && (
+              <span className="inline-flex items-center gap-1 rounded border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[11px] text-purple-200">
+                <Wrench className="h-3 w-3" aria-hidden="true" />
+                {turn.toolPath.map(tool => tool.name).join(' -> ')}
+              </span>
+            )}
+            {hasWarnings && (
+              <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                {turn.warnings.length} warning
+              </span>
+            )}
+          </div>
+          <div className="mt-2 grid gap-2 min-[980px]:grid-cols-2">
+            <div className="min-w-0 rounded-md bg-zinc-900/70 px-3 py-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] text-zinc-500">
+                <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+                User
+              </div>
+              <p className="break-words text-sm leading-relaxed text-zinc-100">{userText}</p>
+            </div>
+            <div className="min-w-0 rounded-md bg-zinc-900/70 px-3 py-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] text-zinc-500">
+                <Bot className="h-3.5 w-3.5" aria-hidden="true" />
+                Agent
+              </div>
+              <p className="break-words text-sm leading-relaxed text-zinc-200">{finalText}</p>
+            </div>
+          </div>
+        </div>
+        <div className="hidden min-w-[120px] text-right text-xs text-zinc-500 min-[760px]:block">
+          <div>{turn.agentId ?? '-'}</div>
+          <div>{turn.channel}</div>
+          <div className="truncate">{turn.user}</div>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-zinc-800 px-3 py-3">
+          <div className="grid gap-3 min-[900px]:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="min-w-0 space-y-3">
+              <div>
+                <h3 className="mb-1 text-xs font-semibold text-zinc-300">Decision trace</h3>
+                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                  <span className="rounded border border-zinc-800 px-2 py-1 text-zinc-300">intent: {turn.intent || 'unknown'}</span>
+                  <span className="rounded border border-zinc-800 px-2 py-1 text-zinc-300">route: {routeLabel(turn.route)}</span>
+                  <span className="rounded border border-zinc-800 px-2 py-1 text-zinc-300">source: {turn.source}</span>
+                  {turn.rootCause && <span className="rounded border border-zinc-800 px-2 py-1 text-zinc-300">cause: {turn.rootCause}</span>}
+                </div>
+              </div>
+
+              {hasTools && (
+                <div>
+                  <h3 className="mb-1 text-xs font-semibold text-zinc-300">Tools</h3>
+                  <div className="space-y-2">
+                    {turn.toolPath.map((tool, index) => (
+                      <div key={`${tool.name}-${index}`} className="rounded-md border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-medium text-purple-200">{tool.name}</span>
+                          <span className="text-zinc-500">{tool.status ?? 'ok'}</span>
+                          {tool.durationMs != null && <span className={durationClass(tool.durationMs)}>{msText(tool.durationMs)}</span>}
+                        </div>
+                        {tool.argsPreview && <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-black/30 p-2 text-[11px] text-zinc-300">{tool.argsPreview}</pre>}
+                        {tool.resultSummary && <p className="mt-2 break-words text-xs leading-relaxed text-zinc-400">{tool.resultSummary}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {hasWarnings && (
+                <div>
+                  <h3 className="mb-1 text-xs font-semibold text-amber-200">Warnings</h3>
+                  <div className="space-y-1">
+                    {turn.warnings.map((warning, index) => (
+                      <div key={`${warning.type}-${index}`} className="rounded-md border border-amber-700/50 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-100">
+                        {warning.summary}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 rounded-md border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
+              <div className="flex items-center justify-between gap-2">
+                <span>Agent</span>
+                <span className="truncate text-zinc-200">{turn.agentId ?? '-'}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>Channel</span>
+                <span className="text-zinc-200">{turn.channel}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>Duration</span>
+                <span className={durationClass(turn.durationMs)}>{msText(turn.durationMs)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>Model</span>
+                <span className="text-zinc-200">{msText(turn.modelMs)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>Ack</span>
+                <span className="text-zinc-200">{msText(turn.ackMs)}</span>
+              </div>
+              {canReplay && (
+                <Button size="sm" variant="outline" className="mt-2 w-full" onClick={onReplay}>
+                  Open session replay
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </article>
   )
 }
 
-function LatencyPanel({ data }: { data?: MonitorLatencyData }) {
+function LatencyDiagnostics({ data }: { data?: MonitorLatencyData }) {
   const summary = data?.summary
-  const turns = data?.turns ?? []
   const slowest = data?.slowest ?? []
-  const latestProblem = turns.find(t => t.status === 'stuck' || t.status === 'slow' || t.status === 'warn')
-  const pendingCount = summary?.byStatus?.pending ?? 0
-  const stuckCount = summary?.byStatus?.stuck ?? 0
-  const slowCount = summary?.byStatus?.slow ?? 0
-  const warnCount = summary?.byStatus?.warn ?? 0
-  const rootCauseCounts = turns.reduce<Record<string, number>>((acc, turn) => {
-    const key = turn.rootCause || 'unknown'
-    acc[key] = (acc[key] ?? 0) + 1
-    return acc
-  }, {})
-  const topRootCauses = Object.entries(rootCauseCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-  const ackOk = summary?.slo?.ackP95Ok
-  const finalOk = summary?.slo?.finalTextP95Ok
-  const panelTone = stuckCount > 0 || warnCount > 0
-    ? 'border-red-900/60 bg-red-950/20'
-    : slowCount > 0 || pendingCount > 0
-      ? 'border-amber-900/60 bg-amber-950/20'
-      : 'border-zinc-800 bg-zinc-950'
-
   return (
-    <section className={`shrink-0 rounded-lg border px-3 py-3 ${panelTone}`}>
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-[190px] flex-1">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-zinc-300" aria-hidden="true" />
-            <p className="text-sm font-semibold text-zinc-100">Telegram latency</p>
-          </div>
-          <p className="mt-1 text-[11px] text-zinc-500">
-            {data?.windowMinutes ?? 60} min · {summary?.count ?? 0} turns · generated {data?.generatedAt ? turnTimeLabel(data.generatedAt) : '-'}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <span className={`rounded border px-2 py-1 text-[11px] ${ackOk === false ? latencyStatusClass('slow') : ackOk === true ? latencyStatusClass('ok') : 'border-zinc-800 bg-zinc-900 text-zinc-400'}`}>
-              ack SLO {ackOk === null || ackOk === undefined ? '-' : ackOk ? 'ผ่าน' : 'ไม่ผ่าน'}
-            </span>
-            <span className={`rounded border px-2 py-1 text-[11px] ${finalOk === false ? latencyStatusClass('slow') : finalOk === true ? latencyStatusClass('ok') : 'border-zinc-800 bg-zinc-900 text-zinc-400'}`}>
-              final SLO {finalOk === null || finalOk === undefined ? '-' : finalOk ? 'ผ่าน' : 'ไม่ผ่าน'}
-            </span>
-          </div>
-        </div>
-        <div className="grid flex-[2] grid-cols-2 gap-2 min-[920px]:grid-cols-4">
-          <MetricCard label="ack p95" value={msText(summary?.ackP95Ms)} tone={msColor(summary?.ackP95Ms, 1000, 1500)} sub={`p50 ${msText(summary?.ackP50Ms)}`} />
-          <MetricCard label="final p95" value={msText(summary?.finalP95Ms)} tone={msColor(summary?.finalP95Ms, 8000, 10000)} sub={`p50 ${msText(summary?.finalP50Ms)}`} />
-          <MetricCard label="slow / stuck" value={`${slowCount + stuckCount}`} tone={stuckCount > 0 ? 'text-red-400' : slowCount > 0 ? 'text-yellow-400' : 'text-green-400'} sub={`pending ${pendingCount}`} />
-          <MetricCard label="root cause" value={latestProblem ? rootCauseLabel(latestProblem.rootCause) : 'clear'} tone={latestProblem ? 'text-amber-300' : 'text-green-400'} sub={latestProblem?.agentId ?? 'no active issue'} />
-        </div>
+    <section className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Gauge className="h-4 w-4 text-zinc-300" aria-hidden="true" />
+        <h2 className="text-sm font-semibold text-zinc-100">Telegram diagnostics</h2>
+        <span className="text-xs text-zinc-500">{data?.windowMinutes ?? 60} min</span>
       </div>
-
-      <div className="mt-3 grid gap-3 min-[1040px]:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
-        <div className="min-w-0">
-          <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
-            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Slowest turns</span>
-          </div>
-          <div className="space-y-1.5">
-            {slowest.length > 0 ? slowest.slice(0, 4).map(turn => (
-              <LatencyTurnRow key={turn.turnId} turn={turn} />
-            )) : (
-              <div className="flex min-h-[44px] items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 text-[11px] text-zinc-500">
-                <CheckCircle2 className="h-3.5 w-3.5 text-green-400" aria-hidden="true" />
-                ยังไม่มี final turn ที่ช้าในช่วงเวลานี้
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="min-w-0">
-          <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
-            <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Root causes</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {topRootCauses.length > 0 ? topRootCauses.map(([cause, count]) => (
-              <span key={cause} className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300">
-                {rootCauseLabel(cause)} <span className="text-zinc-500">×{count}</span>
-              </span>
-            )) : (
-              <span className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-500">ยังไม่มี telemetry</span>
-            )}
-          </div>
-
-          {(data?.warnings?.length ?? 0) > 0 && (
-            <div className="mt-2 space-y-1">
-              {data?.warnings?.slice(0, 3).map((warning, index) => (
-                <div key={`${warning.type}-${index}`} className="flex items-start gap-1.5 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="min-w-0 break-words">{warning.summary}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {latestProblem && (
-            <div className="mt-2 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-100">
-              <span className="font-semibold">ล่าสุด:</span> {latencyStatusLabel(latestProblem.status)} · {latestProblem.agentId ?? '-'} · {rootCauseLabel(latestProblem.rootCause)} · final {msText(latestProblem.finalMs)}
-            </div>
-          )}
-        </div>
+      <div className="mt-3 grid gap-2 min-[760px]:grid-cols-4">
+        <SummaryCard label="ack p95" value={msText(summary?.ackP95Ms)} sub={`p50 ${msText(summary?.ackP50Ms)}`} tone={durationClass(summary?.ackP95Ms)} />
+        <SummaryCard label="final p95" value={msText(summary?.finalP95Ms)} sub={`p50 ${msText(summary?.finalP50Ms)}`} tone={durationClass(summary?.finalP95Ms)} />
+        <SummaryCard label="turns" value={String(summary?.count ?? 0)} sub="telemetry window" />
+        <SummaryCard label="slowest" value={slowest[0] ? msText(slowest[0].finalMs) : '-'} sub={slowest[0]?.rootCause ?? 'no slow final'} />
       </div>
+      {slowest.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {slowest.slice(0, 5).map(turn => (
+            <div key={turn.turnId} className="grid grid-cols-[80px_1fr_80px] gap-2 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-xs text-zinc-300">
+              <span className="font-mono text-zinc-500">{turnTimeLabel(turn.startedAt)}</span>
+              <span className="truncate">{turn.agentId ?? '-'} · {turn.rootCause}</span>
+              <span className={durationClass(turn.finalMs)}>{msText(turn.finalMs)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
 
-function NoiseToggle({ hiddenCount, checked, onChange }: { hiddenCount: number; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
-      Show noise
-      {hiddenCount > 0 && (
-        <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-500">
-          {hiddenCount} hidden
-        </span>
-      )}
-    </label>
-  )
-}
-
-// ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function MonitorPage() {
   const [paused, setPaused] = useState(false)
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [stateFilter, setStateFilter] = useState('ALL')
-  const [channelFilter, setChannelFilter] = useState<'ALL' | 'line' | 'telegram' | 'webchat'>('ALL')
-  const [autoScroll, setAutoScroll] = useState(true)
-  const [showNoise, setShowNoise] = useState(false)
-  const [expandedIdxSet, setExpandedIdxSet] = useState<Set<number>>(new Set())
-  const [expandAll, setExpandAll] = useState(false)
-  const [replayOpen, setReplayOpen] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>('ALL')
+  const [routeFilter, setRouteFilter] = useState<RouteFilter>('ALL')
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [replayTarget, setReplayTarget] = useState<{ agentId: string; sessionKey: string } | null>(null)
 
-  // ข้อ 2: adaptive refresh — เร็วขึ้นเมื่อมี active session
-  const [activeCountForRefetch, setActiveCountForRefetch] = useState(0)
-  const refetchInterval = paused ? false : activeCountForRefetch > 0 ? 1500 : 5000
-
-  const { data, dataUpdatedAt } = useQuery({
-    queryKey: ['monitor'],
-    queryFn: getMonitorEvents,
-    refetchInterval,
+  const conversationParams = useMemo(() => ({
+    minutes: 180,
+    limit: 120,
+    ...(channelFilter !== 'ALL' ? { channel: channelFilter as Exclude<ChannelFilter, 'ALL'> } : {}),
+  }), [channelFilter])
+  const {
+    data: conversationData,
+    dataUpdatedAt,
+    isLoading,
+  } = useQuery({
+    queryKey: ['monitor-conversations', conversationParams],
+    queryFn: () => getMonitorConversations(conversationParams),
+    refetchInterval: paused ? false : 3000,
   })
-  const { data: latencyData } = useQuery({
+
+  const { data: latencyData, isFetching: latencyFetching } = useQuery({
     queryKey: ['monitor-latency', 'telegram', 60],
     queryFn: () => getMonitorLatency({ minutes: 60, channel: 'telegram' }),
+    enabled: diagnosticsOpen,
     refetchInterval: paused ? false : 15000,
   })
 
-  useEffect(() => {
-    if (autoScroll && !paused) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [dataUpdatedAt, autoScroll, paused])
+  const { data: replayData, isLoading: replayLoading } = useQuery({
+    queryKey: ['session-replay', replayTarget?.agentId, replayTarget?.sessionKey],
+    queryFn: () => getSessionReplay(replayTarget!.agentId, replayTarget!.sessionKey),
+    enabled: replayTarget !== null,
+  })
 
+  const filteredTurns = useMemo(() => {
+    const turns = conversationData?.turns ?? []
+    return turns.filter(turn => {
+      if (routeFilter !== 'ALL' && turn.route !== routeFilter) return false
+      return turnMatchesQuery(turn, search.trim())
+    })
+  }, [conversationData?.turns, routeFilter, search])
+
+  const activeCount = filteredTurns.filter(turn => turn.status === 'pending').length
+  const warningCount = filteredTurns.reduce((sum, turn) => sum + turn.warnings.length, 0)
+  const toolPathCount = filteredTurns.filter(turn => turn.route === 'tool_path').length
+  const modelPathCount = filteredTurns.filter(turn => turn.route === 'model_path').length
   const updatedStr = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString('th-TH', {
-        timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        timeZone: 'Asia/Bangkok',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
       })
     : '--:--'
 
-  const groups = data ? buildGroups(data) : []
-  const stats = data?.stats
-  const activeCount = groups.filter(g => g.state === 'thinking' || g.state === 'tool_call').length
-
-  // sync activeCount → refetch interval
-  useEffect(() => {
-    setActiveCountForRefetch(activeCount)
-  }, [activeCount])
-
-  const selectedGroup = groups.find(g => g.sessionKey === selectedKey) ?? null
-  const effectiveKey = selectedGroup ? selectedKey : null
-
-  // Replay queries (need selectedGroup declared first)
-  const replayAgentId = selectedGroup?.agentId ?? null
-  const { data: replayData, isLoading: replayLoading } = useQuery({
-    queryKey: ['session-replay', replayAgentId, selectedKey],
-    queryFn: () => getSessionReplay(replayAgentId!, selectedKey!),
-    enabled: replayOpen && replayAgentId !== null && selectedKey !== null,
-  })
-
-  let longestDur = 0
-  let errorCount = 0
-  for (const g of groups) {
-    for (const e of g.events) {
-      if (e.type === 'error') errorCount++
-      if (e.type === 'reply' && e.responseDuration && e.responseDuration > longestDur) {
-        longestDur = e.responseDuration
-      }
-    }
-  }
-
-  // ─── Events to display ────────────────────────────────────────────────────
-  const isGlobal = effectiveKey === null
-  let events: FlatEvent[] = []
-
-  if (isGlobal) {
-    events = groups.flatMap(g => g.events)
-    events.sort((a, b) => a.ts.localeCompare(b.ts))
-  } else {
-    const g = groups.find(g => g.sessionKey === effectiveKey)
-    if (g) events = g.events
-  }
-
-  const q = search.toLowerCase()
-  const filteredWithNoise = events.filter(e => {
-    // ข้อ 1: channel filter
-    if (channelFilter !== 'ALL' && e.channel !== channelFilter) return false
-    if (stateFilter !== 'ALL') {
-      const typeMap: Record<string, string[]> = {
-        thinking: ['thinking'], tool: ['tool'], replied: ['reply'], error: ['error'], message: ['message'],
-        warning: ['warning'],
-      }
-      if (!(typeMap[stateFilter] ?? []).includes(e.type)) return false
-    }
-    if (q) return e.text.toLowerCase().includes(q) || e.agentId.includes(q) || e.user.includes(q)
-    return true
-  })
-  const hiddenNoiseCount = filteredWithNoise.filter(isNoiseEvent).length
-  const filtered = showNoise ? filteredWithNoise : filteredWithNoise.filter(e => !isNoiseEvent(e))
-
-  function handleToggleExpandAll() {
-    if (expandAll) {
-      setExpandedIdxSet(new Set())
-      setExpandAll(false)
-    } else {
-      setExpandedIdxSet(new Set(Array.from({ length: filtered.length }, (_, i) => i)))
-      setExpandAll(true)
-    }
-  }
-
-  function toggleRow(i: number) {
-    setExpandedIdxSet(prev => {
+  function toggleTurn(id: string) {
+    setExpandedIds(prev => {
       const next = new Set(prev)
-      if (next.has(i)) { next.delete(i) } else { next.add(i) }
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
-    setExpandAll(false)
   }
 
   return (
-    <div className="flex flex-col h-full gap-3">
-
-      {/* ── Row 1: Title + stats + live/pause ─────────────────────────────── */}
-      <div className="shrink-0 flex items-center gap-2 flex-wrap">
-        <div className="mr-1">
-          <h1 className="text-xl font-bold leading-none">Monitor</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">อัปเดต {updatedStr}</p>
+    <div className="flex h-full flex-col gap-3">
+      <div className="shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="mr-1">
+            <h1 className="text-xl font-bold leading-none">Monitor</h1>
+            <p className="mt-0.5 text-xs text-muted-foreground">Conversation feed · อัปเดต {updatedStr}</p>
+          </div>
+          <Badge variant="secondary">{conversationData?.summary.count ?? 0} turns</Badge>
+          {activeCount > 0 ? (
+            <Badge className="border-yellow-500/30 bg-yellow-500/10 text-yellow-400">{activeCount} pending</Badge>
+          ) : (
+            <Badge variant="secondary">0 pending</Badge>
+          )}
+          <Badge className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">{toolPathCount} tool path</Badge>
+          <Badge className="border-blue-500/30 bg-blue-500/10 text-blue-300">{modelPathCount} model path</Badge>
+          {warningCount > 0 && <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-300">{warningCount} warnings</Badge>}
+          <div className="flex-1" />
+          <span className={`text-xs font-medium ${paused ? 'text-muted-foreground' : 'text-emerald-400'}`}>
+            {paused ? 'Paused' : 'Live'}
+          </span>
+          <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(value => !value)}>
+            {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
+            {paused ? 'Resume' : 'Pause'}
+          </Button>
         </div>
-        {stats && (
-          <>
-            <Badge variant="secondary">{stats.totalAgents} agents</Badge>
-            {activeCount > 0
-              ? <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30 dark:text-yellow-400">⚡ {activeCount} active</Badge>
-              : <Badge variant="secondary">0 active</Badge>
-            }
-            <Badge variant="secondary">💬 {stats.todayMessages} วันนี้</Badge>
-            <Badge variant="secondary">avg {stats.avgResponseTime.toFixed(1)}s</Badge>
-            {longestDur > 0 && (
-              <Badge variant="outline" className={durationColor(longestDur)}>🐢 {longestDur.toFixed(1)}s</Badge>
-            )}
-            {errorCount > 0 && <Badge variant="destructive">{errorCount} errors</Badge>}
-          </>
-        )}
-        <div className="flex-1" />
-        <span className={`text-xs font-medium ${paused ? 'text-muted-foreground' : 'text-green-500'}`}>
-          ● {paused ? 'Paused' : 'Live'}
-        </span>
-        <Button size="sm" variant={paused ? 'default' : 'outline'} onClick={() => setPaused(v => !v)}>
-          {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
-          {paused ? 'Resume' : 'Pause'}
+
+        <div className="mt-3 grid gap-2 min-[920px]:grid-cols-4">
+          <SummaryCard label="avg duration" value={msText(conversationData?.summary.avgDurationMs)} sub="จาก conversation turns" tone={durationClass(conversationData?.summary.avgDurationMs)} />
+          <SummaryCard label="tool path" value={String(toolPathCount)} sub="direct MCP path" tone="text-emerald-300" />
+          <SummaryCard label="model path" value={String(modelPathCount)} sub="agent/model path" tone="text-blue-300" />
+          <SummaryCard label="warnings" value={String(warningCount)} sub="quality/tool/model" tone={warningCount > 0 ? 'text-amber-300' : 'text-emerald-300'} />
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+          <Input
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder="ค้นหา user, agent, intent, tool, คำถาม หรือคำตอบ"
+            className="h-9 pl-8"
+          />
+        </div>
+        <select
+          aria-label="Channel filter"
+          value={channelFilter}
+          onChange={event => setChannelFilter(event.target.value as ChannelFilter)}
+          className="h-9 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground"
+        >
+          <option value="ALL">ทุก channel</option>
+          <option value="telegram">Telegram</option>
+          <option value="line">LINE</option>
+          <option value="webchat">Webchat</option>
+        </select>
+        <select
+          aria-label="Route filter"
+          value={routeFilter}
+          onChange={event => setRouteFilter(event.target.value as RouteFilter)}
+          className="h-9 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground"
+        >
+          <option value="ALL">ทุก route</option>
+          <option value="tool_path">Tool path</option>
+          <option value="model_path">Model path</option>
+          <option value="capability_denied">Denied</option>
+          <option value="native">Native</option>
+        </select>
+        <Button
+          size="sm"
+          variant={diagnosticsOpen ? 'default' : 'outline'}
+          onClick={() => setDiagnosticsOpen(value => !value)}
+        >
+          <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+          {diagnosticsOpen ? 'Hide diagnostics' : 'Diagnostics'}
         </Button>
       </div>
 
-      <LatencyPanel data={latencyData} />
+      {diagnosticsOpen && (
+        latencyFetching && !latencyData ? (
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-500">กำลังโหลด diagnostics...</div>
+        ) : (
+          <LatencyDiagnostics data={latencyData} />
+        )
+      )}
 
-      {/* ── Row 2: Session dropdown + filters + search + autoscroll ──────── */}
-      <div className="shrink-0 flex items-center gap-2 flex-wrap">
-        {/* Session dropdown */}
-        <select
-          aria-label="เลือก session"
-          value={selectedKey ?? ''}
-          onChange={e => { setSelectedKey(e.target.value || null); setExpandedIdxSet(new Set()); setExpandAll(false); setReplayOpen(false) }}
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring min-w-0 max-w-[260px] truncate"
-        >
-          <option value="">📡 ทุก session ({groups.length})</option>
-          {groups.map(g => {
-            const st = stateInfo(g.state)
-            const ch = g.channel === 'telegram' ? 'tg' : g.channel === 'line' ? 'line' : 'web'
-            const elapsed = (g.state === 'thinking' || g.state === 'tool_call') && g.elapsed > 0 ? ` ${g.elapsed}s` : ''
-            const costStr = g.sessionCost > 0 ? ` $${g.sessionCost.toFixed(4)}` : ''
-            return (
-              <option key={g.sessionKey} value={g.sessionKey}>
-                {st.label}{elapsed} · {g.agentId} · {ch} · {g.user.replace('direct:', '')}{costStr}
-              </option>
-            )
-          })}
-        </select>
-
-        {/* Full Replay button — only when specific session selected */}
-        {effectiveKey && (
-          <Button
-            size="sm"
-            variant={replayOpen ? 'default' : 'outline'}
-            className="h-8 text-xs px-2.5"
-            onClick={() => setReplayOpen(v => !v)}
-          >
-            📋 {replayOpen ? 'ปิด Replay' : 'Full Replay'}
-          </Button>
+      <section className="min-h-0 flex-1 overflow-auto rounded-md border border-zinc-800 bg-black/20 p-2">
+        {isLoading && (
+          <div className="flex min-h-[180px] items-center justify-center gap-2 text-sm text-zinc-500">
+            <Clock3 className="h-4 w-4" aria-hidden="true" />
+            กำลังโหลด conversation feed...
+          </div>
         )}
-
-        {/* Channel filter — ข้อ 1 */}
-        <div className="flex gap-1 flex-wrap">
-          {([
-            { id: 'ALL',      label: 'ทุก channel' },
-            { id: 'line',     label: '📱 LINE' },
-            { id: 'telegram', label: '✈️ Telegram' },
-            { id: 'webchat',  label: '💬 Webchat' },
-          ] as { id: 'ALL' | 'line' | 'telegram' | 'webchat'; label: string }[]).map(s => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => { setChannelFilter(s.id); setExpandedIdxSet(new Set()); setExpandAll(false) }}
-              className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
-                channelFilter === s.id
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'border-input text-muted-foreground hover:border-foreground/40'
-              }`}
-            >
-              {s.label}
-            </button>
+        {!isLoading && filteredTurns.length === 0 && (
+          <div className="flex min-h-[180px] flex-col items-center justify-center gap-2 text-center text-sm text-zinc-500">
+            <CheckCircle2 className="h-5 w-5 text-zinc-400" aria-hidden="true" />
+            ไม่พบ conversation ตาม filter นี้
+          </div>
+        )}
+        <div className="space-y-2">
+          {filteredTurns.map(turn => (
+            <ConversationTurnCard
+              key={turn.id}
+              turn={turn}
+              expanded={expandedIds.has(turn.id)}
+              onToggle={() => toggleTurn(turn.id)}
+              onReplay={() => {
+                if (turn.agentId && turn.sessionKey) {
+                  setReplayTarget({ agentId: turn.agentId, sessionKey: turn.sessionKey })
+                }
+              }}
+            />
           ))}
         </div>
+      </section>
 
-        {/* Event type filter pills */}
-        <div className="flex gap-1 flex-wrap">
-          {[
-            { id: 'ALL',      label: 'ทั้งหมด' },
-            { id: 'message',  label: '📩 msg' },
-            { id: 'thinking', label: '💭 think' },
-            { id: 'tool',     label: '🔧 tool' },
-            { id: 'warning',  label: '⚠ warn' },
-            { id: 'replied',  label: '✅ reply' },
-            { id: 'error',    label: '❌ error' },
-          ].map(s => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setStateFilter(s.id)}
-              className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
-                stateFilter === s.id
-                  ? 'bg-foreground text-background border-foreground dark:bg-white dark:text-zinc-900'
-                  : 'border-input text-muted-foreground hover:border-foreground/40'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        <Input
-          placeholder="ค้นหา..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-32 h-8 text-xs"
-        />
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
-          <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
-          Auto scroll
-        </label>
-        <NoiseToggle hiddenCount={hiddenNoiseCount} checked={showNoise} onChange={setShowNoise} />
-        {!replayOpen && filtered.length > 0 && (
-          <Button size="sm" variant="outline" className="h-8 text-xs px-2.5" onClick={handleToggleExpandAll}>
-            {expandAll ? '▲ Collapse All' : '▼ Expand All'}
-          </Button>
-        )}
-        <span className="text-xs text-muted-foreground ml-auto">
-          {filtered.length} events{filtered.length !== events.length ? ` / ${events.length}` : ''}
-          {selectedGroup && selectedGroup.sessionCost > 0 && (
-            <span className="ml-2 text-yellow-500 font-medium" title="Total cost ของ session นี้">
-              💰 ${selectedGroup.sessionCost.toFixed(4)}
-            </span>
-          )}
-        </span>
-      </div>
-
-      {/* ── Full Replay Panel ─────────────────────────────────────────── */}
-      {replayOpen && effectiveKey && (
-        <div className="flex-1 min-h-0 border rounded-xl bg-zinc-950 font-mono text-xs overflow-y-auto p-3 space-y-3">
-          {replayLoading && <p className="text-zinc-500 text-center py-8">กำลังโหลด full session...</p>}
-          {!replayLoading && !replayData && (
-            <p className="text-zinc-500 text-center py-8">ไม่พบ session ID — กรุณารอสักครู่</p>
-          )}
+      {replayTarget && (
+        <section className="max-h-[42vh] overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-zinc-300" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-zinc-100">Session replay</h2>
+            <span className="text-xs text-zinc-500">{replayTarget.agentId}</span>
+            <div className="flex-1" />
+            <Button size="sm" variant="outline" onClick={() => setReplayTarget(null)}>Close</Button>
+          </div>
+          {replayLoading && <p className="text-sm text-zinc-500">กำลังโหลด replay...</p>}
           {replayData && (
-            <>
-              {/* Stats bar */}
-              <div className="flex gap-3 text-zinc-500 text-xs border-b border-zinc-800 pb-2 flex-wrap">
-                <span>{replayData.stats.turns} turns</span>
-                <span>in: {replayData.stats.inputTokens.toLocaleString()}</span>
-                <span>out: {replayData.stats.outputTokens.toLocaleString()}</span>
-                <span className="text-yellow-500">${replayData.stats.totalCost.toFixed(4)}</span>
-                <span>avg {replayData.stats.avgLatency}s</span>
-              </div>
-              {replayData.warnings && replayData.warnings.length > 0 && (
-                <div className="rounded border border-amber-800 bg-amber-950/40 p-2 text-amber-200">
-                  {replayData.warnings.map((w, i) => (
-                    <p key={i} className="break-all">{w.summary}</p>
-                  ))}
-                </div>
-              )}
-              {/* Messages */}
-              {replayData.messages.map((msg, mi) => (
-                <div key={mi} className={`rounded p-2 ${msg.role === 'user' ? 'bg-zinc-900 border border-zinc-800' : 'bg-zinc-950'}`}>
-                  <div className="flex gap-2 items-center mb-1 text-zinc-500">
-                    <span className={msg.role === 'user' ? 'text-blue-400' : 'text-green-400'}>{msg.role === 'user' ? '👤 User' : '🤖 Agent'}</span>
-                    <span>{msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}</span>
-                    {msg.latency != null && <span className={durationColor(msg.latency)}>{msg.latency}s</span>}
-                    {msg.usage && (
-                      <>
-                        <span>↑{msg.usage.input.toLocaleString()}</span>
-                        <span>↓{msg.usage.output.toLocaleString()}</span>
-                        <span className="text-yellow-500">${msg.usage.cost.toFixed(4)}</span>
-                      </>
-                    )}
-                    {msg.model && <span className="truncate max-w-32 text-zinc-600">{msg.model}</span>}
+            <div className="space-y-2">
+              {replayData.messages.map((message, index) => (
+                <div key={`${message.timestamp}-${index}`} className="rounded-md border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+                  <div className="mb-1 flex items-center gap-2 text-xs text-zinc-500">
+                    <span className={message.role === 'user' ? 'text-zinc-200' : 'text-blue-200'}>{message.role}</span>
+                    <span>{turnTimeLabel(message.timestamp)}</span>
+                    {message.latency != null && <span className={durationClass(message.latency * 1000)}>{message.latency.toFixed(1)}s</span>}
                   </div>
-                  {msg.thinking && (
-                    <details className="mb-1">
-                      <summary className="text-yellow-600 cursor-pointer text-xs">💭 Thinking</summary>
-                      <pre className="mt-1 text-yellow-200/70 whitespace-pre-wrap break-all leading-relaxed text-xs">{msg.thinking}</pre>
+                  {message.text && <p className="whitespace-pre-wrap break-words text-sm text-zinc-200">{message.text}</p>}
+                  {message.thinking && (
+                    <details className="mt-2 rounded border border-zinc-800 bg-black/20 px-2 py-1 text-xs text-zinc-400">
+                      <summary className="cursor-pointer text-zinc-300">Raw thinking debug</summary>
+                      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words">{message.thinking}</pre>
                     </details>
                   )}
-                  {msg.toolCalls && msg.toolCalls.length > 0 && msg.toolCalls.map((tc, ti) => (
-                    <details key={ti} className="mb-1">
-                      <summary className="text-purple-400 cursor-pointer text-xs">🔧 {tc.name}</summary>
-                      <pre className="mt-1 text-purple-200/70 whitespace-pre-wrap break-all text-xs">Input: {JSON.stringify(tc.input, null, 2)}</pre>
-                      {tc.result && <pre className="mt-1 text-zinc-400 whitespace-pre-wrap break-all text-xs">Result: {tc.result}</pre>}
-                    </details>
-                  ))}
-                  {msg.text && <pre className="text-zinc-200 whitespace-pre-wrap break-all leading-relaxed">{msg.text}</pre>}
+                  {message.toolCalls && message.toolCalls.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {message.toolCalls.map((tool, toolIndex) => (
+                        <div key={`${tool.name}-${toolIndex}`} className="rounded border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-xs text-purple-100">
+                          <div className="font-medium">{tool.name}</div>
+                          {tool.result && <p className="mt-1 max-h-24 overflow-auto break-words text-purple-200/80">{tool.result}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
-            </>
+            </div>
           )}
-        </div>
+        </section>
       )}
-
-      {/* ── Log panel — fills remaining height ───────────────────────────── */}
-      {!replayOpen && (
-      <div className="flex-1 min-h-0 border rounded-xl bg-zinc-950 font-mono text-xs overflow-y-auto p-1">
-        {filtered.length === 0 ? (
-          <p className="text-zinc-600 text-center py-12">ไม่มีข้อมูล</p>
-        ) : (
-          filtered.map((e, i) => {
-            const badge = typeBadge(e.type)
-            const isExp = expandedIdxSet.has(i)
-            let rowCls = 'hover:bg-zinc-900'
-            if (e.isLive)                   rowCls = 'row-live'
-            else if (e.type === 'thinking') rowCls = isExp ? 'bg-yellow-950/30' : 'bg-yellow-950/15 hover:bg-yellow-950/25'
-            else if (e.type === 'tool')     rowCls = isExp ? 'bg-purple-950/30' : 'bg-purple-950/15 hover:bg-purple-950/25'
-            else if (e.type === 'warning')  rowCls = isExp ? 'bg-amber-950/35' : 'bg-amber-950/20 hover:bg-amber-950/30'
-            else if (e.type === 'error')    rowCls = isExp ? 'bg-red-950/35' : 'bg-red-950/20 hover:bg-red-950/30'
-            else if (isExp)                 rowCls = 'bg-zinc-800'
-
-            let expandText = e.text
-            if (e.type === 'tool') {
-              const colonIdx = e.text.indexOf(': ')
-              if (colonIdx !== -1) {
-                try {
-                  const parsed = JSON.parse(e.text.slice(colonIdx + 2))
-                  expandText = e.text.slice(0, colonIdx) + ':\n' + JSON.stringify(parsed, null, 2)
-                } catch { /* keep original */ }
-              }
-            }
-
-            return (
-              <div
-                key={i}
-                className={`rounded transition-colors cursor-pointer select-text ${rowCls}`}
-                onClick={() => toggleRow(i)}
-              >
-                <div className="flex items-start px-2 py-0.5 leading-5">
-                  <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
-                  {isGlobal && (
-                    <span className={`shrink-0 w-24 truncate ${agentColor(e.agentId)}`}>
-                      {e.agentId}·{e.channel === 'telegram' ? 'tg' : e.channel === 'line' ? 'line' : 'web'}
-                    </span>
-                  )}
-                  {isGlobal && (
-                    <span className="shrink-0 w-24 text-zinc-600 truncate">
-                      {e.user.replace('direct:', '').slice(0, 12)}
-                    </span>
-                  )}
-                  <span className={`shrink-0 w-7 ${badge.cls}`}>{badge.icon}</span>
-                  <span className={`flex-1 text-zinc-300 min-w-0 ${isExp ? '' : 'truncate'}`} title={isExp ? undefined : e.text}>
-                    {isExp ? null : (
-                      e.type === 'tool' && e.toolName
-                        ? <><span className="text-purple-300 font-medium">{e.toolName}</span>{e.text && e.text !== 'exec' ? <span className="text-zinc-500 ml-1 text-xs">{e.text}</span> : null}</>
-                        : e.text
-                    )}
-                    {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
-                  </span>
-                  {/* tool event: แสดง duration */}
-                  {e.type === 'tool' && e.latency != null && (
-                    <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
-                      <span className={durationColor(e.latency)}>{e.latency}s</span>
-                    </span>
-                  )}
-                  {/* thinking event: แสดง cost ต่อ LLM call */}
-                  {e.type === 'thinking' && (e.latency != null || e.cost) && (
-                    <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
-                      {e.latency != null && <span className={durationColor(e.latency)}>{e.latency}s</span>}
-                      {e.inputTokens ? <span title={`In: ${e.inputTokens?.toLocaleString()} Out: ${e.outputTokens?.toLocaleString()}`}>{(((e.inputTokens ?? 0) + (e.outputTokens ?? 0)) / 1000).toFixed(1)}K</span> : null}
-                      {e.cost ? <span className="text-yellow-500/70">${e.cost.toFixed(4)}</span> : null}
-                    </span>
-                  )}
-                  {/* reply event: แสดง latency + tokens + turnTotalCost (ยอดรวมทั้ง turn) */}
-                  {e.type === 'reply' && (e.latency != null || e.inputTokens) && (
-                    <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
-                      {e.latency != null && <span className={durationColor(e.latency)}>{e.latency}s</span>}
-                      {e.inputTokens ? <span title={`In: ${e.inputTokens?.toLocaleString()} Out: ${e.outputTokens?.toLocaleString()}`}>{(((e.inputTokens ?? 0) + (e.outputTokens ?? 0)) / 1000).toFixed(1)}K</span> : null}
-                      {e.turnTotalCost
-                        ? <span className="text-yellow-400 font-medium" title={`รวม turn: $${e.turnTotalCost.toFixed(4)}${e.cost && e.cost !== e.turnTotalCost ? ` (call นี้: $${e.cost.toFixed(4)})` : ''}`}>${e.turnTotalCost.toFixed(4)}</span>
-                        : e.cost ? <span className="text-yellow-600">${e.cost.toFixed(4)}</span> : null
-                      }
-                    </span>
-                  )}
-                  {e.type === 'reply' && e.responseDuration != null && (
-                    <span className={`shrink-0 w-12 text-right ${durationColor(e.responseDuration)}`}>
-                      {e.responseDuration.toFixed(1)}s
-                    </span>
-                  )}
-                  <span className="shrink-0 w-4 text-right text-zinc-600">{isExp ? '▲' : '▼'}</span>
-                </div>
-                {isExp && (
-                  <pre className="px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ml-20">
-                    {expandText}
-                    {e.type === 'tool' && e.toolResult && (
-                      <span className="block mt-2 pt-2 border-t border-zinc-700 text-zinc-400">
-                        {'↩ Result:\n'}{e.toolResult}
-                      </span>
-                    )}
-                  </pre>
-                )}
-              </div>
-            )
-          })
-        )}
-        <div ref={bottomRef} />
-      </div>
-      )}
-
-      <style>{`
-        @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-        .anim-pulse { animation: livePulse 1.5s ease-in-out infinite; }
-        .row-live { animation: rowGlow 2s ease-in-out infinite; }
-        @keyframes rowGlow {
-          0%, 100% { background-color: rgba(234,179,8,0.07); }
-          50%       { background-color: rgba(234,179,8,0.16); }
-        }
-        .thinking-dots::after { content: ''; animation: dots 1.4s infinite; }
-        @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } 100% { content: ''; } }
-      `}</style>
     </div>
   )
 }

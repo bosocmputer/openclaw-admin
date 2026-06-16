@@ -574,6 +574,53 @@ export async function getMonitorEvents(): Promise<MonitorData> {
   return data
 }
 
+export interface MonitorConversationTool {
+  name: string
+  status?: string
+  argsPreview?: string
+  resultSummary?: string
+  durationMs?: number | null
+}
+
+export interface MonitorConversationTurn {
+  id: string
+  source: 'session' | 'gateway' | string
+  sessionKey?: string
+  startedAt: string
+  agentId: string | null
+  channel: 'webchat' | 'telegram' | 'line' | string
+  user: string
+  userText: string
+  finalText: string
+  route: 'native' | 'capability_denied' | 'tool_path' | 'model_path' | 'quality_fallback' | string
+  intent: string
+  status: 'ok' | 'pending' | 'warn' | 'error' | 'skipped' | string
+  rootCause?: string | null
+  durationMs?: number | null
+  ackMs?: number | null
+  modelMs?: number | null
+  toolPath: MonitorConversationTool[]
+  warnings: { type: string; issue?: string; toolName?: string; summary: string }[]
+}
+
+export interface MonitorConversationData {
+  generatedAt: string
+  windowMinutes: number
+  summary: {
+    count: number
+    byStatus: Record<string, number>
+    byRoute: Record<string, number>
+    avgDurationMs: number | null
+  }
+  turns: MonitorConversationTurn[]
+  warnings: { type: string; summary: string }[]
+}
+
+export async function getMonitorConversations(params: { minutes?: number; agent?: string; channel?: 'telegram' | 'line' | 'webchat'; limit?: number } = {}): Promise<MonitorConversationData> {
+  const { data } = await api.get('/api/monitor/conversations', { params })
+  return data
+}
+
 export interface MonitorLatencyTurn {
   turnId: string
   agentId?: string
@@ -723,6 +770,14 @@ export interface SupportBundle {
   }
   latencySummary?: MonitorLatencyData['summary']
   recentSlowTurns?: MonitorLatencyTurn[]
+  recentGuardrailWarnings?: {
+    type: string
+    guardrail?: string
+    turnId?: string
+    agentId?: string
+    chatIdRedacted?: string
+    summary: string
+  }[]
   recentToolLoopWarnings?: {
     agentId: string
     sessionKey: string
