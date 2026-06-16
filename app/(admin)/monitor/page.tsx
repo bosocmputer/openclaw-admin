@@ -44,7 +44,10 @@ interface FlatEvent {
   cost?: number
   toolName?: string
   toolResult?: string
-  turnTotalCost?: number  // ยอดรวม cost ทั้ง turn (message → reply)
+  turnTotalCost?: number  // ยอดรวม cost ทั้ง turn (message -> reply)
+  turnModelCalls?: number
+  turnInputTokens?: number
+  turnOutputTokens?: number
 }
 
 interface SessionGroup {
@@ -95,6 +98,14 @@ function typeBadge(type: string) {
   }
 }
 
+function hasUsageMetrics(e: Pick<FlatEvent, 'cost' | 'inputTokens' | 'outputTokens'>) {
+  return e.cost != null || e.inputTokens != null || e.outputTokens != null
+}
+
+function formatTokenK(inputTokens?: number, outputTokens?: number) {
+  return (((inputTokens ?? 0) + (outputTokens ?? 0)) / 1000).toFixed(1)
+}
+
 const AGENT_COLORS = ['text-blue-400', 'text-emerald-400', 'text-orange-400', 'text-pink-400', 'text-cyan-400', 'text-violet-400']
 const agentColorMap: Record<string, string> = {}
 let agentColorIdx = 0
@@ -121,14 +132,24 @@ function buildGroups(data: MonitorData): SessionGroup[] {
 
         const evList = session.events as MonitorEvent[]
         let turnCost = 0
+        let turnModelCalls = 0
+        let turnInputTokens = 0
+        let turnOutputTokens = 0
         for (let i = 0; i < evList.length; i++) {
           const e = evList[i]
           const isLast = i === evList.length - 1
+          const eventInputTokens = (e as MonitorEvent).inputTokens
+          const eventOutputTokens = (e as MonitorEvent).outputTokens
+          const eventCost = (e as MonitorEvent).cost
+          const eventHasUsage = hasUsageMetrics({ cost: eventCost, inputTokens: eventInputTokens, outputTokens: eventOutputTokens })
           let responseDuration: number | undefined
 
           if (e.type === 'message') {
             lastMsgTs = e.ts
             turnCost = 0
+            turnModelCalls = 0
+            turnInputTokens = 0
+            turnOutputTokens = 0
           } else if (e.type === 'reply' && lastMsgTs) {
             const diff = tsToSec(e.ts) - tsToSec(lastMsgTs)
             const real = diff < 0 ? diff + 86400 : diff
@@ -136,9 +157,12 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             lastMsgTs = null
           }
 
-          // สะสม cost ทุก LLM call ในรอบนี้ (thinking + reply)
-          if ((e.type === 'thinking' || e.type === 'reply') && e.cost) {
-            turnCost += e.cost
+          // สะสม usage ทุก LLM call ในรอบนี้ (thinking + reply)
+          if ((e.type === 'thinking' || e.type === 'reply') && eventHasUsage) {
+            turnModelCalls += 1
+            turnInputTokens += eventInputTokens ?? 0
+            turnOutputTokens += eventOutputTokens ?? 0
+            turnCost += eventCost ?? 0
           }
 
           events.push({
@@ -146,12 +170,15 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             agentId: agent.id, channel: ch, user: session.user,
             sessionKey: session.sessionKey, isLive: isActive && isLast, responseDuration,
             latency: (e as MonitorEvent).latency,
-            inputTokens: (e as MonitorEvent).inputTokens,
-            outputTokens: (e as MonitorEvent).outputTokens,
-            cost: (e as MonitorEvent).cost,
+            inputTokens: eventInputTokens,
+            outputTokens: eventOutputTokens,
+            cost: eventCost,
             toolName: (e as MonitorEvent).toolName,
             toolResult: (e as MonitorEvent).toolResult,
-            turnTotalCost: e.type === 'reply' && turnCost > 0 ? turnCost : undefined,
+            turnTotalCost: e.type === 'reply' && turnModelCalls > 0 ? turnCost : undefined,
+            turnModelCalls: e.type === 'reply' && turnModelCalls > 0 ? turnModelCalls : undefined,
+            turnInputTokens: e.type === 'reply' && turnModelCalls > 0 ? turnInputTokens : undefined,
+            turnOutputTokens: e.type === 'reply' && turnModelCalls > 0 ? turnOutputTokens : undefined,
           })
         }
 
@@ -570,21 +597,32 @@ export default function MonitorPage() {
                     </span>
                   )}
                   {/* thinking event: แสดง cost ต่อ LLM call */}
-                  {e.type === 'thinking' && (e.latency != null || e.cost) && (
+                  {e.type === 'thinking' && (e.latency != null || e.cost != null || e.inputTokens != null || e.outputTokens != null) && (
                     <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
                       {e.latency != null && <span className={durationColor(e.latency)}>{e.latency}s</span>}
-                      {e.inputTokens ? <span title={`In: ${e.inputTokens?.toLocaleString()} Out: ${e.outputTokens?.toLocaleString()}`}>{(((e.inputTokens ?? 0) + (e.outputTokens ?? 0)) / 1000).toFixed(1)}K</span> : null}
-                      {e.cost ? <span className="text-yellow-500/70">${e.cost.toFixed(4)}</span> : null}
+                      <span className="text-zinc-500">call</span>
+                      {(e.inputTokens != null || e.outputTokens != null) ? <span title={`Model call tokens - In: ${(e.inputTokens ?? 0).toLocaleString()} Out: ${(e.outputTokens ?? 0).toLocaleString()}`}>{formatTokenK(e.inputTokens, e.outputTokens)}K</span> : null}
+                      {e.cost != null ? <span className="text-yellow-500/70" title="Cost ของ model call นี้">${e.cost.toFixed(4)}</span> : null}
                     </span>
                   )}
                   {/* reply event: แสดง latency + tokens + turnTotalCost (ยอดรวมทั้ง turn) */}
-                  {e.type === 'reply' && (e.latency != null || e.inputTokens) && (
+                  {e.type === 'reply' && (e.latency != null || e.inputTokens != null || e.outputTokens != null || e.cost != null || e.turnTotalCost != null) && (
                     <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">
                       {e.latency != null && <span className={durationColor(e.latency)}>{e.latency}s</span>}
-                      {e.inputTokens ? <span title={`In: ${e.inputTokens?.toLocaleString()} Out: ${e.outputTokens?.toLocaleString()}`}>{(((e.inputTokens ?? 0) + (e.outputTokens ?? 0)) / 1000).toFixed(1)}K</span> : null}
-                      {e.turnTotalCost
-                        ? <span className="text-yellow-400 font-medium" title={`รวม turn: $${e.turnTotalCost.toFixed(4)}${e.cost && e.cost !== e.turnTotalCost ? ` (call นี้: $${e.cost.toFixed(4)})` : ''}`}>${e.turnTotalCost.toFixed(4)}</span>
-                        : e.cost ? <span className="text-yellow-600">${e.cost.toFixed(4)}</span> : null
+                      {e.turnTotalCost != null
+                        ? (
+                          <>
+                            <span className="text-zinc-500" title="จำนวน model API calls ใน turn นี้">{e.turnModelCalls} call{e.turnModelCalls === 1 ? '' : 's'}</span>
+                            <span title={`Turn total tokens - In: ${(e.turnInputTokens ?? 0).toLocaleString()} Out: ${(e.turnOutputTokens ?? 0).toLocaleString()}`}>{formatTokenK(e.turnInputTokens, e.turnOutputTokens)}K</span>
+                            <span className="text-yellow-400 font-medium" title={`Turn total cost: $${e.turnTotalCost.toFixed(4)}`}>turn ${e.turnTotalCost.toFixed(4)}</span>
+                          </>
+                        )
+                        : (
+                          <>
+                            {(e.inputTokens != null || e.outputTokens != null) ? <span title={`Model call tokens - In: ${(e.inputTokens ?? 0).toLocaleString()} Out: ${(e.outputTokens ?? 0).toLocaleString()}`}>{formatTokenK(e.inputTokens, e.outputTokens)}K</span> : null}
+                            {e.cost != null ? <span className="text-yellow-600" title="Cost ของ model call นี้">${e.cost.toFixed(4)}</span> : null}
+                          </>
+                        )
                       }
                     </span>
                   )}
