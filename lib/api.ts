@@ -730,6 +730,122 @@ export async function getMonitorCost(days = 30): Promise<CostData> {
   return data
 }
 
+// ─── Dashboard Overview ───────────────────────────────────────────────────────
+
+export interface DashboardRelease {
+  installedVersion: string | null
+  latestVersion: string | null
+  targetVersion: string
+  nodeVersion?: string
+  npmRoot?: string | null
+  runtimeRoot?: string | null
+  status: 'behind' | 'current' | 'custom' | 'unknown' | string
+  warnings: string[]
+  deployMetadataPresent?: boolean
+  customMarkers?: Record<string, boolean>
+  generatedAt?: string
+}
+
+export interface DashboardHealthSummary {
+  status: 'ok' | 'warn' | 'fail' | string
+  criticalFail: number
+  warn: number
+  ok: number
+  fail: number
+  info: number
+  total: number
+  warnings: { id: string; label: string; status: string; summary: string }[]
+}
+
+export interface DashboardOperations {
+  gateway?: 'online' | 'offline' | string
+  agents?: number
+  telegramBotsConfigured?: number
+  telegramBotsOnline?: number
+  lineAccounts?: number
+  webchatRooms?: number | null
+  members?: number | null
+  defaultModel?: string | null
+}
+
+export interface DashboardLatencySummary {
+  windowMinutes?: number
+  turns: number
+  active: number
+  stuck: number
+  ackP50Ms?: number | null
+  ackP95Ms?: number | null
+  finalP50Ms?: number | null
+  finalP95Ms?: number | null
+  byStatus: Record<string, number>
+  routeBreakdown: Record<string, number>
+}
+
+export interface DashboardCostSummary {
+  days: number
+  totalCost: number
+  modelCalls: number
+  inputTokens: number
+  outputTokens: number
+  toolOnlyTurns: number
+  byAgent: { agentId: string; cost: number }[]
+}
+
+export interface DashboardAgentRow {
+  id: string
+  accessMode: string
+  mcpUrl: string | null
+  toolCount: number
+  toolSource: string
+  soulStatus: string
+  authStatus: string
+  fallbackModelCount: number
+  channels: { telegram: number; line: number; webchat: number }
+}
+
+export interface DashboardRecentTurn {
+  id: string
+  startedAt: string
+  agentId: string | null
+  channel: string
+  user: string
+  userText: string
+  finalText: string
+  route: string
+  intent: string
+  status: string
+  durationMs: number | null
+  toolChain: string[]
+  warnings: string[]
+}
+
+export interface DashboardWhatsNewItem {
+  id: string
+  title: string
+  summary: string
+  action: string
+  status: string
+}
+
+export interface DashboardOverview {
+  ok: boolean
+  generatedAt: string
+  cache: { hit: boolean; ttlSeconds: number }
+  release: DashboardRelease
+  health: DashboardHealthSummary
+  operations: DashboardOperations
+  latency: DashboardLatencySummary
+  cost: DashboardCostSummary
+  agents: DashboardAgentRow[]
+  recentTurns: DashboardRecentTurn[]
+  whatsNew: { version: string; items: DashboardWhatsNewItem[] }
+}
+
+export async function getDashboardOverview(refresh = false): Promise<DashboardOverview> {
+  const { data } = await api.get('/api/dashboard/overview', { params: refresh ? { refresh: true } : {} })
+  return data
+}
+
 // ─── System Health ───────────────────────────────────────────────────────────
 
 export type SystemCheckStatus = 'ok' | 'warn' | 'fail' | 'info'
