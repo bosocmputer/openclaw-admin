@@ -66,7 +66,11 @@ interface FlatEvent {
   outputTokens?: number
   cost?: number
   toolName?: string
+  toolInput?: string
   toolResult?: string
+  cleanKeyword?: string
+  intent?: string
+  route?: string
   turnTotalCost?: number  // ยอดรวม cost ทั้ง turn (message -> reply)
   turnModelCalls?: number
   turnInputTokens?: number
@@ -228,7 +232,11 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             outputTokens: eventOutputTokens,
             cost: eventCost,
             toolName: (e as MonitorEvent).toolName,
+            toolInput: (e as MonitorEvent).toolInput,
             toolResult: (e as MonitorEvent).toolResult,
+            cleanKeyword: (e as MonitorEvent).cleanKeyword,
+            intent: (e as MonitorEvent).intent,
+            route: (e as MonitorEvent).route,
             turnTotalCost: e.type === 'reply' && turnModelCalls > 0 ? turnCost : undefined,
             turnModelCalls: e.type === 'reply' && turnModelCalls > 0 ? turnModelCalls : undefined,
             turnInputTokens: e.type === 'reply' && turnModelCalls > 0 ? turnInputTokens : undefined,
@@ -618,6 +626,15 @@ export default function MonitorPage() {
                 } catch { /* keep original */ }
               }
             }
+            const toolMetaText = e.type === 'tool'
+              ? [
+                  e.route ? `route: ${e.route}` : null,
+                  e.intent ? `intent: ${e.intent}` : null,
+                  e.cleanKeyword ? `cleanKeyword: ${e.cleanKeyword}` : null,
+                  e.toolInput ? `Input:\n${e.toolInput}` : null,
+                ].filter(Boolean).join('\n\n')
+              : ''
+            const expandedBody = [expandText, toolMetaText].filter(Boolean).join('\n\n')
 
             return (
               <div
@@ -693,7 +710,7 @@ export default function MonitorPage() {
                 </div>
                 {isExp && (
                   <pre className={`px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ${showEventDates ? 'ml-32' : 'ml-20'}`}>
-                    {expandText}
+                    {expandedBody}
                     {e.type === 'tool' && e.toolResult && (
                       <span className="block mt-2 pt-2 border-t border-zinc-700 text-zinc-400">
                         {'↩ Result:\n'}{e.toolResult}

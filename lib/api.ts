@@ -529,7 +529,11 @@ export interface MonitorEvent {
   outputTokens?: number
   cost?: number
   toolName?: string
+  toolInput?: string
   toolResult?: string
+  cleanKeyword?: string
+  intent?: string
+  route?: string
 }
 
 export interface MonitorSession {
