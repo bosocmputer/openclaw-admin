@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
@@ -13,6 +13,7 @@ import {
   Cpu,
   ExternalLink,
   Gauge,
+  Info,
   RefreshCw,
   RotateCcw,
   Server,
@@ -35,6 +36,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { toast } from 'sonner'
 
 const WHATS_NEW_KEY = 'whats-new-dismissed-v2026.6.8'
@@ -84,23 +86,93 @@ function modelShort(value?: string | null) {
   return value.replace(/^openrouter\//, '')
 }
 
+function InfoHint({
+  title,
+  description,
+  action,
+}: {
+  title: string
+  description: string
+  action?: string
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label={`ข้อมูลเพิ่มเติม: ${title}`}
+        className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-zinc-400 transition hover:bg-muted hover:text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-zinc-200"
+      >
+        <Info className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverContent align="start" side="top" className="w-80 max-w-[calc(100vw-2rem)]">
+        <PopoverHeader>
+          <PopoverTitle>{title}</PopoverTitle>
+          <PopoverDescription className="text-xs leading-relaxed">{description}</PopoverDescription>
+        </PopoverHeader>
+        {action && (
+          <div className="rounded-md bg-muted px-2.5 py-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+            {action}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function SectionHeading({
+  title,
+  description,
+  infoTitle,
+  infoDescription,
+  infoAction,
+  children,
+}: {
+  title: string
+  description?: string
+  infoTitle: string
+  infoDescription: string
+  infoAction?: string
+  children?: ReactNode
+}) {
+  return (
+    <CardHeader className="flex flex-row items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <InfoHint title={infoTitle} description={infoDescription} action={infoAction} />
+        </div>
+        {description && <p className="mt-1 text-sm text-zinc-500">{description}</p>}
+      </div>
+      {children}
+    </CardHeader>
+  )
+}
+
 function MetricCard({
   title,
   value,
   detail,
   icon: Icon,
   status,
+  infoTitle,
+  infoDescription,
+  infoAction,
 }: {
   title: string
   value: string
   detail?: string
   icon: typeof Activity
   status?: string
+  infoTitle: string
+  infoDescription: string
+  infoAction?: string
 }) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3 pb-2">
-        <CardTitle className="text-sm font-medium text-zinc-500">{title}</CardTitle>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <CardTitle className="truncate text-sm font-medium text-zinc-500">{title}</CardTitle>
+          <InfoHint title={infoTitle} description={infoDescription} action={infoAction} />
+        </div>
         <span className={`inline-flex size-7 items-center justify-center rounded-md ${status ? statusTone(status) : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300'}`}>
           <Icon className="size-4" />
         </span>
@@ -126,6 +198,207 @@ function OverviewSkeleton() {
       <SkeletonBlock className="h-64" />
       <SkeletonBlock className="h-72" />
     </div>
+  )
+}
+
+type RecommendationSeverity = 'critical' | 'warn' | 'info'
+
+interface Recommendation {
+  id: string
+  severity: RecommendationSeverity
+  title: string
+  detail: string
+  actionLabel: string
+  href: string
+}
+
+function addRecommendation(items: Recommendation[], next: Recommendation) {
+  if (!items.some(item => item.id === next.id)) items.push(next)
+}
+
+function buildRecommendations(data: DashboardOverview): Recommendation[] {
+  const items: Recommendation[] = []
+  const healthWarnings = data.health.warnings.map(warning => `${warning.id} ${warning.label} ${warning.summary}`.toLowerCase())
+
+  if (data.health.criticalFail > 0 || data.health.status === 'fail') {
+    addRecommendation(items, {
+      id: 'critical-health',
+      severity: 'critical',
+      title: 'แก้ critical health checks ก่อนใช้งานจริง',
+      detail: `พบ ${data.health.criticalFail} critical issue จาก system health. ตรวจ dependency ที่ล้มเหลวและ run remediation จากหน้า System.`,
+      actionLabel: 'Open System',
+      href: '/system',
+    })
+  }
+
+  if (data.release.status === 'behind') {
+    addRecommendation(items, {
+      id: 'runtime-behind',
+      severity: 'warn',
+      title: 'วางแผนอัปเดต OpenClaw runtime',
+      detail: `ติดตั้งอยู่ ${data.release.installedVersion || 'unknown'} แต่ target คือ ${data.release.targetVersion}. อัปเดตหลัง backup และ smoke test เท่านั้น.`,
+      actionLabel: 'Check Runtime',
+      href: '/system',
+    })
+  }
+
+  if (healthWarnings.some(text => text.includes('fallback model'))) {
+    addRecommendation(items, {
+      id: 'fallback-model',
+      severity: 'warn',
+      title: 'ตั้ง fallback model ให้ agent',
+      detail: 'ถ้า provider หลัก timeout หรือ error Telegram อาจตอบช้า หรือส่ง error ให้ user. ตั้ง fallback อย่างน้อย agent ที่รับลูกค้าจริง.',
+      actionLabel: 'Open Models',
+      href: '/model',
+    })
+  }
+
+  if (healthWarnings.some(text => text.includes('image model'))) {
+    addRecommendation(items, {
+      id: 'image-model',
+      severity: 'warn',
+      title: 'กำหนด image model ให้ชัดเจน',
+      detail: 'ถ้าลูกค้าส่งรูปสินค้า ระบบควรมี image model ที่ตรวจสอบได้ ไม่พึ่งค่า auto ที่เปลี่ยนตาม runtime.',
+      actionLabel: 'Open Models',
+      href: '/model',
+    })
+  }
+
+  if (data.agents.some(agent => agent.toolSource !== 'live' || agent.toolCount === 0)) {
+    addRecommendation(items, {
+      id: 'mcp-not-live',
+      severity: 'warn',
+      title: 'ตรวจ MCP tools ของ agent',
+      detail: 'มี agent ที่ไม่ได้ใช้ live MCP tools หรือไม่มี tool. Agent อาจตอบว่าไม่มีสิทธิ์ หรือหา ERP ไม่ได้.',
+      actionLabel: 'Open Agents',
+      href: '/agents',
+    })
+  }
+
+  if (data.agents.some(agent => agent.soulStatus !== 'ok' || agent.authStatus !== 'ok')) {
+    addRecommendation(items, {
+      id: 'agent-contract',
+      severity: 'warn',
+      title: 'ตรวจ SOUL และ auth profile',
+      detail: 'พบ agent ที่ SOUL หรือ auth profile ยังไม่ ok. ควร apply template ล่าสุดและตรวจ model key ก่อนเปิดให้ user ถามจริง.',
+      actionLabel: 'Open Agents',
+      href: '/agents',
+    })
+  }
+
+  if ((data.operations.telegramBotsConfigured || 0) > (data.operations.telegramBotsOnline || 0)) {
+    addRecommendation(items, {
+      id: 'telegram-offline',
+      severity: 'critical',
+      title: 'ตรวจ Telegram bot ที่ยังไม่ online',
+      detail: `${formatCount(data.operations.telegramBotsOnline)}/${formatCount(data.operations.telegramBotsConfigured)} bot online. ตรวจ token, binding, gateway log และ webhook/polling conflict.`,
+      actionLabel: 'Open Telegram',
+      href: '/telegram',
+    })
+  }
+
+  if (data.latency.stuck > 0) {
+    addRecommendation(items, {
+      id: 'stuck-turns',
+      severity: 'warn',
+      title: 'ตรวจ turn ที่ค้างอยู่',
+      detail: `มี ${formatCount(data.latency.stuck)} stuck turn ใน telemetry window. เปิด Monitor เพื่อดูว่า stuck ที่ model, tool, หรือ delivery.`,
+      actionLabel: 'Open Monitor',
+      href: '/monitor',
+    })
+  }
+
+  if ((data.latency.finalP95Ms || 0) > 10000) {
+    addRecommendation(items, {
+      id: 'slow-final',
+      severity: 'warn',
+      title: 'ตรวจ response p95 ที่ช้า',
+      detail: `final p95 ตอนนี้ ${formatMs(data.latency.finalP95Ms)}. ดู slow turns และแยกว่าเป็น model latency, MCP latency, หรือ queue.`,
+      actionLabel: 'Open Monitor',
+      href: '/monitor',
+    })
+  }
+
+  if (items.length === 0) {
+    items.push({
+      id: 'all-clear',
+      severity: 'info',
+      title: 'ระบบพร้อมใช้งาน',
+      detail: 'ไม่พบ action เร่งด่วนจาก dashboard overview ตอนนี้. ให้ดู Monitor ระหว่างลูกค้าทดสอบจริงและตรวจ cost เป็นระยะ.',
+      actionLabel: 'Open Monitor',
+      href: '/monitor',
+    })
+  }
+
+  return items.slice(0, 6)
+}
+
+function recommendationTone(severity: RecommendationSeverity) {
+  if (severity === 'critical') {
+    return {
+      box: 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100',
+      badge: 'destructive' as const,
+      icon: 'text-red-600 dark:text-red-300',
+    }
+  }
+  if (severity === 'warn') {
+    return {
+      box: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100',
+      badge: 'secondary' as const,
+      icon: 'text-amber-600 dark:text-amber-300',
+    }
+  }
+  return {
+    box: 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100',
+    badge: 'default' as const,
+    icon: 'text-emerald-600 dark:text-emerald-300',
+  }
+}
+
+function RecommendedActions({ recommendations }: { recommendations: Recommendation[] }) {
+  const hasCritical = recommendations.some(item => item.severity === 'critical')
+  const hasWarn = recommendations.some(item => item.severity === 'warn')
+  const statusLabel = hasCritical ? 'critical action' : hasWarn ? 'needs attention' : 'ready'
+
+  return (
+    <Card>
+      <SectionHeading
+        title="Recommended Next Actions"
+        description="คำแนะนำจาก health, release, channel, latency, MCP และ agent contract ล่าสุด."
+        infoTitle="Recommended Next Actions"
+        infoDescription="ส่วนนี้รวมสัญญาณที่ทำให้ระบบยังไม่สมบูรณ์ แล้วแปลงเป็นงานที่ admin ควรทำต่อ เช่น ตรวจ System, ตั้ง fallback model, แก้ MCP หรือเปิด Monitor ดู turn ที่ช้า."
+        infoAction="คำแนะนำไม่แก้ระบบเอง เป็น navigation ไปยังหน้าที่ควรตรวจ เพื่อกัน operator กด action เสี่ยงโดยไม่ตั้งใจ."
+      >
+        <Badge variant={hasCritical ? 'destructive' : hasWarn ? 'secondary' : 'default'}>{statusLabel}</Badge>
+      </SectionHeading>
+      <CardContent>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {recommendations.map(item => {
+            const tone = recommendationTone(item.severity)
+            return (
+              <div key={item.id} className={`rounded-md border p-3 ${tone.box}`}>
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 gap-2">
+                    {item.severity === 'info' ? (
+                      <CheckCircle2 className={`mt-0.5 size-4 shrink-0 ${tone.icon}`} />
+                    ) : (
+                      <AlertTriangle className={`mt-0.5 size-4 shrink-0 ${tone.icon}`} />
+                    )}
+                    <p className="min-w-0 text-sm font-medium">{item.title}</p>
+                  </div>
+                  <Badge variant={tone.badge} className="shrink-0">{item.severity}</Badge>
+                </div>
+                <p className="min-h-12 text-xs leading-relaxed opacity-90">{item.detail}</p>
+                <a href={item.href} className="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-current/20 bg-background/50 px-2 text-xs font-medium hover:bg-background/80">
+                  {item.actionLabel}
+                  <ExternalLink className="size-3" />
+                </a>
+              </div>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -289,6 +562,7 @@ export default function DashboardPage() {
     if (!data) return '-'
     return `p50 ${formatMs(data.latency.finalP50Ms)} · p95 ${formatMs(data.latency.finalP95Ms)}`
   }, [data])
+  const recommendations = useMemo(() => data ? buildRecommendations(data) : [], [data])
 
   return (
     <div className="w-full space-y-5">
@@ -325,7 +599,14 @@ export default function DashboardPage() {
                 <div className="flex min-w-0 items-center gap-2">
                   <Sparkles className="size-4 shrink-0 text-zinc-500" />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">มีอะไรใหม่ใน OpenClaw {data.whatsNew.version}</p>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <p className="truncate text-sm font-semibold">มีอะไรใหม่ใน OpenClaw {data.whatsNew.version}</p>
+                      <InfoHint
+                        title="มีอะไรใหม่"
+                        description="สรุปเฉพาะสิ่งที่มีผลกับงาน operator เช่น runtime recovery, model fallback, Telegram delivery, cost/usage และ memory diagnostics."
+                        action="ใช้เป็น checklist หลังอัปเดต ไม่ใช่ release note ทั้งหมดของ upstream."
+                      />
+                    </div>
                     <p className="truncate text-xs text-zinc-500">Operator highlights for this Admin deployment</p>
                   </div>
                 </div>
@@ -361,6 +642,9 @@ export default function DashboardPage() {
               detail={`${data.health.criticalFail} critical · ${data.health.warn} warnings · ${data.health.ok} ok`}
               icon={ShieldCheck}
               status={data.health.status}
+              infoTitle="Overall Health"
+              infoDescription="ภาพรวม system checks ทั้ง API, gateway, MCP, Telegram, SOUL, auth profile และ runtime warning."
+              infoAction="ถ้าเป็น warn หรือ fail ให้เปิด System เพื่อดู check ที่ล้มเหลวและ remediation."
             />
             <MetricCard
               title="Gateway"
@@ -368,6 +652,9 @@ export default function DashboardPage() {
               detail={`${formatCount(data.operations.agents)} agents · ${formatCount(data.operations.members)} active members`}
               icon={Server}
               status={data.operations.gateway}
+              infoTitle="Gateway"
+              infoDescription="สถานะ OpenClaw gateway ที่รับ event จาก channel และส่งต่อให้ agent/runtime."
+              infoAction="ถ้า offline ให้ดู Logs/Monitor ก่อน restart gateway."
             />
             <MetricCard
               title="Runtime"
@@ -375,6 +662,9 @@ export default function DashboardPage() {
               detail={`${data.release.status} · target ${data.release.targetVersion}`}
               icon={Cpu}
               status={data.release.status}
+              infoTitle="Runtime"
+              infoDescription="เวอร์ชัน OpenClaw runtime ที่ติดตั้งจริง เทียบกับ target version ที่ dashboard ใช้เป็น baseline."
+              infoAction="ถ้า behind ให้วางแผน backup, update และ smoke test ก่อนใช้กับลูกค้าจริง."
             />
             <MetricCard
               title="MCP Tools"
@@ -382,6 +672,9 @@ export default function DashboardPage() {
               detail={`${data.agents.filter(agent => agent.toolSource === 'live').length}/${data.agents.length} agents live`}
               icon={Wrench}
               status={data.agents.every(agent => agent.toolSource === 'live') ? 'ok' : 'warn'}
+              infoTitle="MCP Tools"
+              infoDescription="จำนวน tool ที่ agent เห็นจาก MCP ตาม access mode จริง ใช้เป็น source of truth ว่า agent ทำอะไรได้."
+              infoAction="ถ้าไม่ live หรือ tool เป็น 0 ให้ตรวจ MCP URL, access mode และ SOUL contract."
             />
             <MetricCard
               title="Telegram"
@@ -389,6 +682,9 @@ export default function DashboardPage() {
               detail={`${formatCount(data.operations.lineAccounts)} LINE OA · ${formatCount(data.operations.webchatRooms)} webchat rooms`}
               icon={Bot}
               status={(data.operations.telegramBotsOnline || 0) >= (data.operations.telegramBotsConfigured || 0) ? 'ok' : 'warn'}
+              infoTitle="Telegram And Channels"
+              infoDescription="จำนวน Telegram bot ที่พร้อมใช้งาน เทียบกับที่ตั้งค่าไว้ พร้อมจำนวน LINE OA และ webchat rooms."
+              infoAction="ถ้า bot online ไม่ครบ ให้ตรวจ token, binding, gateway log และ polling conflict."
             />
             <MetricCard
               title="Today Response"
@@ -396,6 +692,9 @@ export default function DashboardPage() {
               detail={p95Detail}
               icon={Gauge}
               status={(data.latency.finalP95Ms || 0) > 10000 ? 'warn' : 'ok'}
+              infoTitle="Today Response"
+              infoDescription="เวลาตอบกลับจาก telemetry window ล่าสุด แสดง p50 และ p95 ของ final reply เพื่อจับเคสช้า."
+              infoAction="ถ้า p95 เกิน 10 วินาที ให้เปิด Monitor ดูว่าเป็น model, MCP, queue หรือ delivery."
             />
             <MetricCard
               title="7-Day Cost"
@@ -403,6 +702,9 @@ export default function DashboardPage() {
               detail={`${formatCount(data.cost.modelCalls)} model calls · ${formatCount(data.cost.toolOnlyTurns)} tool-only turns`}
               icon={CircleDollarSign}
               status="ok"
+              infoTitle="7-Day Cost"
+              infoDescription="ค่าใช้จ่าย model จาก log 7 วันล่าสุด นับเฉพาะ model calls ไม่เอา deterministic tool-only turn ไปปน."
+              infoAction="ใช้ตรวจว่า prompt/model หรือ conversation flow ทำให้ค่าใช้จ่ายสูงผิดปกติหรือไม่."
             />
             <MetricCard
               title="Default Model"
@@ -410,20 +712,27 @@ export default function DashboardPage() {
               detail={data.operations.defaultModel || 'No default model configured'}
               icon={Activity}
               status={data.operations.defaultModel ? 'ok' : 'warn'}
+              infoTitle="Default Model"
+              infoDescription="model หลักที่ runtime ใช้เมื่อ agent ไม่ override เอง เป็นตัวกำหนดความเร็ว คุณภาพ และค่าใช้จ่าย."
+              infoAction="ถ้าลูกค้าต้องการตอบเร็ว ให้เทียบ latency/cost ใน Monitor ก่อนเปลี่ยน model."
             />
           </div>
 
+          <RecommendedActions recommendations={recommendations} />
+
           <div className="grid gap-4 xl:grid-cols-3">
             <Card className="xl:col-span-2">
-              <CardHeader className="flex flex-row items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base">Operations Today</CardTitle>
-                  <p className="mt-1 text-sm text-zinc-500">Conversation throughput, latency, and route mix from bounded telemetry.</p>
-                </div>
+              <SectionHeading
+                title="Operations Today"
+                description="Conversation throughput, latency, and route mix from bounded telemetry."
+                infoTitle="Operations Today"
+                infoDescription="สรุปปริมาณ turn วันนี้ งานที่ยัง active/stuck, ack/final latency และ route ที่ระบบใช้ เช่น tool path, model path หรือ native command."
+                infoAction="ใช้ดูว่า user รอเพราะ model, tool, queue หรือ gateway delivery แล้วเปิด Monitor เพื่อดู turn จริง."
+              >
                 <Badge variant={data.latency.stuck > 0 ? 'destructive' : 'secondary'}>
                   {data.latency.stuck} stuck
                 </Badge>
-              </CardHeader>
+              </SectionHeading>
               <CardContent>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
@@ -453,10 +762,13 @@ export default function DashboardPage() {
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Actions</CardTitle>
-                <p className="text-sm text-zinc-500">Risky actions stay explicit and reversible.</p>
-              </CardHeader>
+              <SectionHeading
+                title="Actions"
+                description="Risky actions stay explicit and reversible."
+                infoTitle="Actions"
+                infoDescription="ปุ่มแก้ปัญหาแบบ manual สำหรับ operator เช่น restart gateway, clean stale sessions และ doctor fix."
+                infoAction="ใช้เมื่อรู้สาเหตุแล้วเท่านั้น ถ้ายังไม่แน่ใจให้เปิด Logs หรือ Monitor ก่อน."
+              />
               <CardContent className="space-y-2">
                 <Button variant="outline" className="w-full justify-start" onClick={() => setRestartDialog(true)} disabled={restart.isPending}>
                   <RotateCcw className="size-4" />
@@ -484,16 +796,18 @@ export default function DashboardPage() {
 
           <div className="grid gap-4 xl:grid-cols-3">
             <Card className="xl:col-span-2">
-              <CardHeader className="flex flex-row items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base">Recent Conversations</CardTitle>
-                  <p className="mt-1 text-sm text-zinc-500">Latest Telegram turns with route, intent, tools, warnings, and duration.</p>
-                </div>
+              <SectionHeading
+                title="Recent Conversations"
+                description="Latest Telegram turns with route, intent, tools, warnings, and duration."
+                infoTitle="Recent Conversations"
+                infoDescription="ตัวอย่าง turn ล่าสุดแบบ conversation-first เพื่อให้เห็น user text, route, intent, tool chain, warning และคำตอบสุดท้ายในที่เดียว."
+                infoAction="ถ้าต้อง debug รายละเอียด thinking/tool payload ให้เปิด Monitor แบบเต็ม."
+              >
                 <a href="/monitor" className="inline-flex items-center gap-1 text-sm font-medium text-zinc-700 hover:underline dark:text-zinc-200">
                   Open monitor
                   <ExternalLink className="size-3.5" />
                 </a>
-              </CardHeader>
+              </SectionHeading>
               <CardContent className="space-y-3">
                 {data.recentTurns.length ? data.recentTurns.map(turn => <RecentTurn key={turn.id} turn={turn} />) : (
                   <p className="text-sm text-zinc-500">No recent conversation markers found.</p>
@@ -502,10 +816,13 @@ export default function DashboardPage() {
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Cost And Tokens</CardTitle>
-                <p className="text-sm text-zinc-500">Model usage only; deterministic tool-only turns are not counted as model calls.</p>
-              </CardHeader>
+              <SectionHeading
+                title="Cost And Tokens"
+                description="Model usage only; deterministic tool-only turns are not counted as model calls."
+                infoTitle="Cost And Tokens"
+                infoDescription="สรุป token และค่าใช้จ่าย model calls เพื่อแยกต้นทุน AI ออกจาก deterministic tool path."
+                infoAction="ถ้าค่าใช้จ่ายสูง ให้ดู agent/model ที่ใช้เยอะ แล้วตรวจ prompt, SOUL, และ flow ที่เข้า model บ่อย."
+              />
               <CardContent className="space-y-4">
                 <div>
                   <p className="text-xs text-zinc-500">Input / Output tokens</p>
@@ -535,20 +852,26 @@ export default function DashboardPage() {
 
           <div className="grid gap-4 xl:grid-cols-3">
             <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-base">Agent And MCP Matrix</CardTitle>
-                <p className="text-sm text-zinc-500">Source of truth from system health and openclaw.json bindings.</p>
-              </CardHeader>
+              <SectionHeading
+                title="Agent And MCP Matrix"
+                description="Source of truth from system health and openclaw.json bindings."
+                infoTitle="Agent And MCP Matrix"
+                infoDescription="ตารางรวม agent, access mode, MCP URL, จำนวน tools, SOUL status, auth status และ channel binding."
+                infoAction="ใช้ตรวจว่า agent เห็น tool ตามสิทธิ์จริงหรือไม่ ก่อนให้ user ถามผ่าน Telegram/LINE/Webchat."
+              />
               <CardContent>
                 <AgentMatrix agents={data.agents} />
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Health Warnings</CardTitle>
-                <p className="text-sm text-zinc-500">Release/runtime warnings are included with system checks.</p>
-              </CardHeader>
+              <SectionHeading
+                title="Health Warnings"
+                description="Release/runtime warnings are included with system checks."
+                infoTitle="Health Warnings"
+                infoDescription="warning สำคัญจาก health endpoint รวมถึง runtime, fallback model, MCP, SOUL, auth และ telemetry."
+                infoAction="ถ้า warning กระทบ production ให้ใช้ Recommended Next Actions หรือเปิด System เพื่อดูรายละเอียดเต็ม."
+              />
               <CardContent>
                 <HealthWarnings data={data} />
               </CardContent>
