@@ -147,10 +147,27 @@ export async function submitAnthropicOAuth(redirectUrl: string): Promise<{ messa
 export interface OpenRouterModel {
   id: string
   name: string
+  provider?: string
+  contextLength?: number
+  ownedBy?: string
+  capabilities?: Record<string, unknown>
   pricing?: {
     prompt: string
     completion: string
+    [key: string]: string | undefined
   }
+}
+
+export interface ModelCatalog {
+  ok: boolean
+  provider: string
+  status: 'ready' | 'missing_key' | 'auth_error' | 'provider_error' | 'timeout' | 'unknown_provider' | string
+  source: 'live' | 'cache' | 'not_configured' | 'provider' | 'none' | string
+  cache: { hit: boolean; ttlSeconds: number }
+  models: OpenRouterModel[]
+  warnings: string[]
+  summary?: string
+  generatedAt?: string
 }
 
 // API functions
@@ -376,9 +393,14 @@ export async function resetAgentSessions(agentId: string): Promise<{ ok: boolean
   return data
 }
 
+export async function getModelCatalog(provider: string, refresh = false): Promise<ModelCatalog> {
+  const { data } = await api.get('/api/models/catalog', { params: refresh ? { provider, refresh: true } : { provider } })
+  return data
+}
+
 export async function getModels(provider: string): Promise<OpenRouterModel[]> {
-  const { data } = await api.get('/api/models', { params: { provider } })
-  return Array.isArray(data) ? data : (data.data ?? [])
+  const data = await getModelCatalog(provider)
+  return data.models ?? []
 }
 
 export interface ChatSession {

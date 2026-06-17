@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getConfig, putConfig, getModels, testProvider, restartGateway, startAnthropicOAuth, submitAnthropicOAuth, PROVIDERS, type ProviderConfig } from '@/lib/api'
+import { getConfig, putConfig, getModelCatalog, testProvider, restartGateway, startAnthropicOAuth, PROVIDERS, type ModelCatalog, type ProviderConfig } from '@/lib/api'
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { toast } from 'sonner'
-import { ChevronsUpDown, Check, AlertCircle } from 'lucide-react'
+import { ChevronsUpDown, Check, AlertCircle, RefreshCw } from 'lucide-react'
 
 function parseProviderFromModel(model: string): string {
   const p = PROVIDERS.find(pr => model.startsWith(pr.modelPrefix + '/'))
@@ -20,8 +20,8 @@ function parseModelId(model: string, prefix: string): string {
   return model.startsWith(prefix + '/') ? model.slice(prefix.length + 1) : model
 }
 
-function formatPrice(val: string) {
-  const n = parseFloat(val)
+function formatPrice(val?: string) {
+  const n = parseFloat(String(val || ''))
   if (isNaN(n) || n === 0) return 'ฟรี'
   return `$${(n * 1_000_000).toFixed(2)}/1M`
 }
@@ -33,43 +33,34 @@ const RECOMMENDED = [
   { id: 'openrouter/qwen/qwen3.5-122b-a10b',      label: 'ดีที่สุด',    desc: 'Qwen 3.5 122B — ประสิทธิภาพสูงสุด' },
 ]
 
-// Anthropic models สำหรับ OAuth (Pro/Max subscription)
-// ราคาต่อ 1M tokens (input/output) จาก platform.claude.com/docs
-const ANTHROPIC_MODELS = [
-  {
-    id: 'claude-haiku-4-5',
-    label: 'Claude Haiku 4.5',
-    badge: 'ประหยัดสุด ⚡',
-    badgeCls: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-    desc: 'เร็วที่สุด ประหยัดสุด — เหมาะกับงาน FAQ, สอบถามข้อมูลทั่วไป',
-    inputPrice: '$1',
-    outputPrice: '$5',
-    context: '200K tokens',
-    recommended: false,
-  },
-  {
-    id: 'claude-sonnet-4-6',
-    label: 'Claude Sonnet 4.6',
-    badge: 'แนะนำ ⭐',
-    badgeCls: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-    desc: 'สมดุลความเร็ว/ความฉลาด — เหมาะกับงาน ERP, วิเคราะห์ข้อมูล, ตอบคำถามซับซ้อน',
-    inputPrice: '$3',
-    outputPrice: '$15',
-    context: '1M tokens',
-    recommended: true,
-  },
-  {
-    id: 'claude-opus-4-8',
-    label: 'Claude Opus 4.8',
-    badge: 'ฉลาดสุด 🧠',
-    badgeCls: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-    desc: 'ฉลาดที่สุด — เหมาะกับงาน reasoning ซับซ้อน, เขียนโค้ด, วิเคราะห์เชิงลึก',
-    inputPrice: '$5',
-    outputPrice: '$25',
-    context: '1M tokens',
-    recommended: false,
-  },
-]
+function catalogStatusText(status?: string) {
+  if (status === 'ready') return 'Ready'
+  if (status === 'missing_key') return 'Missing key'
+  if (status === 'auth_error') return 'Auth failed'
+  if (status === 'timeout') return 'Provider timeout'
+  if (status === 'provider_error') return 'Provider error'
+  if (status === 'unknown_provider') return 'Unknown provider'
+  return 'Checking'
+}
+
+function catalogStatusClass(status?: string) {
+  if (status === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'
+  if (status === 'missing_key') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300'
+  if (!status) return 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300'
+  return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300'
+}
+
+function catalogHelp(catalog?: ModelCatalog, provider?: ProviderConfig) {
+  if (!catalog) return 'กำลังตรวจสอบ model catalog จาก provider'
+  if (catalog.status === 'ready') {
+    const source = catalog.cache?.hit ? 'cache' : 'provider สด'
+    return `พบ ${catalog.models.length} models จาก ${source}${provider?.id === 'kilocode' && catalog.warnings.length ? ' แต่ต้องตั้ง API key ก่อนใช้งานจริง' : ''}`
+  }
+  if (catalog.status === 'missing_key') return `ยังไม่ได้ตั้ง ${provider?.label || 'provider'} API key จึงยังไม่โหลด model จาก provider`
+  if (catalog.status === 'auth_error') return 'API key ใช้ไม่ได้หรือ token ถูกปฏิเสธ กรุณาตรวจ key แล้วลองใหม่'
+  if (catalog.status === 'timeout') return 'provider ตอบช้าเกินกำหนด ลอง refresh อีกครั้งหรือรอสักครู่'
+  return catalog.summary || 'โหลด model catalog ไม่สำเร็จ'
+}
 
 export default function ModelPage() {
   const qc = useQueryClient()
@@ -90,9 +81,9 @@ export default function ModelPage() {
   const [oauthError, setOauthError] = useState('')
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
-  const { data: fetchedModels, isLoading: modelsLoading, isError: modelsError } = useQuery({
+  const { data: modelCatalog, isLoading: modelsLoading, isError: modelsError, isFetching: modelsFetching } = useQuery({
     queryKey: ['models', selectedProvider.id],
-    queryFn: () => getModels(selectedProvider.id),
+    queryFn: () => getModelCatalog(selectedProvider.id),
     enabled: !!config,
     staleTime: 5 * 60 * 1000,
     retry: 1,
@@ -129,8 +120,27 @@ export default function ModelPage() {
   // Provider อื่น → ใส่ prefix ตามปกติ
   // (คำนวณหลัง isAnthropicOAuth — ดูด้านล่าง)
   const currentModel = config?.agents?.defaults?.model?.primary ?? '-'
-  const modelList: { id: string; name: string; pricing?: { prompt: string; completion: string } }[] = fetchedModels ?? []
+  const modelList = modelCatalog?.models ?? []
   const selectedModelInfo = modelList.find(m => m.id === selectedModelId)
+  const recommendedModels = selectedProvider.id === 'openrouter'
+    ? RECOMMENDED
+      .map(r => ({ ...r, modelId: parseModelId(r.id, 'openrouter') }))
+      .filter(r => modelList.some(m => m.id === r.modelId))
+    : []
+  const staleRecommendedCount = selectedProvider.id === 'openrouter'
+    ? RECOMMENDED.length - recommendedModels.length
+    : 0
+
+  async function refreshModels() {
+    try {
+      const data = await getModelCatalog(selectedProvider.id, true)
+      qc.setQueryData(['models', selectedProvider.id], data)
+      if (data.status === 'ready') toast.success(`โหลด ${data.models.length} models จาก provider แล้ว`)
+      else toast.warning(catalogStatusText(data.status))
+    } catch {
+      toast.error('Refresh models ไม่สำเร็จ')
+    }
+  }
 
   async function handleTest() {
     setTesting(true)
@@ -511,7 +521,7 @@ export default function ModelPage() {
                       <div className="flex-1">
                         <p className="text-xs font-medium mb-1">หลัง Login เสร็จ — Copy URL ทั้งหมดจาก address bar</p>
                         <div className="rounded-md bg-zinc-50 dark:bg-zinc-900 border px-3 py-2 text-xs text-zinc-500 space-y-1">
-                          <p>Browser จะขึ้น <span className="text-red-500 font-medium">"This site can't be reached"</span> — <strong>ปกติ ไม่ต้องตกใจ</strong></p>
+                          <p>Browser จะขึ้น <span className="text-red-500 font-medium">&quot;This site can&apos;t be reached&quot;</span>, <strong>ปกติ ไม่ต้องตกใจ</strong></p>
                           <p>URL ใน address bar จะมีหน้าตาแบบนี้:</p>
                           <p className="font-mono text-zinc-400 break-all text-xs bg-zinc-100 dark:bg-zinc-800 rounded px-2 py-1">
                             http://localhost:53692/callback?code=<span className="text-orange-500">XXXXX</span>&state=<span className="text-orange-500">XXXXX</span>
@@ -564,22 +574,18 @@ export default function ModelPage() {
             </Card>
           )}
 
-          {/* Anthropic model list — แสดงเมื่อใช้ OAuth */}
+          {/* Anthropic OAuth note — model list now comes from live provider catalog */}
           {selectedProvider.id === 'anthropic' && isAnthropicOAuth && oauthStep === 'idle' && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">เลือก Claude Model</CardTitle>
-                <p className="text-xs text-zinc-500 mt-1">
-                  ราคาต่อ 1 ล้าน tokens (input/output) — ใช้ quota จาก Pro/Max subscription ของคุณ
-                </p>
+                <CardTitle className="text-sm">Anthropic OAuth</CardTitle>
+                <p className="text-xs text-zinc-500 mt-1">Claude models are loaded from Anthropic&apos;s live model catalog.</p>
               </CardHeader>
-              <CardContent className="space-y-2">
-                {/* Info: Usage Credits */}
-                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 px-3 py-2.5 space-y-1 mb-3">
-                  <p className="text-xs font-medium text-blue-700 dark:text-blue-400">ℹ️ ข้อมูลเกี่ยวกับค่าใช้จ่าย</p>
+              <CardContent>
+                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 px-3 py-2.5 space-y-1">
+                  <p className="text-xs font-medium text-blue-700 dark:text-blue-400">ข้อมูลเกี่ยวกับค่าใช้จ่าย</p>
                   <p className="text-xs text-blue-600 dark:text-blue-300">
-                    การใช้งานผ่าน OAuth ใช้ <strong>Usage Credits</strong> ใน claude.ai account ของคุณ
-                    — ไม่ใช่ weekly session limit ที่เห็นในหน้าแชทปกติ
+                    การใช้งานผ่าน OAuth ใช้ Usage Credits ใน claude.ai account ของคุณ ไม่ใช่ weekly session limit ที่เห็นในหน้าแชทปกติ
                   </p>
                   <p className="text-xs text-blue-500 dark:text-blue-400">
                     ตรวจสอบและเติม credits ได้ที่{' '}
@@ -591,54 +597,32 @@ export default function ModelPage() {
                     >
                       claude.ai/settings/usage
                     </a>
-                    {' '}→ หัวข้อ &ldquo;Usage credits&rdquo;
                   </p>
                 </div>
-                {ANTHROPIC_MODELS.map(m => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setSelectedModelId(m.id)}
-                    className={`w-full text-left px-4 py-3 rounded-md border text-sm transition-colors ${
-                      selectedModelId === m.id
-                        ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800'
-                        : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium">{m.label}</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${m.badgeCls}`}>{m.badge}</span>
-                    </div>
-                    <p className="text-xs text-zinc-500 mb-1.5">{m.desc}</p>
-                    <div className="flex gap-3 text-xs text-zinc-400">
-                      <span>⚡ {m.id === 'claude-haiku-4-5' ? 'เร็วที่สุด' : m.id === 'claude-sonnet-4-6' ? 'เร็ว' : 'ปานกลาง'}</span>
-                      <span>🧠 {m.id === 'claude-haiku-4-5' ? 'ฉลาดพอ' : m.id === 'claude-sonnet-4-6' ? 'ฉลาดมาก' : 'ฉลาดสุด'}</span>
-                      <span>📋 Context {m.context}</span>
-                    </div>
-                  </button>
-                ))}
               </CardContent>
             </Card>
           )}
 
           {/* Recommended (OpenRouter only) */}
-          {selectedProvider.id === 'openrouter' && (
+          {selectedProvider.id === 'openrouter' && recommendedModels.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">แนะนำสำหรับ ERP Chatbot ภาษาไทย</CardTitle>
-                <p className="text-xs text-zinc-500 mt-1">Thai ดี + Tool Use — คลิกเพื่อเลือก</p>
+                <p className="text-xs text-zinc-500 mt-1">
+                  Thai ดี + Tool Use จาก live catalog เท่านั้น
+                  {staleRecommendedCount > 0 ? ` · ซ่อน ${staleRecommendedCount} รายการที่ไม่อยู่ใน catalog ตอนนี้` : ''}
+                </p>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {RECOMMENDED.map(r => {
-                    const rModelId = parseModelId(r.id, 'openrouter')
+                  {recommendedModels.map(r => {
                     return (
                       <button
                         key={r.id}
                         type="button"
-                        onClick={() => setSelectedModelId(rModelId)}
+                        onClick={() => setSelectedModelId(r.modelId)}
                         className={`w-full text-left px-3 py-2 rounded-md border text-sm transition-colors ${
-                          selectedModelId === rModelId
+                          selectedModelId === r.modelId
                             ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800'
                             : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
                         }`}
@@ -657,21 +641,44 @@ export default function ModelPage() {
         {/* คอลัมน์ขวา: เลือก Model */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">
-              {selectedProvider.noApiKey ? 'ขั้นตอนที่ 2' : 'ขั้นตอนที่ 3'} — เลือก Model
-              <span className="text-zinc-400 font-normal text-sm ml-2">({selectedProvider.label})</span>
-            </CardTitle>
-            {selectedProvider.id === 'openrouter' && (
-              <p className="text-xs text-zinc-500 mt-1">ราคาเป็น USD ต่อ 1 ล้าน token</p>
-            )}
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">
+                  {selectedProvider.noApiKey ? 'ขั้นตอนที่ 2' : 'ขั้นตอนที่ 3'} — เลือก Model
+                  <span className="text-zinc-400 font-normal text-sm ml-2">({selectedProvider.label})</span>
+                </CardTitle>
+                {selectedProvider.id === 'openrouter' && (
+                  <p className="text-xs text-zinc-500 mt-1">ราคาเป็น USD ต่อ 1 ล้าน token</p>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={refreshModels} disabled={modelsFetching}>
+                <RefreshCw className={`h-4 w-4 ${modelsFetching ? 'animate-spin' : ''}`} />
+                Refresh models
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
+
+            <div className={`rounded-md border px-3 py-2.5 text-sm ${catalogStatusClass(modelCatalog?.status)}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">{catalogStatusText(modelCatalog?.status)}</span>
+                {modelCatalog?.cache?.hit && <span className="text-xs">Using cache</span>}
+              </div>
+              <p className="mt-1 text-xs opacity-90">{catalogHelp(modelCatalog, selectedProvider)}</p>
+              {modelCatalog?.warnings?.length ? (
+                <div className="mt-2 space-y-1">
+                  {modelCatalog.warnings.map(warning => (
+                    <p key={warning} className="break-words text-xs opacity-90">{warning}</p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
             {/* Error state */}
             {modelsError && (
               <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 rounded-md px-3 py-2">
                 <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>โหลด model list ไม่สำเร็จ — ตรวจสอบ API Key แล้วลองใหม่</span>
+                <span>โหลด model catalog ไม่สำเร็จ — ตรวจสอบ API server แล้วลองใหม่</span>
               </div>
             )}
 
