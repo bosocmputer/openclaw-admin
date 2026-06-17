@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 
 // ─── Time helpers ──────────────────────────────────────────────────────────────
-function tsToThai(ts: string): string {
+function legacyTsToThai(ts: string): string {
   if (!ts) return ''
   const parts = ts.split(':')
   if (parts.length < 3) return ts
@@ -20,16 +20,39 @@ function tsToThai(ts: string): string {
   return `${String(h).padStart(2, '0')}:${m}:${s}`
 }
 
-function tsToSec(ts: string): number {
+function legacyTsToSec(ts: string): number {
   const p = ts.split(':')
   if (p.length < 3) return 0
   return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60 + parseFloat(p[2])
+}
+
+function formatBangkokTime(ms: number, includeDate: boolean): string {
+  const date = new Date(ms)
+  return date.toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    ...(includeDate ? { day: '2-digit', month: 'short' } : {}),
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+function bangkokDayKey(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 interface FlatEvent {
   ts: string
   tsThai: string
+  timestamp?: string | null
+  timeMs?: number | null
   type: string
   text: string
   agentId: string
@@ -48,6 +71,28 @@ interface FlatEvent {
   turnModelCalls?: number
   turnInputTokens?: number
   turnOutputTokens?: number
+}
+
+function eventTimeMs(e: Pick<FlatEvent, 'timeMs' | 'timestamp' | 'ts'>): number | null {
+  if (typeof e.timeMs === 'number' && Number.isFinite(e.timeMs)) return e.timeMs
+  if (e.timestamp) {
+    const parsed = new Date(e.timestamp).getTime()
+    if (Number.isFinite(parsed)) return parsed
+  }
+  if (e.ts) return legacyTsToSec(e.ts) * 1000
+  return null
+}
+
+function eventDayKey(e: Pick<FlatEvent, 'timeMs' | 'timestamp' | 'ts'>): string | null {
+  const ms = eventTimeMs(e)
+  if (ms == null || !e.timestamp) return null
+  return bangkokDayKey(ms)
+}
+
+function formatEventTime(e: FlatEvent, includeDate: boolean): string {
+  const ms = eventTimeMs(e)
+  if (ms != null && e.timestamp) return formatBangkokTime(ms, includeDate)
+  return e.tsThai || legacyTsToThai(e.ts)
 }
 
 interface SessionGroup {
@@ -127,7 +172,7 @@ function buildGroups(data: MonitorData): SessionGroup[] {
     for (const { ch, sessions } of channels) {
       for (const session of sessions) {
         const isActive = session.state === 'thinking' || session.state === 'tool_call'
-        let lastMsgTs: string | null = null
+        let lastMsgMs: number | null = null
         const events: FlatEvent[] = []
 
         const evList = session.events as MonitorEvent[]
@@ -142,19 +187,23 @@ function buildGroups(data: MonitorData): SessionGroup[] {
           const eventOutputTokens = (e as MonitorEvent).outputTokens
           const eventCost = (e as MonitorEvent).cost
           const eventHasUsage = hasUsageMetrics({ cost: eventCost, inputTokens: eventInputTokens, outputTokens: eventOutputTokens })
+          const currentMs = eventTimeMs({
+            ts: e.ts,
+            timestamp: (e as MonitorEvent).timestamp,
+            timeMs: (e as MonitorEvent).timeMs,
+          })
           let responseDuration: number | undefined
 
           if (e.type === 'message') {
-            lastMsgTs = e.ts
+            lastMsgMs = currentMs
             turnCost = 0
             turnModelCalls = 0
             turnInputTokens = 0
             turnOutputTokens = 0
-          } else if (e.type === 'reply' && lastMsgTs) {
-            const diff = tsToSec(e.ts) - tsToSec(lastMsgTs)
-            const real = diff < 0 ? diff + 86400 : diff
+          } else if (e.type === 'reply' && lastMsgMs != null && currentMs != null) {
+            const real = (currentMs - lastMsgMs) / 1000
             if (real >= 0 && real < 3600) responseDuration = real
-            lastMsgTs = null
+            lastMsgMs = null
           }
 
           // สะสม usage ทุก LLM call ในรอบนี้ (thinking + reply)
@@ -166,7 +215,12 @@ function buildGroups(data: MonitorData): SessionGroup[] {
           }
 
           events.push({
-            ts: e.ts, tsThai: tsToThai(e.ts), type: e.type, text: e.text,
+            ts: e.ts,
+            tsThai: legacyTsToThai(e.ts),
+            timestamp: (e as MonitorEvent).timestamp ?? null,
+            timeMs: (e as MonitorEvent).timeMs ?? null,
+            type: e.type,
+            text: e.text,
             agentId: agent.id, channel: ch, user: session.user,
             sessionKey: session.sessionKey, isLive: isActive && isLast, responseDuration,
             latency: (e as MonitorEvent).latency,
@@ -288,7 +342,7 @@ export default function MonitorPage() {
 
   if (isGlobal) {
     events = groups.flatMap(g => g.events)
-    events.sort((a, b) => a.ts.localeCompare(b.ts))
+    events.sort((a, b) => (eventTimeMs(a) ?? 0) - (eventTimeMs(b) ?? 0))
   } else {
     const g = groups.find(g => g.sessionKey === effectiveKey)
     if (g) events = g.events
@@ -310,6 +364,8 @@ export default function MonitorPage() {
   })
   const hiddenNoiseCount = filteredWithNoise.filter(isNoiseEvent).length
   const filtered = showNoise ? filteredWithNoise : filteredWithNoise.filter(e => !isNoiseEvent(e))
+  const visibleDayCount = new Set(filtered.map(eventDayKey).filter(Boolean)).size
+  const showEventDates = visibleDayCount > 1
 
   function handleToggleExpandAll() {
     if (expandAll) {
@@ -570,7 +626,9 @@ export default function MonitorPage() {
                 onClick={() => toggleRow(i)}
               >
                 <div className="flex items-start px-2 py-0.5 leading-5">
-                  <span className="shrink-0 w-20 text-zinc-600">{e.tsThai}</span>
+                  <span className={`shrink-0 text-zinc-600 ${showEventDates ? 'w-32' : 'w-20'}`}>
+                    {formatEventTime(e, showEventDates)}
+                  </span>
                   {isGlobal && (
                     <span className={`shrink-0 w-24 truncate ${agentColor(e.agentId)}`}>
                       {e.agentId}·{e.channel === 'telegram' ? 'tg' : e.channel === 'line' ? 'line' : 'web'}
@@ -634,7 +692,7 @@ export default function MonitorPage() {
                   <span className="shrink-0 w-4 text-right text-zinc-600">{isExp ? '▲' : '▼'}</span>
                 </div>
                 {isExp && (
-                  <pre className="px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ml-20">
+                  <pre className={`px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ${showEventDates ? 'ml-32' : 'ml-20'}`}>
                     {expandText}
                     {e.type === 'tool' && e.toolResult && (
                       <span className="block mt-2 pt-2 border-t border-zinc-700 text-zinc-400">

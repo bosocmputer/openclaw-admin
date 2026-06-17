@@ -517,6 +517,8 @@ export async function getGatewayLogs(lines = 500): Promise<LogEntry[]> {
 
 export interface MonitorEvent {
   ts: string
+  timestamp?: string | null
+  timeMs?: number | null
   type: 'message' | 'thinking' | 'tool' | 'reply' | 'error' | string
   text: string
   agentId?: string
