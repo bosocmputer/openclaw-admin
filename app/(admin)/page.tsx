@@ -63,7 +63,7 @@ function formatMoney(value?: number | null) {
 }
 
 function formatCount(value?: number | null) {
-  if (value == null) return '-'
+  if (value == null || !Number.isFinite(Number(value))) return '-'
   return Intl.NumberFormat('en-US').format(value)
 }
 
