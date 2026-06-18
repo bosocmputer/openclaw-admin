@@ -637,7 +637,8 @@ export default function ModelPage() {
   const missingTextProvider = selectedTextModels
     .map(model => providerFromRef(model))
     .find(provider => !provider.noApiKey && !config?.env?.[provider.envKey])
-  const unverifiedTextModels = selectedTextModels.filter(model => !textTestResults[model]?.ok)
+  const textModelReady = (model: string) => Boolean(textTestResults[model]?.ok) || isRuntimeVerified(runtimeState(model, 'text'))
+  const unverifiedTextModels = selectedTextModels.filter(model => !textModelReady(model))
   const textModelsReady = Boolean(primary) && unverifiedTextModels.length === 0
   const messageTesting = Boolean(textTestingModel)
 
@@ -986,8 +987,8 @@ export default function ModelPage() {
   const imageElapsedText = imageTesting && imageTestStartedAt
     ? `${Math.max(0, Math.round((progressNowMs - imageTestStartedAt) / 1000))}s`
     : ''
-  const primaryPassed = Boolean(primary && textTestResults[primary]?.ok)
-  const fallbackPassedCount = fallbacks.filter(model => textTestResults[model]?.ok).length
+  const primaryPassed = Boolean(primary && textModelReady(primary))
+  const fallbackPassedCount = fallbacks.filter(model => textModelReady(model)).length
   const providerKeyCount = PROVIDERS.filter(provider => provider.noApiKey || config?.env?.[provider.envKey]).length
   const imageStateLabel = imagePrimary ? (imageReady ? 'พร้อม' : 'ยังไม่เปิด') : 'ปิดอยู่'
 
