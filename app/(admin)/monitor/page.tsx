@@ -65,6 +65,10 @@ interface FlatEvent {
   inputTokens?: number
   outputTokens?: number
   cost?: number
+  model?: string | null
+  provider?: string | null
+  modelSource?: 'actual' | 'configured' | string | null
+  finishReason?: string | null
   toolName?: string
   toolInput?: string
   toolResult?: string
@@ -155,6 +159,24 @@ function formatTokenK(inputTokens?: number, outputTokens?: number) {
   return (((inputTokens ?? 0) + (outputTokens ?? 0)) / 1000).toFixed(1)
 }
 
+function compactModel(value?: string | null) {
+  if (!value) return ''
+  return value
+    .replace(/^openrouter\//, '')
+    .replace(/^google\//, 'google/')
+    .replace(/^openai\//, 'openai/')
+}
+
+function modelTitle(e: Pick<FlatEvent, 'model' | 'provider' | 'modelSource' | 'finishReason'>) {
+  const parts = [
+    e.model ? `Model: ${e.model}` : null,
+    e.provider ? `Provider: ${e.provider}` : null,
+    e.modelSource ? `Source: ${e.modelSource}` : null,
+    e.finishReason ? `Finish: ${e.finishReason}` : null,
+  ].filter(Boolean)
+  return parts.join('\n')
+}
+
 const AGENT_COLORS = ['text-blue-400', 'text-emerald-400', 'text-orange-400', 'text-pink-400', 'text-cyan-400', 'text-violet-400']
 const agentColorMap: Record<string, string> = {}
 let agentColorIdx = 0
@@ -210,8 +232,8 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             lastMsgMs = null
           }
 
-          // สะสม usage ทุก LLM call ในรอบนี้ (thinking + reply)
-          if ((e.type === 'thinking' || e.type === 'reply') && eventHasUsage) {
+          // สะสม usage ทุก LLM call ในรอบนี้; deterministic tool-only events ไม่มี usage/model จึงไม่ถูกนับ
+          if (e.type !== 'message' && eventHasUsage) {
             turnModelCalls += 1
             turnInputTokens += eventInputTokens ?? 0
             turnOutputTokens += eventOutputTokens ?? 0
@@ -231,6 +253,10 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             inputTokens: eventInputTokens,
             outputTokens: eventOutputTokens,
             cost: eventCost,
+            model: (e as MonitorEvent).model,
+            provider: (e as MonitorEvent).provider,
+            modelSource: (e as MonitorEvent).modelSource,
+            finishReason: (e as MonitorEvent).finishReason,
             toolName: (e as MonitorEvent).toolName,
             toolInput: (e as MonitorEvent).toolInput,
             toolResult: (e as MonitorEvent).toolResult,
@@ -576,7 +602,12 @@ export default function MonitorPage() {
                         <span className="text-yellow-500">${msg.usage.cost.toFixed(4)}</span>
                       </>
                     )}
-                    {msg.model && <span className="truncate max-w-32 text-zinc-600">{msg.model}</span>}
+                    {msg.model && (
+                      <span className="max-w-56 truncate rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-500" title={`${msg.provider ? `${msg.provider} · ` : ''}${msg.model}`}>
+                        {compactModel(msg.model)}
+                      </span>
+                    )}
+                    {msg.stopReason && <span className="text-zinc-600">finish: {msg.stopReason}</span>}
                   </div>
                   {msg.thinking && (
                     <details className="mb-1">
@@ -634,7 +665,18 @@ export default function MonitorPage() {
                   e.toolInput ? `Input:\n${e.toolInput}` : null,
                 ].filter(Boolean).join('\n\n')
               : ''
-            const expandedBody = [expandText, toolMetaText].filter(Boolean).join('\n\n')
+            const modelMetaText = e.model
+              ? [
+                  `Model: ${e.model}`,
+                  e.provider ? `Provider: ${e.provider}` : null,
+                  e.modelSource ? `Model source: ${e.modelSource}` : null,
+                  e.finishReason ? `Finish reason: ${e.finishReason}` : null,
+                  e.inputTokens != null ? `Input tokens: ${e.inputTokens.toLocaleString()}` : null,
+                  e.outputTokens != null ? `Output tokens: ${e.outputTokens.toLocaleString()}` : null,
+                  e.cost != null ? `Cost: $${e.cost.toFixed(6)}` : null,
+                ].filter(Boolean).join('\n')
+              : ''
+            const expandedBody = [expandText, modelMetaText, toolMetaText].filter(Boolean).join('\n\n')
 
             return (
               <div
@@ -665,6 +707,14 @@ export default function MonitorPage() {
                     )}
                     {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
                   </span>
+                  {e.model && e.type !== 'message' && (
+                    <span
+                      className={`ml-1 hidden max-w-44 shrink-0 truncate rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] sm:inline ${e.modelSource === 'configured' ? 'text-amber-400' : 'text-zinc-500'}`}
+                      title={modelTitle(e)}
+                    >
+                      {compactModel(e.model)}
+                    </span>
+                  )}
                   {/* tool event: แสดง duration */}
                   {e.type === 'tool' && e.latency != null && (
                     <span className="shrink-0 flex gap-1.5 items-center text-zinc-600 text-xs ml-1">

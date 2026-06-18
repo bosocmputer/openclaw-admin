@@ -63,6 +63,13 @@ export interface OpenClawConfig {
     defaults?: {
       model?: {
         primary?: string
+        fallbacks?: string[]
+        timeoutMs?: number
+      }
+      imageModel?: {
+        primary?: string
+        fallbacks?: string[]
+        timeoutMs?: number
       }
       compaction?: {
         mode?: 'default' | 'safeguard'
@@ -168,6 +175,107 @@ export interface ModelCatalog {
   warnings: string[]
   summary?: string
   generatedAt?: string
+}
+
+export type ModelReadinessStatus =
+  | 'ready'
+  | 'not_configured'
+  | 'missing_key'
+  | 'auth_error'
+  | 'provider_error'
+  | 'timeout'
+  | 'unknown_provider'
+  | 'model_not_found'
+  | 'not_image_capable'
+  | 'capability_unknown'
+  | string
+
+export interface ModelRefReadiness {
+  ref: string
+  role: string
+  status: ModelReadinessStatus
+  summary: string
+  provider: string | null
+  modelId: string | null
+  source: string | null
+  catalogStatus: string | null
+  capability: string | null
+  configured: boolean
+}
+
+export interface ModelChainReadiness {
+  primary: ModelRefReadiness
+  fallbacks: ModelRefReadiness[]
+  timeoutMs: number | null
+  configured: boolean
+}
+
+export interface AgentModelReadiness {
+  id: string
+  modelSource: 'agent' | 'defaults'
+  imageModelSource: 'agent' | 'defaults'
+  usesImageTool: boolean
+  model: ModelChainReadiness
+  imageModel: ModelChainReadiness
+}
+
+export interface ModelReadinessIssue {
+  scope: string
+  ref: string
+  status: ModelReadinessStatus
+  summary: string
+  capability: string | null
+}
+
+export interface ModelReadinessWarning {
+  id: string
+  status: string
+  summary: string
+}
+
+export interface ModelReadiness {
+  ok: boolean
+  generatedAt: string
+  cache: { hit: boolean; ttlSeconds: number }
+  defaults: {
+    model: ModelChainReadiness
+    imageModel: ModelChainReadiness
+  }
+  agents: AgentModelReadiness[]
+  providers: Record<string, {
+    status: string
+    source: string
+    cache?: { hit: boolean; ttlSeconds: number }
+    modelCount: number
+    warnings: string[]
+    summary: string
+  }>
+  warnings: ModelReadinessWarning[]
+  blockingIssues: ModelReadinessIssue[]
+}
+
+export interface ModelSettingsChain {
+  primary: string
+  fallbacks?: string[]
+  timeoutMs?: number
+}
+
+export interface ModelSettingsPayload {
+  defaults?: {
+    model?: ModelSettingsChain | null
+    imageModel?: ModelSettingsChain | null
+  }
+  agents?: Record<string, {
+    model?: ModelSettingsChain | null
+    imageModel?: ModelSettingsChain | null
+  }>
+}
+
+export interface ModelSettingsResult {
+  ok: boolean
+  validateOnly?: boolean
+  write?: { ok: boolean; backupId: string; backupPath: string | null; bytes: number; reason: string }
+  readiness: ModelReadiness
 }
 
 // API functions
@@ -403,6 +511,16 @@ export async function getModels(provider: string): Promise<OpenRouterModel[]> {
   return data.models ?? []
 }
 
+export async function getModelReadiness(refresh = false): Promise<ModelReadiness> {
+  const { data } = await api.get('/api/models/readiness', { params: refresh ? { refresh: true } : {} })
+  return data
+}
+
+export async function putModelSettings(payload: ModelSettingsPayload, validateOnly = false): Promise<ModelSettingsResult> {
+  const { data } = await api.put('/api/models/settings', payload, { params: validateOnly ? { validateOnly: true } : {} })
+  return data
+}
+
 export interface ChatSession {
   sessionId: string
   userLabel: string
@@ -550,6 +668,10 @@ export interface MonitorEvent {
   inputTokens?: number
   outputTokens?: number
   cost?: number
+  model?: string | null
+  provider?: string | null
+  modelSource?: 'actual' | 'configured' | string | null
+  finishReason?: string | null
   toolName?: string
   toolInput?: string
   toolResult?: string
@@ -704,6 +826,8 @@ export interface SessionReplayMessage {
   usage?: { input: number; output: number; cost: number } | null
   latency?: number | null
   model?: string
+  provider?: string | null
+  modelSource?: 'actual' | 'configured' | string | null
   stopReason?: string
 }
 

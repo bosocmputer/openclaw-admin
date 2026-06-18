@@ -32,6 +32,9 @@ function auditFor(method: string, path: string[]): { action: AuditAction; target
   const [api, group, id, child, childId] = path
   if (api !== 'api') return null
   if (method === 'PUT' && group === 'config') return { action: 'config.update', detail: 'openclaw.json updated' }
+  if (method === 'PUT' && group === 'models' && id === 'settings') {
+    return { action: 'config.update', detail: 'model settings updated' }
+  }
   if (method === 'POST' && group === 'gateway' && id === 'restart') return { action: 'gateway.restart' }
   if (group === 'members') {
     if (method === 'POST') return { action: 'member.create' }

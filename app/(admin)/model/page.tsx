@@ -1,270 +1,476 @@
 'use client'
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getConfig, putConfig, getModelCatalog, testProvider, restartGateway, startAnthropicOAuth, PROVIDERS, type ModelCatalog, type ProviderConfig } from '@/lib/api'
-import { useState, useEffect, useRef } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  getConfig,
+  getModelCatalog,
+  getModelReadiness,
+  putConfig,
+  putModelSettings,
+  restartGateway,
+  startAnthropicOAuth,
+  testProvider,
+  PROVIDERS,
+  type AgentModelReadiness,
+  type ModelCatalog,
+  type ModelSettingsPayload,
+  type OpenRouterModel,
+  type ProviderConfig,
+} from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import { ChevronsUpDown, Check, AlertCircle, RefreshCw } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronsUpDown,
+  Eye,
+  Image as ImageIcon,
+  KeyRound,
+  Layers,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  ShieldCheck,
+  Trash2,
+  Zap,
+} from 'lucide-react'
 
-function parseProviderFromModel(model: string): string {
-  const p = PROVIDERS.find(pr => model.startsWith(pr.modelPrefix + '/'))
-  return p?.id ?? 'openrouter'
+type Section = 'primary' | 'fallbacks' | 'image'
+
+const OPENROUTER_RECOMMENDED = {
+  primary: 'openrouter/google/gemini-2.5-flash-lite',
+  fallbacks: [
+    'openrouter/qwen/qwen3.5-flash-02-23',
+    'openrouter/openai/gpt-4o-mini',
+  ],
+  imagePrimary: 'openrouter/google/gemini-2.5-flash-lite',
+  imageFallbacks: [
+    'openrouter/openai/gpt-4o-mini',
+    'openrouter/qwen/qwen3.5-flash-02-23',
+  ],
+  imageTimeoutMs: 30000,
 }
 
-function parseModelId(model: string, prefix: string): string {
-  return model.startsWith(prefix + '/') ? model.slice(prefix.length + 1) : model
+function providerFromRef(ref: string): ProviderConfig {
+  const providerId = ref.includes('/') ? ref.split('/')[0] : 'openrouter'
+  return PROVIDERS.find(provider => provider.id === providerId) || PROVIDERS[0]
 }
 
-function formatPrice(val?: string) {
-  const n = parseFloat(String(val || ''))
-  if (isNaN(n) || n === 0) return 'ฟรี'
-  return `$${(n * 1_000_000).toFixed(2)}/1M`
+function modelIdFromRef(ref: string, provider: ProviderConfig): string {
+  const prefix = `${provider.modelPrefix}/`
+  return ref.startsWith(prefix) ? ref.slice(prefix.length) : ''
 }
 
-const RECOMMENDED = [
-  { id: 'openrouter/openrouter/free',             label: 'ฟรี',         desc: 'OpenRouter Free — ทดสอบ' },
-  { id: 'openrouter/qwen/qwen3.5-flash-02-23',    label: 'ประหยัดสุด',  desc: 'Qwen 3.5 Flash — Thai ดี, ราคาถูก' },
-  { id: 'openrouter/qwen/qwen3.5-27b',            label: 'แนะนำ ⭐',    desc: 'Qwen 3.5 27B — สมดุลราคา/ประสิทธิภาพ' },
-  { id: 'openrouter/qwen/qwen3.5-122b-a10b',      label: 'ดีที่สุด',    desc: 'Qwen 3.5 122B — ประสิทธิภาพสูงสุด' },
-]
+function fullRef(provider: ProviderConfig, modelId: string) {
+  return modelId ? `${provider.modelPrefix}/${modelId}` : ''
+}
 
-function catalogStatusText(status?: string) {
+function statusVariant(status?: string): 'default' | 'destructive' | 'secondary' {
+  if (status === 'ready') return 'default'
+  if (status === 'not_configured') return 'secondary'
+  if (!status) return 'secondary'
+  return 'destructive'
+}
+
+function statusLabel(status?: string) {
   if (status === 'ready') return 'Ready'
+  if (status === 'not_configured') return 'Not configured'
   if (status === 'missing_key') return 'Missing key'
   if (status === 'auth_error') return 'Auth failed'
-  if (status === 'timeout') return 'Provider timeout'
   if (status === 'provider_error') return 'Provider error'
-  if (status === 'unknown_provider') return 'Unknown provider'
-  return 'Checking'
+  if (status === 'timeout') return 'Timeout'
+  if (status === 'model_not_found') return 'Not found'
+  if (status === 'not_image_capable') return 'Not image-capable'
+  if (status === 'capability_unknown') return 'Unknown capability'
+  return status || 'Unknown'
 }
 
-function catalogStatusClass(status?: string) {
-  if (status === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'
-  if (status === 'missing_key') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300'
+function catalogTone(status?: string) {
+  if (status === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300'
+  if (status === 'missing_key') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
   if (!status) return 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300'
-  return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300'
+  return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
 }
 
-function catalogHelp(catalog?: ModelCatalog, provider?: ProviderConfig) {
-  if (!catalog) return 'กำลังตรวจสอบ model catalog จาก provider'
+function catalogSummary(catalog?: ModelCatalog, provider?: ProviderConfig) {
+  if (!catalog) return 'ยังไม่ได้โหลด catalog'
   if (catalog.status === 'ready') {
-    const source = catalog.cache?.hit ? 'cache' : 'provider สด'
-    return `พบ ${catalog.models.length} models จาก ${source}${provider?.id === 'kilocode' && catalog.warnings.length ? ' แต่ต้องตั้ง API key ก่อนใช้งานจริง' : ''}`
+    return `พบ ${catalog.models.length} models จาก ${catalog.cache?.hit ? 'cache' : 'provider สด'}`
   }
-  if (catalog.status === 'missing_key') return `ยังไม่ได้ตั้ง ${provider?.label || 'provider'} API key จึงยังไม่โหลด model จาก provider`
-  if (catalog.status === 'auth_error') return 'API key ใช้ไม่ได้หรือ token ถูกปฏิเสธ กรุณาตรวจ key แล้วลองใหม่'
-  if (catalog.status === 'timeout') return 'provider ตอบช้าเกินกำหนด ลอง refresh อีกครั้งหรือรอสักครู่'
-  return catalog.summary || 'โหลด model catalog ไม่สำเร็จ'
+  if (catalog.status === 'missing_key') return `ยังไม่ได้ตั้ง ${provider?.label || 'provider'} API key`
+  return catalog.summary || statusLabel(catalog.status)
 }
 
-export default function ModelPage() {
-  const qc = useQueryClient()
-  const [selectedProvider, setSelectedProvider] = useState<ProviderConfig>(PROVIDERS[0])
-  const [selectedModelId, setSelectedModelId] = useState('')
+function inputModalities(model?: OpenRouterModel): string[] {
+  const caps = model?.capabilities as Record<string, unknown> | undefined
+  const raw = caps?.inputModalities || caps?.input_modalities || (model as Record<string, unknown> | undefined)?.inputModalities || (model as Record<string, unknown> | undefined)?.input
+  return Array.isArray(raw) ? raw.map(item => String(item).toLowerCase()) : []
+}
+
+function isImageCapable(model?: OpenRouterModel) {
+  return inputModalities(model).includes('image')
+}
+
+function formatPrice(model?: OpenRouterModel) {
+  const prompt = Number.parseFloat(String(model?.pricing?.prompt || '0'))
+  const completion = Number.parseFloat(String(model?.pricing?.completion || '0'))
+  if (!Number.isFinite(prompt) && !Number.isFinite(completion)) return ''
+  const input = prompt > 0 ? `$${(prompt * 1_000_000).toFixed(2)}` : 'free'
+  const output = completion > 0 ? `$${(completion * 1_000_000).toFixed(2)}` : 'free'
+  return `${input}/${output} per 1M`
+}
+
+function compactModel(ref: string) {
+  return ref.replace(/^openrouter\//, '')
+}
+
+function draftHash(payload: ModelSettingsPayload) {
+  return JSON.stringify(payload)
+}
+
+function ModelPicker({
+  label,
+  value,
+  onChange,
+  imageOnly = false,
+  disabled = false,
+}: {
+  label: string
+  value: string
+  onChange: (next: string) => void
+  imageOnly?: boolean
+  disabled?: boolean
+}) {
+  const initialProvider = providerFromRef(value)
+  const [fallbackProvider, setFallbackProvider] = useState<ProviderConfig>(initialProvider)
   const [open, setOpen] = useState(false)
-  const [apiKey, setApiKey] = useState('')
-  const [showKey, setShowKey] = useState(false)
-  const [testResult, setTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
-  const [testing, setTesting] = useState(false)
-  const savedProviderRef = useRef<string>('')
-  const savedModelRef = useRef<string>('')
+  const qc = useQueryClient()
+  const provider = value ? providerFromRef(value) : fallbackProvider
 
-  // Anthropic OAuth state
-  const [oauthStep, setOauthStep] = useState<'idle' | 'waiting' | 'submitting' | 'done'>('idle')
-  const [oauthUrl, setOauthUrl] = useState('')
-  const [oauthRedirectUrl, setOauthRedirectUrl] = useState('')
-  const [oauthError, setOauthError] = useState('')
-
-  const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
-  const { data: modelCatalog, isLoading: modelsLoading, isError: modelsError, isFetching: modelsFetching } = useQuery({
-    queryKey: ['models', selectedProvider.id],
-    queryFn: () => getModelCatalog(selectedProvider.id),
-    enabled: !!config,
+  const { data: catalog, isFetching } = useQuery({
+    queryKey: ['models-catalog', provider.id],
+    queryFn: () => getModelCatalog(provider.id),
     staleTime: 5 * 60 * 1000,
     retry: 1,
   })
 
-  // โหลด current provider + model + api key จาก config
-  useEffect(() => {
-    if (!config) return
-    const current = config.agents?.defaults?.model?.primary ?? ''
-    if (current) {
-      const pId = parseProviderFromModel(current)
-      const provider = PROVIDERS.find(p => p.id === pId) ?? PROVIDERS[0]
-      const modelId = parseModelId(current, provider.modelPrefix)
-      savedProviderRef.current = provider.id
-      savedModelRef.current = modelId
-      setSelectedProvider(provider)
-      setSelectedModelId(modelId)
-      setApiKey(config.env?.[provider.envKey] ?? '')
-    } else {
-      setApiKey(config.env?.[PROVIDERS[0].envKey] ?? '')
-    }
-  }, [config])
-
-  // เมื่อ user เปลี่ยน provider
-  useEffect(() => {
-    if (!config) return
-    setApiKey(config.env?.[selectedProvider.envKey] ?? '')
-    setTestResult('idle')
-    setSelectedModelId(selectedProvider.id === savedProviderRef.current ? savedModelRef.current : '')
-  }, [selectedProvider]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Anthropic OAuth token → ไม่ใส่ prefix (openclaw รู้จัก claude-* โดยตรง)
-  // Anthropic API key ปกติ → ใส่ prefix anthropic/
-  // Provider อื่น → ใส่ prefix ตามปกติ
-  // (คำนวณหลัง isAnthropicOAuth — ดูด้านล่าง)
-  const currentModel = config?.agents?.defaults?.model?.primary ?? '-'
-  const modelList = modelCatalog?.models ?? []
-  const selectedModelInfo = modelList.find(m => m.id === selectedModelId)
-  const recommendedModels = selectedProvider.id === 'openrouter'
-    ? RECOMMENDED
-      .map(r => ({ ...r, modelId: parseModelId(r.id, 'openrouter') }))
-      .filter(r => modelList.some(m => m.id === r.modelId))
-    : []
-  const staleRecommendedCount = selectedProvider.id === 'openrouter'
-    ? RECOMMENDED.length - recommendedModels.length
+  const modelId = modelIdFromRef(value, provider)
+  const selected = catalog?.models?.find(model => model.id === modelId)
+  const visibleModels = useMemo(() => {
+    const models = catalog?.models || []
+    if (!imageOnly) return models
+    return models.filter(isImageCapable)
+  }, [catalog, imageOnly])
+  const hiddenUnknownCount = imageOnly
+    ? Math.max(0, (catalog?.models?.length || 0) - visibleModels.length)
     : 0
 
-  async function refreshModels() {
+  async function refreshCatalog() {
     try {
-      const data = await getModelCatalog(selectedProvider.id, true)
-      qc.setQueryData(['models', selectedProvider.id], data)
-      if (data.status === 'ready') toast.success(`โหลด ${data.models.length} models จาก provider แล้ว`)
-      else toast.warning(catalogStatusText(data.status))
+      const next = await getModelCatalog(provider.id, true)
+      qc.setQueryData(['models-catalog', provider.id], next)
+      if (next.status === 'ready') toast.success(`โหลด ${next.models.length} models จาก ${provider.label}`)
+      else toast.warning(statusLabel(next.status))
     } catch {
-      toast.error('Refresh models ไม่สำเร็จ')
+      toast.error('Refresh model catalog ไม่สำเร็จ')
     }
   }
 
-  async function handleTest() {
-    setTesting(true)
-    setTestResult('idle')
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 15000)
-    try {
-      const ok = await testProvider(selectedProvider.id, apiKey.trim(), controller.signal)
-      setTestResult(ok ? 'ok' : 'fail')
-    } catch {
-      setTestResult('fail')
-    } finally {
-      clearTimeout(timer)
-      setTesting(false)
-    }
-  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">{label}</p>
+          {imageOnly && <p className="text-xs text-zinc-500">แสดงเฉพาะ model ที่ provider ยืนยันว่า input เป็น image ได้</p>}
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={refreshCatalog} disabled={isFetching || disabled}>
+          <RefreshCw className={`size-4 ${isFetching ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+      </div>
 
-  async function handleOAuthStart() {
-    setOauthError('')
-    setOauthStep('waiting')
-    try {
-      const { url } = await startAnthropicOAuth()
-      setOauthUrl(url)
-    } catch {
-      setOauthError('ไม่สามารถเริ่ม OAuth ได้ — กรุณาลองใหม่')
-      setOauthStep('idle')
-    }
-  }
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
+        {PROVIDERS.map(item => (
+          <button
+            key={item.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              setFallbackProvider(item)
+              onChange('')
+            }}
+            className={`rounded-md border px-2 py-1.5 text-left text-xs transition ${
+              item.id === provider.id
+                ? 'border-zinc-900 bg-zinc-100 font-medium dark:border-zinc-100 dark:bg-zinc-800'
+                : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800'
+            } disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
 
-  async function handleOAuthSubmit() {
-    if (!oauthRedirectUrl.trim()) return
-    setOauthError('')
-    setOauthStep('submitting')
-    try {
-      // fetch โดยตรง ไม่ผ่าน /api/proxy
-      const res = await fetch('/api/oauth/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ redirectUrl: oauthRedirectUrl.trim() }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      setOauthStep('done')
-      setOauthRedirectUrl('')
-      setOauthUrl('')
-      await qc.invalidateQueries({ queryKey: ['config'] })
-      await qc.refetchQueries({ queryKey: ['config'] })
-      // switch ไป Anthropic provider + reset step เพื่อให้ model list แสดง
-      const anthropicProvider = PROVIDERS.find(p => p.id === 'anthropic')
-      if (anthropicProvider) setSelectedProvider(anthropicProvider)
-      setOauthStep('idle')
-      setSelectedModelId('')
-      toast.success(data.message || 'เชื่อมต่อ Anthropic Account สำเร็จ')
-    } catch (e: unknown) {
-      const err = e as Error
-      setOauthError(err?.message || 'เกิดข้อผิดพลาด')
-      setOauthStep('waiting')
-    }
-  }
+      <div className={`rounded-md border px-3 py-2 text-xs ${catalogTone(catalog?.status)}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-medium">{statusLabel(catalog?.status)}</span>
+          {catalog?.cache?.hit && <span>Using cache</span>}
+        </div>
+        <p className="mt-1">{catalogSummary(catalog, provider)}</p>
+        {hiddenUnknownCount > 0 && (
+          <p className="mt-1">ซ่อน {hiddenUnknownCount} models ที่ provider ไม่ส่ง image capability ชัดเจน</p>
+        )}
+      </div>
 
-  async function handleAnthropicLogout() {
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled || catalog?.status !== 'ready'}
+          onClick={() => setOpen(value => !value)}
+          className="inline-flex h-10 w-full items-center justify-between rounded-md border bg-background px-3 text-sm shadow-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className="truncate text-left">
+            {value ? (selected?.name || compactModel(value)) : 'เลือก model...'}
+          </span>
+          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+        </PopoverTrigger>
+        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+          <Command>
+            <CommandInput placeholder="ค้นหา model..." />
+            <CommandList>
+              <CommandEmpty>ไม่พบ model ที่เลือกได้</CommandEmpty>
+              {visibleModels.map(model => {
+                const ref = fullRef(provider, model.id)
+                const active = ref === value
+                return (
+                  <CommandItem
+                    key={model.id}
+                    value={`${model.id} ${model.name}`}
+                    onSelect={() => {
+                      onChange(ref)
+                      setOpen(false)
+                    }}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Check className={`size-4 shrink-0 ${active ? 'opacity-100' : 'opacity-0'}`} />
+                      <div className="min-w-0">
+                        <p className="truncate">{model.name || model.id}</p>
+                        <p className="truncate font-mono text-xs text-zinc-400">{ref}</p>
+                      </div>
+                    </div>
+                    {formatPrice(model) && <span className="hidden shrink-0 text-xs text-zinc-400 sm:inline">{formatPrice(model)}</span>}
+                  </CommandItem>
+                )
+              })}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      {value && (
+        <div className="rounded-md border px-3 py-2 text-xs text-zinc-500">
+          <p className="break-all font-mono text-zinc-700 dark:text-zinc-300">{value}</p>
+          {selected && formatPrice(selected) && <p className="mt-1">{formatPrice(selected)}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReadinessBadge({ status }: { status?: string }) {
+  return <Badge variant={statusVariant(status)}>{statusLabel(status)}</Badge>
+}
+
+function ChainSummary({ title, primary, fallbackCount }: { title: string; primary?: string; fallbackCount?: number }) {
+  return (
+    <div className="rounded-md border px-3 py-2">
+      <p className="text-xs text-zinc-500">{title}</p>
+      <p className="mt-1 truncate font-mono text-sm">{primary || '-'}</p>
+      <p className="mt-1 text-xs text-zinc-500">{fallbackCount || 0} fallback model(s)</p>
+    </div>
+  )
+}
+
+function AgentMatrix({ agents }: { agents: AgentModelReadiness[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Per-Agent Readiness</CardTitle>
+        <p className="text-sm text-zinc-500">ดูว่า agent ไหน inherit default และ agent ไหน override model/image model เอง</p>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead className="text-left text-xs text-zinc-500">
+              <tr className="border-b">
+                <th className="py-2 pr-3 font-medium">Agent</th>
+                <th className="py-2 pr-3 font-medium">Primary</th>
+                <th className="py-2 pr-3 font-medium">Fallbacks</th>
+                <th className="py-2 pr-3 font-medium">Image</th>
+                <th className="py-2 pr-3 font-medium">Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agents.map(agent => (
+                <tr key={agent.id} className="border-b last:border-b-0">
+                  <td className="py-2 pr-3 font-medium">{agent.id}</td>
+                  <td className="py-2 pr-3">
+                    <div className="flex items-center gap-2">
+                      <ReadinessBadge status={agent.model.primary.status} />
+                      <span className="max-w-[260px] truncate font-mono text-xs">{agent.model.primary.ref || '-'}</span>
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3">{agent.model.fallbacks.length}</td>
+                  <td className="py-2 pr-3">
+                    <div className="flex items-center gap-2">
+                      <ReadinessBadge status={agent.usesImageTool ? agent.imageModel.primary.status : 'ready'} />
+                      <span className="max-w-[260px] truncate font-mono text-xs">
+                        {agent.usesImageTool ? (agent.imageModel.primary.ref || 'not configured') : 'not used'}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3 text-xs text-zinc-500">
+                    model: {agent.modelSource}, image: {agent.imageModelSource}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+export default function ModelPage() {
+  const qc = useQueryClient()
+  const [section, setSection] = useState<Section>('primary')
+  const [providerForKey, setProviderForKey] = useState<ProviderConfig>(PROVIDERS[0])
+  const [apiKey, setApiKey] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [testResult, setTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const [oauthUrl, setOauthUrl] = useState('')
+  const [oauthRedirectUrl, setOauthRedirectUrl] = useState('')
+
+  const [primary, setPrimary] = useState('')
+  const [fallbackDraft, setFallbackDraft] = useState('')
+  const [fallbacks, setFallbacks] = useState<string[]>([])
+  const [imagePrimary, setImagePrimary] = useState('')
+  const [imageFallbackDraft, setImageFallbackDraft] = useState('')
+  const [imageFallbacks, setImageFallbacks] = useState<string[]>([])
+  const [imageTimeoutMs, setImageTimeoutMs] = useState(30000)
+  const [validatedHash, setValidatedHash] = useState('')
+  const [showRestartHint, setShowRestartHint] = useState(false)
+
+  const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
+  const { data: readiness, isFetching: readinessFetching } = useQuery({
+    queryKey: ['model-readiness'],
+    queryFn: () => getModelReadiness(),
+    staleTime: 30_000,
+  })
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const wanted = params.get('section')
+    if (wanted === 'fallbacks' || wanted === 'image' || wanted === 'primary') setSection(wanted)
+  }, [])
+
+  useEffect(() => {
     if (!config) return
-    try {
-      // ลบทั้ง token และ model เพื่อป้องกัน error
-      const updated = {
+    const defaults = config.agents?.defaults || {}
+    setPrimary(defaults.model?.primary || '')
+    setFallbacks(defaults.model?.fallbacks || [])
+    setImagePrimary(defaults.imageModel?.primary || '')
+    setImageFallbacks(defaults.imageModel?.fallbacks || [])
+    setImageTimeoutMs(defaults.imageModel?.timeoutMs || 30000)
+  }, [config])
+
+  useEffect(() => {
+    if (!config) return
+    setApiKey(config.env?.[providerForKey.envKey] || '')
+    setTestResult('idle')
+  }, [config, providerForKey])
+
+  const payload = useMemo<ModelSettingsPayload>(() => ({
+    defaults: {
+      model: { primary, fallbacks },
+      imageModel: imagePrimary
+        ? { primary: imagePrimary, fallbacks: imageFallbacks, timeoutMs: imageTimeoutMs }
+        : null,
+    },
+  }), [fallbacks, imageFallbacks, imagePrimary, imageTimeoutMs, primary])
+
+  const currentHash = draftHash(payload)
+  const draftValidated = validatedHash === currentHash
+
+  const saveKeyMutation = useMutation({
+    mutationFn: async () => {
+      if (!config || providerForKey.noApiKey) return
+      await putConfig({
         ...config,
-        env: { ...config.env, ANTHROPIC_API_KEY: '' },
-        agents: {
-          ...config.agents,
-          defaults: {
-            ...config.agents?.defaults,
-            model: {
-              ...config.agents?.defaults?.model,
-              // ถ้า model ปัจจุบันเป็น Anthropic ให้ล้างออก
-              primary: (config.agents?.defaults?.model?.primary ?? '').startsWith('anthropic/')
-                ? ''
-                : config.agents?.defaults?.model?.primary,
-            },
-          },
-        },
-      }
-      await import('@/lib/api').then(m => m.putConfig(updated))
+        env: { ...config.env, [providerForKey.envKey]: apiKey.trim() },
+      })
+    },
+    onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['config'] })
-      await qc.refetchQueries({ queryKey: ['config'] })
-      setApiKey('')
-      setOauthStep('idle')
-      setSelectedModelId('')
-      toast.success('ยกเลิกการเชื่อมต่อ Anthropic Account แล้ว — model ถูกล้างออกด้วย')
-    } catch {
-      toast.error('เกิดข้อผิดพลาด')
-    }
-  }
+      await qc.invalidateQueries({ queryKey: ['model-readiness'] })
+      await qc.invalidateQueries({ queryKey: ['models-catalog'] })
+      toast.success('บันทึก provider key แล้ว')
+    },
+    onError: () => toast.error('บันทึก provider key ไม่สำเร็จ'),
+  })
 
-  const [oauthTesting, setOauthTesting] = useState(false)
-  const [oauthTestResult, setOauthTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const testKeyMutation = useMutation({
+    mutationFn: () => testProvider(providerForKey.id, apiKey.trim()),
+    onSuccess: ok => {
+      setTestResult(ok ? 'ok' : 'fail')
+      if (ok) toast.success('Provider key ใช้งานได้')
+      else toast.error('Provider key ใช้งานไม่ได้')
+    },
+    onError: () => {
+      setTestResult('fail')
+      toast.error('ทดสอบ provider key ไม่สำเร็จ')
+    },
+  })
 
-  async function handleOAuthTest() {
-    if (!currentAnthropicKey) return
-    setOauthTesting(true)
-    setOauthTestResult('idle')
-    try {
-      const ok = await testProvider('anthropic-oauth', currentAnthropicKey)
-      setOauthTestResult(ok ? 'ok' : 'fail')
-    } catch {
-      setOauthTestResult('fail')
-    } finally {
-      setOauthTesting(false)
-    }
-  }
+  const validateMutation = useMutation({
+    mutationFn: () => putModelSettings(payload, true),
+    onSuccess: async data => {
+      qc.setQueryData(['model-readiness'], data.readiness)
+      setValidatedHash(currentHash)
+      toast.success('Validate ผ่านแล้ว พร้อม Save')
+    },
+    onError: (error: unknown) => {
+      setValidatedHash('')
+      const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Validate ไม่ผ่าน'
+      toast.error(message)
+    },
+  })
 
-  // ตรวจว่า Anthropic key ที่มีอยู่เป็น OAuth token ไหม
-  const currentAnthropicKey = config?.env?.ANTHROPIC_API_KEY ?? ''
-  const isAnthropicOAuth = currentAnthropicKey.includes('sk-ant-oat')
-  const isAnthropicConnected = currentAnthropicKey.length > 0
-
-  // fullModel คำนวณหลัง isAnthropicOAuth เพื่อหลีกเลี่ยง used before declaration
-  const fullModel = selectedModelId
-    ? (selectedProvider.id === 'anthropic' && isAnthropicOAuth
-        ? selectedModelId
-        : `${selectedProvider.modelPrefix}/${selectedModelId}`)
-    : ''
-
-
-  const [savedOnce, setSavedOnce] = useState(false)
+  const saveSettingsMutation = useMutation({
+    mutationFn: () => putModelSettings(payload, false),
+    onSuccess: async data => {
+      qc.setQueryData(['model-readiness'], data.readiness)
+      await qc.invalidateQueries({ queryKey: ['config'] })
+      setShowRestartHint(true)
+      setValidatedHash(currentHash)
+      toast.success(`บันทึก model settings แล้ว${data.write?.backupId ? ` · backup ${data.write.backupId}` : ''}`)
+    },
+    onError: (error: unknown) => {
+      const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Save ไม่สำเร็จ'
+      toast.error(message)
+    },
+  })
 
   const restartMutation = useMutation({
     mutationFn: restartGateway,
@@ -272,534 +478,414 @@ export default function ModelPage() {
     onError: () => toast.error('Restart Gateway ไม่สำเร็จ'),
   })
 
-  // บันทึก API key + model ในครั้งเดียว
-  const saveMutation = useMutation({
-    mutationFn: async ({ saveKey, saveModel }: { saveKey: boolean; saveModel: boolean }) => {
-      if (!config) return
-      const updated = { ...config }
-      // ไม่ save key เมื่อ Anthropic OAuth active — ป้องกัน OpenRouter key ทับ OAuth token
-      const shouldSaveKey = saveKey && !selectedProvider.noApiKey && !(selectedProvider.id === 'anthropic' && isAnthropicOAuth)
-      if (shouldSaveKey) {
-        updated.env = { ...config.env, [selectedProvider.envKey]: apiKey.trim() }
-      }
-      if (saveModel && fullModel) {
-        updated.agents = {
-          ...config.agents,
-          defaults: { ...config.agents?.defaults, model: { primary: fullModel } },
-        }
-      }
-      await putConfig(updated)
-    },
-    onSuccess: (_, { saveKey, saveModel }) => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-      setSavedOnce(true)
-      if (saveKey && saveModel) toast.success('บันทึก API Key และ Model แล้ว')
-      else if (saveKey) toast.success('บันทึก API Key แล้ว')
-      else toast.success('บันทึก Model แล้ว')
-    },
-    onError: () => toast.error('บันทึกไม่สำเร็จ'),
-  })
-
-  const currentKeyInConfig = config?.env?.[selectedProvider.envKey] ?? ''
-  // ไม่นับว่า key เปลี่ยนเมื่อ Anthropic OAuth active (input ถูกซ่อน ค่าใน state อาจเป็น key เก่า)
-  const keyChanged = !selectedProvider.noApiKey
-    && !(selectedProvider.id === 'anthropic' && isAnthropicOAuth)
-    && apiKey.trim() !== currentKeyInConfig
-  const modelChanged = !!fullModel && fullModel !== currentModel
-
-  const PROVIDER_INFO: Record<string, { desc: string; keyUrl?: string; keyHint?: string }> = {
-    openrouter: {
-      desc: 'รองรับ model หลายร้อยตัวจากหลาย provider ในที่เดียว — แนะนำสำหรับผู้เริ่มต้น',
-      keyUrl: 'openrouter.ai/keys',
-      keyHint: 'สมัครฟรี → Settings → API Keys → Create Key',
-    },
-    anthropic: {
-      desc: 'Claude โดย Anthropic — เก่งด้านการวิเคราะห์และภาษาไทย',
-      keyUrl: 'console.anthropic.com/keys',
-      keyHint: 'สมัคร → API Keys → Create Key',
-    },
-    google: {
-      desc: 'Gemini โดย Google — context window ใหญ่ รองรับรูปภาพ',
-      keyUrl: 'aistudio.google.com/apikey',
-      keyHint: 'Login ด้วย Google Account → Create API Key',
-    },
-    openai: {
-      desc: 'GPT-4o และ GPT-4.1 โดย OpenAI — ใช้งานกว้างขวางที่สุด',
-      keyUrl: 'platform.openai.com/api-keys',
-      keyHint: 'สมัคร → API keys → Create new secret key',
-    },
-    mistral: {
-      desc: 'Mistral AI — model ยุโรป ราคาถูก เร็ว',
-      keyUrl: 'console.mistral.ai/api-keys',
-      keyHint: 'สมัคร → API Keys → Create new key',
-    },
-    groq: {
-      desc: 'Groq — inference เร็วมาก ใช้ chip พิเศษ มี free tier',
-      keyUrl: 'console.groq.com/keys',
-      keyHint: 'สมัครฟรี → API Keys → Create API Key',
-    },
-    kilocode: {
-      desc: 'Kilo AI — รวม model ชั้นนำหลายตัว คิดค่าใช้จ่ายตาม usage จริง',
-      keyUrl: 'app.kilo.ai',
-      keyHint: 'Login → Settings → API Keys → Generate Key',
-    },
+  async function refreshReadiness() {
+    try {
+      const next = await getModelReadiness(true)
+      qc.setQueryData(['model-readiness'], next)
+      toast.success('Refresh readiness แล้ว')
+    } catch {
+      toast.error('Refresh readiness ไม่สำเร็จ')
+    }
   }
 
-  const providerInfo = PROVIDER_INFO[selectedProvider.id]
+  async function startOAuth() {
+    try {
+      const { url } = await startAnthropicOAuth()
+      setOauthUrl(url)
+      setOauthRedirectUrl('')
+    } catch {
+      toast.error('เริ่ม Anthropic OAuth ไม่สำเร็จ')
+    }
+  }
+
+  async function submitOAuth() {
+    if (!oauthRedirectUrl.trim()) return
+    try {
+      const res = await fetch('/api/oauth/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ redirectUrl: oauthRedirectUrl.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setOauthUrl('')
+      setOauthRedirectUrl('')
+      await qc.invalidateQueries({ queryKey: ['config'] })
+      await qc.invalidateQueries({ queryKey: ['model-readiness'] })
+      toast.success(data.message || 'เชื่อมต่อ Anthropic OAuth แล้ว')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'เชื่อมต่อ OAuth ไม่สำเร็จ')
+    }
+  }
+
+  function setTab(next: Section) {
+    setSection(next)
+    const url = new URL(window.location.href)
+    url.searchParams.set('section', next)
+    window.history.replaceState(null, '', url.toString())
+  }
+
+  function addFallback(image = false) {
+    const value = image ? imageFallbackDraft : fallbackDraft
+    if (!value) return
+    if (image) {
+      if (!imageFallbacks.includes(value) && value !== imagePrimary) setImageFallbacks(items => [...items, value])
+      setImageFallbackDraft('')
+    } else {
+      if (!fallbacks.includes(value) && value !== primary) setFallbacks(items => [...items, value])
+      setFallbackDraft('')
+    }
+    setValidatedHash('')
+  }
+
+  function removeFallback(index: number, image = false) {
+    if (image) setImageFallbacks(items => items.filter((_, i) => i !== index))
+    else setFallbacks(items => items.filter((_, i) => i !== index))
+    setValidatedHash('')
+  }
+
+  function moveFallback(index: number, direction: -1 | 1, image = false) {
+    const setter = image ? setImageFallbacks : setFallbacks
+    setter(items => {
+      const next = [...items]
+      const target = index + direction
+      if (target < 0 || target >= next.length) return next
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+    setValidatedHash('')
+  }
+
+  const currentKey = config?.env?.[providerForKey.envKey] || ''
+  const keyChanged = !providerForKey.noApiKey && apiKey.trim() !== currentKey
+
+  function applyRecommendedOpenRouter() {
+    setPrimary(OPENROUTER_RECOMMENDED.primary)
+    setFallbacks(OPENROUTER_RECOMMENDED.fallbacks)
+    setImagePrimary(OPENROUTER_RECOMMENDED.imagePrimary)
+    setImageFallbacks(OPENROUTER_RECOMMENDED.imageFallbacks)
+    setImageTimeoutMs(OPENROUTER_RECOMMENDED.imageTimeoutMs)
+    setValidatedHash('')
+    setSection('fallbacks')
+    const url = new URL(window.location.href)
+    url.searchParams.set('section', 'fallbacks')
+    window.history.replaceState(null, '', url.toString())
+    toast.info('ใส่ชุด OpenRouter ที่แนะนำแล้ว กด Validate ก่อน Save')
+  }
 
   return (
-    <div className="space-y-6 w-full">
-      <div>
-        <h1 className="text-2xl font-bold">Model</h1>
-        <p className="text-sm text-zinc-500 mt-1">เลือก AI Provider และ Model สำหรับ bot — หลังบันทึกต้อง Restart Gateway เพื่อให้มีผล</p>
+    <div className="w-full space-y-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Model Readiness</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            ตั้งค่า primary, fallback และ image understanding model ให้ตรงกับ OpenClaw 2026.6.8 พร้อม validate ก่อน save
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={applyRecommendedOpenRouter}>
+            <Zap className="size-4" />
+            Use OpenRouter recommended
+          </Button>
+          <Button variant="outline" onClick={refreshReadiness} disabled={readinessFetching}>
+            <RefreshCw className={`size-4 ${readinessFetching ? 'animate-spin' : ''}`} />
+            Refresh readiness
+          </Button>
+          <Button variant="outline" onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
+            <RotateCcw className="size-4" />
+            Restart Gateway
+          </Button>
+        </div>
       </div>
 
-      {/* ขั้นตอน 1: เลือก Provider */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">ขั้นตอนที่ 1 — เลือก AI Provider</CardTitle>
-          <p className="text-xs text-zinc-500 mt-1">
-            ใช้อยู่ตอนนี้:&nbsp;
-            <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{currentModel}</span>
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {PROVIDERS.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setSelectedProvider(p)}
-                className={`px-3 py-2 rounded-md border text-sm transition-colors text-left ${
-                  selectedProvider.id === p.id
-                    ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800 font-medium'
-                    : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
-                }`}
-              >
-                {p.label}
-              </button>
+      <div className="grid gap-3 md:grid-cols-3">
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-500">Readiness</p>
+                <p className="mt-1 text-2xl font-semibold">{readiness?.ok ? 'Ready' : 'Needs attention'}</p>
+              </div>
+              <ReadinessBadge status={readiness?.ok ? 'ready' : 'warn'} />
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">{readiness?.blockingIssues.length || 0} blocking issue(s), {readiness?.warnings.length || 0} warning(s)</p>
+          </CardContent>
+        </Card>
+        <ChainSummary title="Default primary" primary={primary} fallbackCount={fallbacks.length} />
+        <ChainSummary title="Default image model" primary={imagePrimary || 'not configured'} fallbackCount={imageFallbacks.length} />
+      </div>
+
+      {readiness?.blockingIssues.length ? (
+        <Card className="border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base text-red-700 dark:text-red-300">
+              <AlertTriangle className="size-4" />
+              Validation Blocking Issues
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {readiness.blockingIssues.slice(0, 8).map(issue => (
+              <div key={`${issue.scope}-${issue.ref}-${issue.status}`} className="rounded-md border border-red-200 bg-white/70 px-3 py-2 text-sm dark:border-red-900 dark:bg-zinc-950/40">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="destructive">{statusLabel(issue.status)}</Badge>
+                  <span className="font-mono text-xs">{issue.scope}</span>
+                </div>
+                <p className="mt-1 text-xs text-red-700 dark:text-red-300">{issue.summary}</p>
+              </div>
             ))}
-          </div>
-          {providerInfo && (
-            <p className="text-xs text-zinc-500 pt-1">{providerInfo.desc}</p>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* คอลัมน์ซ้าย */}
+      {showRestartHint && (
+        <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20">
+          <CardContent className="flex flex-col gap-3 pt-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-medium text-amber-800 dark:text-amber-200">Model settings saved</p>
+              <p className="text-sm text-amber-700 dark:text-amber-300">Restart gateway และ reset active sessions หลังเปลี่ยน model เพื่อให้ runtime ใช้ค่าใหม่ทันที</p>
+            </div>
+            <Button onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
+              <RotateCcw className="size-4" />
+              Restart now
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
         <div className="space-y-4">
-
-          {/* ขั้นตอน 2: API Key (ซ่อนถ้าไม่ต้องการ key หรือใช้ Anthropic OAuth) */}
-          {!selectedProvider.noApiKey && !(selectedProvider.id === 'anthropic' && isAnthropicOAuth) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">ขั้นตอนที่ 2 — ใส่ API Key</CardTitle>
-                {providerInfo?.keyUrl && (
-                  <p className="text-xs text-zinc-500 mt-1">
-                    รับ key ได้ที่ <span className="font-mono text-blue-600 dark:text-blue-400">{providerInfo.keyUrl}</span>
-                    {providerInfo.keyHint && <span className="ml-1">— {providerInfo.keyHint}</span>}
-                  </p>
-                )}
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex gap-2">
-                  <Input
-                    type={showKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={e => { setApiKey(e.target.value); setTestResult('idle') }}
-                    placeholder="วาง API Key ที่นี่..."
-                    className="font-mono text-sm"
-                  />
-                  <Button variant="outline" size="sm" onClick={() => setShowKey(v => !v)}>
-                    {showKey ? 'ซ่อน' : 'แสดง'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleTest}
-                    disabled={testing || !apiKey.trim()}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound className="size-4" />
+                Provider Credentials
+              </CardTitle>
+              <p className="text-sm text-zinc-500">บันทึก key ก่อน validate model catalog ถ้า provider ต้องใช้ key</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-1.5">
+                {PROVIDERS.map(provider => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    onClick={() => setProviderForKey(provider)}
+                    className={`rounded-md border px-2 py-1.5 text-left text-xs transition ${
+                      providerForKey.id === provider.id
+                        ? 'border-zinc-900 bg-zinc-100 font-medium dark:border-zinc-100 dark:bg-zinc-800'
+                        : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800'
+                    }`}
                   >
-                    {testing ? 'กำลังทดสอบ...' : 'ทดสอบ'}
-                  </Button>
+                    {provider.label}
+                  </button>
+                ))}
+              </div>
+
+              {providerForKey.noApiKey ? (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  Provider นี้โหลด catalog ได้โดยไม่ต้องมี key แต่การ infer จริงอาจยังต้องตั้ง billing/key ตาม provider
                 </div>
-                {testResult === 'ok' && (
-                  <p className="text-xs text-green-600 dark:text-green-400">✓ API Key ใช้งานได้</p>
-                )}
-                {testResult === 'fail' && (
-                  <p className="text-xs text-red-500">✗ API Key ไม่ถูกต้อง หรือเชื่อมต่อไม่ได้</p>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Kilo AI — แจ้งว่าไม่ต้อง key */}
-          {selectedProvider.noApiKey && (
-            <Card className="border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-900">
-              <CardContent className="pt-4">
-                <p className="text-sm text-green-700 dark:text-green-400">
-                  ✓ <strong>{selectedProvider.label}</strong> ไม่ต้องใช้ API Key — เลือก Model แล้วบันทึกได้เลย
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Anthropic OAuth — Claude Pro/Max subscription */}
-          {selectedProvider.id === 'anthropic' && (
-            <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-orange-700 dark:text-orange-400">
-                  🔐 มี Claude Pro/Max? เชื่อมต่อได้เลยโดยไม่ต้องซื้อ API Key
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {/* แสดงสถานะปัจจุบัน */}
-                {isAnthropicConnected && oauthStep === 'idle' && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between rounded-md bg-white dark:bg-zinc-900 border px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${isAnthropicOAuth ? 'bg-green-500' : 'bg-blue-400'}`} />
-                        <span className="text-xs text-zinc-700 dark:text-zinc-300">
-                          {isAnthropicOAuth ? 'เชื่อมต่อด้วย OAuth (Claude Pro/Max)' : 'ใช้ API Key ธรรมดา'}
-                        </span>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="text-xs h-7"
-                          onClick={handleOAuthTest} disabled={oauthTesting}>
-                          {oauthTesting ? 'กำลังทดสอบ...' : 'ทดสอบ'}
-                        </Button>
-                        <Button size="sm" variant="outline" className="text-xs h-7"
-                          onClick={handleOAuthStart}>
-                          เชื่อมต่อใหม่
-                        </Button>
-                        <Button size="sm" variant="outline"
-                          className="text-xs h-7 text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950"
-                          onClick={handleAnthropicLogout}>
-                          Logout
-                        </Button>
-                      </div>
-                    </div>
-                    {oauthTestResult === 'ok' && (
-                      <p className="text-xs text-green-600 dark:text-green-400 px-1">✓ OAuth token ใช้งานได้ — พร้อมใช้งาน</p>
-                    )}
-                    {oauthTestResult === 'fail' && (
-                      <p className="text-xs text-red-500 px-1">✗ Token ไม่ valid หรือหมดอายุ — กรุณากด Logout แล้วเชื่อมต่อใหม่</p>
-                    )}
-                  </div>
-                )}
-
-                {!isAnthropicConnected && oauthStep === 'idle' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-orange-400 text-orange-700 hover:bg-orange-100 dark:hover:bg-orange-900"
-                    onClick={handleOAuthStart}
-                  >
-                    เชื่อมต่อ Anthropic Account (OAuth)
-                  </Button>
-                )}
-
-                {(oauthStep === 'waiting' || oauthStep === 'submitting') && (
-                  <div className="space-y-3">
-                    {/* Step 1 */}
-                    <div className="flex gap-3">
-                      <span className="shrink-0 w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center">1</span>
-                      <div className="flex-1 space-y-2">
-                        <p className="text-xs font-medium">เปิด URL นี้แล้ว Login ด้วย Claude account</p>
-                        <div className="flex gap-2">
-                          <input readOnly value={oauthUrl} title="Anthropic OAuth URL"
-                            className="flex-1 text-xs font-mono border rounded px-2 py-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-600 truncate" />
-                          <Button size="sm" variant="outline" className="text-xs shrink-0"
-                            onClick={() => window.open(oauthUrl, '_blank')}>เปิด</Button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Step 2 */}
-                    <div className="flex gap-3">
-                      <span className="shrink-0 w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center">2</span>
-                      <div className="flex-1">
-                        <p className="text-xs font-medium mb-1">หลัง Login เสร็จ — Copy URL ทั้งหมดจาก address bar</p>
-                        <div className="rounded-md bg-zinc-50 dark:bg-zinc-900 border px-3 py-2 text-xs text-zinc-500 space-y-1">
-                          <p>Browser จะขึ้น <span className="text-red-500 font-medium">&quot;This site can&apos;t be reached&quot;</span>, <strong>ปกติ ไม่ต้องตกใจ</strong></p>
-                          <p>URL ใน address bar จะมีหน้าตาแบบนี้:</p>
-                          <p className="font-mono text-zinc-400 break-all text-xs bg-zinc-100 dark:bg-zinc-800 rounded px-2 py-1">
-                            http://localhost:53692/callback?code=<span className="text-orange-500">XXXXX</span>&state=<span className="text-orange-500">XXXXX</span>
-                          </p>
-                          <p>→ <strong>Click address bar → Ctrl+A → Ctrl+C</strong> (Select All แล้ว Copy)</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Step 3 */}
-                    <div className="flex gap-3">
-                      <span className="shrink-0 w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center">3</span>
-                      <div className="flex-1 space-y-1.5">
-                        <p className="text-xs font-medium">วาง URL ที่ copy มา แล้วกด ยืนยัน</p>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={oauthRedirectUrl}
-                            onChange={e => setOauthRedirectUrl(e.target.value)}
-                            placeholder="http://localhost:53692/callback?code=...&state=..."
-                            title="วาง redirect URL จาก browser address bar"
-                            className="flex-1 text-xs font-mono border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-orange-400"
-                          />
-                          <Button size="sm"
-                            className="bg-orange-600 hover:bg-orange-700 text-white shrink-0"
-                            disabled={!oauthRedirectUrl.trim() || oauthStep === 'submitting'}
-                            onClick={handleOAuthSubmit}>
-                            {oauthStep === 'submitting' ? 'กำลังเชื่อมต่อ...' : 'ยืนยัน'}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {oauthError && <p className="text-xs text-red-500 pl-9">✗ {oauthError}</p>}
-                    <button type="button" className="text-xs text-zinc-400 hover:text-zinc-600 underline pl-9"
-                      onClick={() => { setOauthStep('idle'); setOauthUrl(''); setOauthRedirectUrl(''); setOauthError('') }}>
-                      ยกเลิก
-                    </button>
-                  </div>
-                )}
-
-                {oauthStep === 'done' && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-green-600 dark:text-green-400">✓ เชื่อมต่อ Anthropic Account สำเร็จ</span>
-                    <button type="button" className="text-xs text-zinc-400 underline"
-                      onClick={() => setOauthStep('idle')}>เชื่อมต่อใหม่</button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Anthropic OAuth note — model list now comes from live provider catalog */}
-          {selectedProvider.id === 'anthropic' && isAnthropicOAuth && oauthStep === 'idle' && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Anthropic OAuth</CardTitle>
-                <p className="text-xs text-zinc-500 mt-1">Claude models are loaded from Anthropic&apos;s live model catalog.</p>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 px-3 py-2.5 space-y-1">
-                  <p className="text-xs font-medium text-blue-700 dark:text-blue-400">ข้อมูลเกี่ยวกับค่าใช้จ่าย</p>
-                  <p className="text-xs text-blue-600 dark:text-blue-300">
-                    การใช้งานผ่าน OAuth ใช้ Usage Credits ใน claude.ai account ของคุณ ไม่ใช่ weekly session limit ที่เห็นในหน้าแชทปกติ
-                  </p>
-                  <p className="text-xs text-blue-500 dark:text-blue-400">
-                    ตรวจสอบและเติม credits ได้ที่{' '}
-                    <a
-                      href="https://claude.ai/settings/usage"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline font-medium hover:text-blue-700"
-                    >
-                      claude.ai/settings/usage
-                    </a>
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Recommended (OpenRouter only) */}
-          {selectedProvider.id === 'openrouter' && recommendedModels.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">แนะนำสำหรับ ERP Chatbot ภาษาไทย</CardTitle>
-                <p className="text-xs text-zinc-500 mt-1">
-                  Thai ดี + Tool Use จาก live catalog เท่านั้น
-                  {staleRecommendedCount > 0 ? ` · ซ่อน ${staleRecommendedCount} รายการที่ไม่อยู่ใน catalog ตอนนี้` : ''}
-                </p>
-              </CardHeader>
-              <CardContent>
+              ) : (
                 <div className="space-y-2">
-                  {recommendedModels.map(r => {
-                    return (
-                      <button
-                        key={r.id}
-                        type="button"
-                        onClick={() => setSelectedModelId(r.modelId)}
-                        className={`w-full text-left px-3 py-2 rounded-md border text-sm transition-colors ${
-                          selectedModelId === r.modelId
-                            ? 'border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-800'
-                            : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-700'
-                        }`}
-                      >
-                        <span className="font-medium">{r.label}</span>
-                        <span className="text-zinc-500 ml-2 text-xs">{r.desc}</span>
-                      </button>
-                    )
-                  })}
+                  <div className="flex gap-2">
+                    <Input
+                      type={showKey ? 'text' : 'password'}
+                      value={apiKey}
+                      onChange={event => {
+                        setApiKey(event.target.value)
+                        setTestResult('idle')
+                      }}
+                      placeholder={`${providerForKey.envKey}=...`}
+                      className="font-mono text-sm"
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowKey(value => !value)} aria-label={showKey ? 'Hide key' : 'Show key'}>
+                      <Eye className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => testKeyMutation.mutate()} disabled={!apiKey.trim() || testKeyMutation.isPending}>
+                      <ShieldCheck className="size-4" />
+                      Test key
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => saveKeyMutation.mutate()} disabled={!keyChanged || saveKeyMutation.isPending}>
+                      <Save className="size-4" />
+                      Save key
+                    </Button>
+                    {testResult === 'ok' && <Badge>Key ok</Badge>}
+                    {testResult === 'fail' && <Badge variant="destructive">Key failed</Badge>}
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              )}
+
+              {providerForKey.id === 'anthropic' && (
+                <div className="space-y-2 rounded-md border px-3 py-3">
+                  <p className="text-sm font-medium">Anthropic OAuth</p>
+                  <p className="text-xs text-zinc-500">ใช้เมื่อ server เก็บ token แบบ Claude account OAuth</p>
+                  {!oauthUrl ? (
+                    <Button type="button" variant="outline" size="sm" onClick={startOAuth}>Start OAuth</Button>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <Input readOnly value={oauthUrl} className="font-mono text-xs" />
+                        <Button type="button" variant="outline" size="sm" onClick={() => window.open(oauthUrl, '_blank')}>Open</Button>
+                      </div>
+                      <Input
+                        value={oauthRedirectUrl}
+                        onChange={event => setOauthRedirectUrl(event.target.value)}
+                        placeholder="วาง callback URL หลัง login"
+                        className="font-mono text-xs"
+                      />
+                      <Button type="button" size="sm" onClick={submitOAuth} disabled={!oauthRedirectUrl.trim()}>Submit OAuth</Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Provider Status</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {Object.entries(readiness?.providers || {}).length === 0 ? (
+                <p className="text-sm text-zinc-500">Provider catalog จะปรากฏหลัง validate หรือ refresh readiness</p>
+              ) : Object.entries(readiness?.providers || {}).map(([provider, status]) => (
+                <div key={provider} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{provider}</p>
+                    <p className="truncate text-xs text-zinc-500">{status.modelCount} models · {status.source}</p>
+                  </div>
+                  <ReadinessBadge status={status.status} />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         </div>
 
-        {/* คอลัมน์ขวา: เลือก Model */}
         <Card>
           <CardHeader>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle className="text-base">
-                  {selectedProvider.noApiKey ? 'ขั้นตอนที่ 2' : 'ขั้นตอนที่ 3'} — เลือก Model
-                  <span className="text-zinc-400 font-normal text-sm ml-2">({selectedProvider.label})</span>
-                </CardTitle>
-                {selectedProvider.id === 'openrouter' && (
-                  <p className="text-xs text-zinc-500 mt-1">ราคาเป็น USD ต่อ 1 ล้าน token</p>
-                )}
-              </div>
-              <Button variant="outline" size="sm" onClick={refreshModels} disabled={modelsFetching}>
-                <RefreshCw className={`h-4 w-4 ${modelsFetching ? 'animate-spin' : ''}`} />
-                Refresh models
-              </Button>
-            </div>
+            <CardTitle className="text-base">Model Settings</CardTitle>
+            <p className="text-sm text-zinc-500">Validate ต้องผ่านก่อน Save เพื่อกันค่า model ที่ไม่มีจริงหรือ image model ที่ไม่รองรับรูป</p>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent>
+            <Tabs value={section} onValueChange={value => setTab(value as Section)} className="space-y-5">
+              <TabsList className="w-full flex-wrap justify-start">
+                <TabsTrigger value="primary"><Zap className="size-4" />Primary Model</TabsTrigger>
+                <TabsTrigger value="fallbacks"><Layers className="size-4" />Fallback Models</TabsTrigger>
+                <TabsTrigger value="image"><ImageIcon className="size-4" />Image Understanding</TabsTrigger>
+              </TabsList>
 
-            <div className={`rounded-md border px-3 py-2.5 text-sm ${catalogStatusClass(modelCatalog?.status)}`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium">{catalogStatusText(modelCatalog?.status)}</span>
-                {modelCatalog?.cache?.hit && <span className="text-xs">Using cache</span>}
-              </div>
-              <p className="mt-1 text-xs opacity-90">{catalogHelp(modelCatalog, selectedProvider)}</p>
-              {modelCatalog?.warnings?.length ? (
-                <div className="mt-2 space-y-1">
-                  {modelCatalog.warnings.map(warning => (
-                    <p key={warning} className="break-words text-xs opacity-90">{warning}</p>
+              <TabsContent value="primary" className="space-y-4">
+                <ModelPicker
+                  label="Default primary model"
+                  value={primary}
+                  onChange={value => {
+                    setPrimary(value)
+                    setValidatedHash('')
+                  }}
+                />
+              </TabsContent>
+
+              <TabsContent value="fallbacks" className="space-y-4">
+                <ModelPicker label="Add fallback model" value={fallbackDraft} onChange={setFallbackDraft} />
+                <Button type="button" variant="outline" onClick={() => addFallback(false)} disabled={!fallbackDraft}>
+                  Add fallback
+                </Button>
+                <div className="space-y-2">
+                  {fallbacks.length === 0 && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                      ยังไม่มี fallback model ถ้า provider หลัก timeout Telegram อาจช้า หรือเห็น error จาก model
+                    </div>
+                  )}
+                  {fallbacks.map((item, index) => (
+                    <div key={item} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                      <span className="w-6 text-sm text-zinc-500">{index + 1}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm">{item}</span>
+                      <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, -1)} disabled={index === 0} aria-label="Move fallback up">
+                        <ArrowUp className="size-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, 1)} disabled={index === fallbacks.length - 1} aria-label="Move fallback down">
+                        <ArrowDown className="size-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => removeFallback(index)} aria-label="Remove fallback">
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
                   ))}
                 </div>
-              ) : null}
-            </div>
+              </TabsContent>
 
-            {/* Error state */}
-            {modelsError && (
-              <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 rounded-md px-3 py-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>โหลด model catalog ไม่สำเร็จ — ตรวจสอบ API server แล้วลองใหม่</span>
-              </div>
-            )}
-
-            <Popover open={open} onOpenChange={setOpen}>
-              <PopoverTrigger
-                role="combobox"
-                aria-expanded={open}
-                disabled={modelsLoading}
-                onClick={() => setOpen(v => !v)}
-                className="w-full inline-flex items-center justify-between rounded-lg border bg-card px-3 py-2 text-sm font-normal shadow-sm hover:bg-accent disabled:opacity-50"
-              >
-                <span className="truncate">
-                  {modelsLoading
-                    ? 'กำลังโหลด models...'
-                    : (selectedModelInfo?.name ?? (selectedModelId ? selectedModelId : 'เลือก Model...'))}
-                </span>
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-              </PopoverTrigger>
-              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="ค้นหา model..." />
-                  <CommandList>
-                    <CommandEmpty>
-                      {modelsError ? 'โหลดไม่สำเร็จ — ตรวจสอบ API Key' : 'ไม่พบ model ที่ค้นหา'}
-                    </CommandEmpty>
-                    {modelList.map(m => {
-                      const isActive = selectedModelId === m.id
-                      return (
-                        <CommandItem
-                          key={m.id}
-                          value={`${m.name} ${m.id}`}
-                          onSelect={() => { setSelectedModelId(m.id); setOpen(false) }}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Check className={`h-4 w-4 shrink-0 ${isActive ? 'opacity-100' : 'opacity-0'}`} />
-                            <span className="truncate">{m.name}</span>
-                          </div>
-                          {'pricing' in m && m.pricing && (
-                            <span className="text-xs text-zinc-400 shrink-0">
-                              {formatPrice(m.pricing.prompt)}
-                            </span>
-                          )}
-                        </CommandItem>
-                      )
-                    })}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-
-            {/* Selected model info */}
-            {selectedModelId && (
-              <div className="rounded-md border px-3 py-2 text-xs text-zinc-500 space-y-1">
-                <p className="font-medium text-zinc-700 dark:text-zinc-300">
-                  {selectedModelInfo?.name ?? selectedModelId}
-                </p>
-                <p className="font-mono break-all text-zinc-400">{fullModel}</p>
-                {selectedModelInfo && 'pricing' in selectedModelInfo && selectedModelInfo.pricing && (
-                  <div className="flex gap-4 pt-1">
-                    <span>Input: <strong className="text-zinc-600 dark:text-zinc-300">{formatPrice(selectedModelInfo.pricing.prompt)}</strong></span>
-                    <span>Output: <strong className="text-zinc-600 dark:text-zinc-300">{formatPrice(selectedModelInfo.pricing.completion)}</strong></span>
+              <TabsContent value="image" className="space-y-4">
+                <ModelPicker
+                  label="Default image understanding model"
+                  value={imagePrimary}
+                  imageOnly
+                  onChange={value => {
+                    setImagePrimary(value)
+                    setValidatedHash('')
+                  }}
+                />
+                <div className="max-w-xs space-y-1">
+                  <label className="text-sm font-medium" htmlFor="image-timeout">Image timeout (ms)</label>
+                  <Input
+                    id="image-timeout"
+                    type="number"
+                    min={1000}
+                    max={180000}
+                    step={1000}
+                    value={imageTimeoutMs}
+                    onChange={event => {
+                      setImageTimeoutMs(Number(event.target.value))
+                      setValidatedHash('')
+                    }}
+                  />
+                </div>
+                <div className="rounded-md border px-3 py-3">
+                  <ModelPicker label="Add image fallback" value={imageFallbackDraft} imageOnly onChange={setImageFallbackDraft} disabled={!imagePrimary} />
+                  <Button type="button" variant="outline" className="mt-3" onClick={() => addFallback(true)} disabled={!imageFallbackDraft || !imagePrimary}>
+                    Add image fallback
+                  </Button>
+                  <div className="mt-3 space-y-2">
+                    {imageFallbacks.map((item, index) => (
+                      <div key={item} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                        <span className="w-6 text-sm text-zinc-500">{index + 1}</span>
+                        <span className="min-w-0 flex-1 truncate font-mono text-sm">{item}</span>
+                        <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, -1, true)} disabled={index === 0} aria-label="Move image fallback up">
+                          <ArrowUp className="size-4" />
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, 1, true)} disabled={index === imageFallbacks.length - 1} aria-label="Move image fallback down">
+                          <ArrowDown className="size-4" />
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => removeFallback(index, true)} aria-label="Remove image fallback">
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
                   </div>
-                )}
+                </div>
+              </TabsContent>
+
+              <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs text-zinc-500">
+                  {draftValidated ? 'Validated draft พร้อมบันทึก' : 'ต้อง Validate draft ปัจจุบันก่อน Save'}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => validateMutation.mutate()} disabled={!primary || validateMutation.isPending}>
+                    <ShieldCheck className="size-4" />
+                    {validateMutation.isPending ? 'Validating...' : 'Validate'}
+                  </Button>
+                  <Button type="button" onClick={() => saveSettingsMutation.mutate()} disabled={!draftValidated || saveSettingsMutation.isPending}>
+                    <Save className="size-4" />
+                    {saveSettingsMutation.isPending ? 'Saving...' : 'Save settings'}
+                  </Button>
+                </div>
               </div>
-            )}
-
-            {/* Save buttons */}
-            <div className="space-y-2 pt-1">
-              {/* บันทึกทั้ง key + model */}
-              {keyChanged && modelChanged && (
-                <Button
-                  className="w-full"
-                  onClick={() => saveMutation.mutate({ saveKey: true, saveModel: true })}
-                  disabled={saveMutation.isPending}
-                >
-                  {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึก API Key + Model'}
-                </Button>
-              )}
-              {/* บันทึก key อย่างเดียว */}
-              {keyChanged && !modelChanged && (
-                <Button
-                  className="w-full"
-                  onClick={() => saveMutation.mutate({ saveKey: true, saveModel: false })}
-                  disabled={saveMutation.isPending}
-                >
-                  {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึก API Key'}
-                </Button>
-              )}
-              {/* บันทึก model อย่างเดียว */}
-              {!keyChanged && modelChanged && (
-                <Button
-                  className="w-full"
-                  onClick={() => saveMutation.mutate({ saveKey: false, saveModel: true })}
-                  disabled={saveMutation.isPending}
-                >
-                  {saveMutation.isPending ? 'กำลังบันทึก...' : `บันทึก Model — ${fullModel}`}
-                </Button>
-              )}
-              {/* ไม่มีอะไรเปลี่ยน */}
-              {!keyChanged && !modelChanged && (
-                <Button className="w-full" disabled variant="outline">
-                  {fullModel ? 'ไม่มีการเปลี่ยนแปลง' : 'เลือก Model ก่อน'}
-                </Button>
-              )}
-
-              {/* Restart Gateway — แสดงหลังจาก save สำเร็จอย่างน้อย 1 ครั้ง */}
-              {savedOnce && (
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => restartMutation.mutate()}
-                  disabled={restartMutation.isPending}
-                >
-                  {restartMutation.isPending ? 'กำลัง Restart...' : '⚡ Restart Gateway เพื่อให้มีผล'}
-                </Button>
-              )}
-            </div>
+            </Tabs>
           </CardContent>
         </Card>
       </div>
+
+      <AgentMatrix agents={readiness?.agents || []} />
     </div>
   )
 }

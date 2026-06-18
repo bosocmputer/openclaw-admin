@@ -238,7 +238,18 @@ function buildRecommendations(data: DashboardOverview): Recommendation[] {
       title: 'วางแผนอัปเดต OpenClaw runtime',
       detail: `ติดตั้งอยู่ ${data.release.installedVersion || 'unknown'} แต่ target คือ ${data.release.targetVersion}. อัปเดตหลัง backup และ smoke test เท่านั้น.`,
       actionLabel: 'Check Runtime',
-      href: '/system',
+      href: '/system?section=runtime',
+    })
+  }
+
+  if (healthWarnings.some(text => text.includes('runtime.guardrails'))) {
+    addRecommendation(items, {
+      id: 'runtime-guardrails',
+      severity: 'warn',
+      title: 'ทดสอบ Telegram หลังเปลี่ยน runtime',
+      detail: 'Runtime ปัจจุบันอาจเป็น official package ที่ไม่มี ERP guardrail marker บางตัว. ให้รัน regression Telegram ก่อน rollout ลูกค้า และใช้ custom runtime เฉพาะเมื่อพบ regression จริง.',
+      actionLabel: 'Open Monitor',
+      href: '/monitor',
     })
   }
 
@@ -249,7 +260,7 @@ function buildRecommendations(data: DashboardOverview): Recommendation[] {
       title: 'ตั้ง fallback model ให้ agent',
       detail: 'ถ้า provider หลัก timeout หรือ error Telegram อาจตอบช้า หรือส่ง error ให้ user. ตั้ง fallback อย่างน้อย agent ที่รับลูกค้าจริง.',
       actionLabel: 'Open Models',
-      href: '/model',
+      href: '/model?section=fallbacks',
     })
   }
 
@@ -260,7 +271,7 @@ function buildRecommendations(data: DashboardOverview): Recommendation[] {
       title: 'กำหนด image model ให้ชัดเจน',
       detail: 'ถ้าลูกค้าส่งรูปสินค้า ระบบควรมี image model ที่ตรวจสอบได้ ไม่พึ่งค่า auto ที่เปลี่ยนตาม runtime.',
       actionLabel: 'Open Models',
-      href: '/model',
+      href: '/model?section=image',
     })
   }
 
