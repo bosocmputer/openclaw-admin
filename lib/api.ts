@@ -230,6 +230,33 @@ export interface ModelRuntimeTestResult {
   } | null
 }
 
+export interface ModelImageUploadPayload {
+  dataUrl?: string
+  base64?: string
+  mimeType: string
+  fileName?: string
+}
+
+export interface ModelMessageTestAttempt {
+  model: string
+  ok: boolean
+  status: ModelRuntimeTestStatus
+  durationMs?: number
+  safeMessage?: string
+  outputPreview?: string | null
+  runtimeVersion?: string | null
+}
+
+export interface ModelMessageTestResult {
+  ok: boolean
+  status: ModelRuntimeTestStatus
+  selectedModel: string | null
+  durationMs: number
+  safeMessage?: string
+  outputPreview?: string | null
+  attempts: ModelMessageTestAttempt[]
+}
+
 export interface ModelRefReadiness {
   ref: string
   role: string
@@ -572,6 +599,25 @@ export async function testModelRuntime(params: {
   refresh?: boolean
 }, signal?: AbortSignal): Promise<ModelRuntimeTestResult> {
   const { data } = await api.post('/api/models/runtime-test', params, { signal })
+  return data
+}
+
+export async function testModelMessage(params: {
+  primary: string
+  fallbacks?: string[]
+  prompt: string
+  capability?: 'text'
+}, signal?: AbortSignal): Promise<ModelMessageTestResult> {
+  const { data } = await api.post('/api/models/message-test', params, { signal })
+  return data
+}
+
+export async function testModelImageMessage(params: {
+  model: string
+  prompt: string
+  image: ModelImageUploadPayload
+}, signal?: AbortSignal): Promise<ModelRuntimeTestResult> {
+  const { data } = await api.post('/api/models/image-message-test', params, { signal })
   return data
 }
 

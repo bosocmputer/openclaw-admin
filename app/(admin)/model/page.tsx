@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getConfig,
@@ -9,12 +9,13 @@ import {
   putConfig,
   putModelSettings,
   restartGateway,
-  startAnthropicOAuth,
+  testModelImageMessage,
+  testModelMessage,
   testProvider,
-  testModelRuntime,
   PROVIDERS,
-  type AgentModelReadiness,
   type ModelCatalog,
+  type ModelImageUploadPayload,
+  type ModelMessageTestResult,
   type ModelRuntimeTestResult,
   type ModelSettingsPayload,
   type OpenRouterModel,
@@ -22,37 +23,40 @@ import {
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
-  CheckCircle2,
   Check,
-  ChevronsUpDown,
+  CheckCircle2,
   ChevronDown,
+  ChevronsUpDown,
   Eye,
   Image as ImageIcon,
-  KeyRound,
-  Layers,
   PlayCircle,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
-  Settings2,
   ShieldCheck,
-  Timer,
   Trash2,
   XCircle,
-  Zap,
 } from 'lucide-react'
-
-type Section = 'primary' | 'fallbacks' | 'image'
 
 const OPENROUTER_RECOMMENDED = {
   primary: 'openrouter/google/gemini-2.5-flash-lite',
@@ -61,11 +65,6 @@ const OPENROUTER_RECOMMENDED = {
     'openrouter/openai/gpt-4o-mini',
   ],
   imagePrimary: 'openrouter/google/gemini-2.5-flash-lite',
-  imageFallbacks: [
-    'openrouter/openai/gpt-4o-mini',
-    'openrouter/qwen/qwen3.5-flash-02-23',
-  ],
-  imageTimeoutMs: 30000,
 }
 
 const KILO_RECOMMENDED = {
@@ -76,17 +75,14 @@ const KILO_RECOMMENDED = {
   ],
 }
 
-const KILO_TEXT_CANDIDATES = [
-  KILO_RECOMMENDED.primary,
-  ...KILO_RECOMMENDED.fallbacks,
-  'kilocode/deepseek/deepseek-v4-flash',
-  'kilocode/qwen/qwen3.6-flash',
-  'kilocode/qwen/qwen3.5-flash-02-23',
-  'kilocode/kilo-auto/free',
-  'kilocode/google/gemini-3.5-flash',
-  'kilocode/kilo-auto/efficient',
-  'kilocode/kilo-auto/balanced',
-]
+type KeyTestState = 'idle' | 'ok' | 'fail'
+type ImageUploadDraft = ModelImageUploadPayload & {
+  previewUrl: string
+  size: number
+}
+
+const MAX_IMAGE_UPLOAD_BYTES = 4 * 1024 * 1024
+const SUPPORTED_IMAGE_UPLOAD_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
 function providerFromRef(ref: string): ProviderConfig {
   const providerId = ref.includes('/') ? ref.split('/')[0] : 'openrouter'
@@ -102,45 +98,30 @@ function fullRef(provider: ProviderConfig, modelId: string) {
   return modelId ? `${provider.modelPrefix}/${modelId}` : ''
 }
 
-function statusVariant(status?: string): 'default' | 'destructive' | 'secondary' {
-  if (status === 'ready' || status === 'runtime_verified' || status === 'ok') return 'default'
-  if (status === 'not_configured') return 'secondary'
-  if (status === 'runtime_unverified') return 'secondary'
-  if (!status) return 'secondary'
-  return 'destructive'
+function compactModel(ref: string) {
+  return ref.replace(/^openrouter\//, '').replace(/^kilocode\//, 'kilo/')
 }
 
 function statusLabel(status?: string) {
-  if (status === 'ready') return 'Ready'
-  if (status === 'not_configured') return 'Not configured'
-  if (status === 'missing_key') return 'Missing key'
-  if (status === 'auth_error') return 'Auth failed'
-  if (status === 'provider_error') return 'Provider error'
-  if (status === 'invalid_output') return 'Invalid output'
-  if (status === 'timeout') return 'Timeout'
-  if (status === 'model_not_found') return 'Not found'
-  if (status === 'not_image_capable') return 'Not image-capable'
-  if (status === 'capability_unknown') return 'Unknown capability'
-  if (status === 'runtime_verified' || status === 'ok') return 'Runtime verified'
-  if (status === 'runtime_unverified') return 'Not tested'
-  if (status === 'runtime_unavailable') return 'Runtime unavailable'
-  return status || 'Unknown'
+  if (status === 'ready') return 'พร้อม'
+  if (status === 'not_configured') return 'ยังไม่ตั้งค่า'
+  if (status === 'missing_key') return 'ไม่มี key'
+  if (status === 'auth_error') return 'key ใช้ไม่ได้'
+  if (status === 'provider_error') return 'provider error'
+  if (status === 'invalid_output') return 'ตอบผิดรูปแบบ'
+  if (status === 'timeout') return 'timeout'
+  if (status === 'model_not_found') return 'runtime ใช้ไม่ได้'
+  if (status === 'not_image_capable') return 'ไม่รองรับรูปภาพ'
+  if (status === 'runtime_verified' || status === 'ok') return 'ทดสอบผ่าน'
+  if (status === 'runtime_unverified') return 'ยังไม่ทดสอบ'
+  if (status === 'runtime_unavailable') return 'runtime ไม่พร้อม'
+  return status || 'ไม่ทราบสถานะ'
 }
 
-function catalogTone(status?: string) {
-  if (status === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300'
-  if (status === 'missing_key') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
-  if (!status) return 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300'
-  return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
-}
-
-function catalogSummary(catalog?: ModelCatalog, provider?: ProviderConfig) {
-  if (!catalog) return 'ยังไม่ได้โหลด catalog'
-  if (catalog.status === 'ready') {
-    return `พบ ${catalog.models.length} models จาก ${catalog.cache?.hit ? 'cache' : 'provider สด'}`
-  }
-  if (catalog.status === 'missing_key') return `ยังไม่ได้ตั้ง ${provider?.label || 'provider'} API key`
-  return catalog.summary || statusLabel(catalog.status)
+function badgeVariant(status?: string): 'default' | 'secondary' | 'destructive' {
+  if (status === 'ready' || status === 'ok' || status === 'runtime_verified') return 'default'
+  if (!status || status === 'not_configured' || status === 'runtime_unverified') return 'secondary'
+  return 'destructive'
 }
 
 function inputModalities(model?: OpenRouterModel): string[] {
@@ -153,16 +134,6 @@ function isImageCapable(model?: OpenRouterModel) {
   return inputModalities(model).includes('image')
 }
 
-function catalogHasRef(catalog: ModelCatalog | undefined, ref: string) {
-  if (!catalog || catalog.status !== 'ready') return false
-  const provider = providerFromRef(ref)
-  const modelId = modelIdFromRef(ref, provider)
-  return (catalog.models || []).some(model => (
-    model.id === modelId ||
-    `${provider.modelPrefix}/${model.id}` === ref
-  ))
-}
-
 function formatPrice(model?: OpenRouterModel) {
   const prompt = Number.parseFloat(String(model?.pricing?.prompt || '0'))
   const completion = Number.parseFloat(String(model?.pricing?.completion || '0'))
@@ -172,26 +143,54 @@ function formatPrice(model?: OpenRouterModel) {
   return `${input}/${output} per 1M`
 }
 
-function compactModel(ref: string) {
-  return ref.replace(/^openrouter\//, '')
-}
-
 function runtimeKey(ref: string, capability: 'text' | 'image') {
   return `${capability}:${ref}`
-}
-
-function runtimeStatusTone(status?: string) {
-  if (status === 'runtime_verified' || status === 'ok') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300'
-  if (status === 'runtime_unverified' || !status) return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
-  return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
 }
 
 function isRuntimeVerified(status?: string) {
   return status === 'runtime_verified' || status === 'ok'
 }
 
-function draftHash(payload: ModelSettingsPayload) {
+function settingsHash(payload: ModelSettingsPayload) {
   return JSON.stringify(payload)
+}
+
+function imageModelHash(primary: string, fallbacks: string[], timeoutMs: number) {
+  return JSON.stringify({ primary, fallbacks, timeoutMs })
+}
+
+function readImageUpload(file: File): Promise<ImageUploadDraft> {
+  return new Promise((resolve, reject) => {
+    if (!SUPPORTED_IMAGE_UPLOAD_TYPES.includes(file.type)) {
+      reject(new Error('unsupported_type'))
+      return
+    }
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      reject(new Error('too_large'))
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '')
+      const base64 = dataUrl.split(',')[1] || ''
+      resolve({
+        dataUrl,
+        base64,
+        mimeType: file.type,
+        fileName: file.name,
+        previewUrl: dataUrl,
+        size: file.size,
+      })
+    }
+    reader.onerror = () => reject(new Error('read_failed'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function modelCatalogSummary(catalog?: ModelCatalog) {
+  if (!catalog) return 'กดเลือก provider เพื่อโหลดรายชื่อ model'
+  if (catalog.status === 'ready') return `${catalog.models.length} models พร้อมให้เลือก`
+  return catalog.summary || statusLabel(catalog.status)
 }
 
 function ModelPicker({
@@ -210,8 +209,10 @@ function ModelPicker({
   const initialProvider = providerFromRef(value)
   const [fallbackProvider, setFallbackProvider] = useState<ProviderConfig>(initialProvider)
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const qc = useQueryClient()
   const provider = value ? providerFromRef(value) : fallbackProvider
+  const modelId = modelIdFromRef(value, provider)
 
   const { data: catalog, isFetching } = useQuery({
     queryKey: ['models-catalog', provider.id],
@@ -220,25 +221,30 @@ function ModelPicker({
     retry: 1,
   })
 
-  const modelId = modelIdFromRef(value, provider)
   const selected = catalog?.models?.find(model => model.id === modelId)
   const visibleModels = useMemo(() => {
     const models = catalog?.models || []
-    if (!imageOnly) return models
-    return models.filter(isImageCapable)
+    return imageOnly ? models.filter(isImageCapable) : models
   }, [catalog, imageOnly])
-  const hiddenUnknownCount = imageOnly
-    ? Math.max(0, (catalog?.models?.length || 0) - visibleModels.length)
-    : 0
+  const filteredModels = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return visibleModels
+    return visibleModels.filter(model => (
+      model.id.toLowerCase().includes(needle) ||
+      (model.name || '').toLowerCase().includes(needle) ||
+      fullRef(provider, model.id).toLowerCase().includes(needle)
+    ))
+  }, [provider, query, visibleModels])
+  const displayedModels = filteredModels.slice(0, 80)
 
   async function refreshCatalog() {
     try {
       const next = await getModelCatalog(provider.id, true)
       qc.setQueryData(['models-catalog', provider.id], next)
-      if (next.status === 'ready') toast.success(`โหลด ${next.models.length} models จาก ${provider.label}`)
+      if (next.status === 'ready') toast.success(`โหลด model จาก ${provider.label} แล้ว`)
       else toast.warning(statusLabel(next.status))
     } catch {
-      toast.error('Refresh model catalog ไม่สำเร็จ')
+      toast.error('โหลดรายชื่อ model ไม่สำเร็จ')
     }
   }
 
@@ -247,45 +253,37 @@ function ModelPicker({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium">{label}</p>
-          {imageOnly && <p className="text-xs text-zinc-500">แสดงเฉพาะ model ที่ provider ยืนยันว่า input เป็น image ได้</p>}
+          {imageOnly && <p className="text-xs text-muted-foreground">แสดงเฉพาะ model ที่ provider ระบุว่ารับรูปภาพได้</p>}
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={refreshCatalog} disabled={isFetching || disabled}>
-          <RefreshCw className={`size-4 ${isFetching ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
-        {PROVIDERS.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            disabled={disabled}
-            onClick={() => {
-              setFallbackProvider(item)
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={provider.id}
+            onValueChange={providerId => {
+              const nextProvider = PROVIDERS.find(item => item.id === providerId) || PROVIDERS[0]
+              setFallbackProvider(nextProvider)
               onChange('')
             }}
-            className={`rounded-md border px-2 py-1.5 text-left text-xs transition ${
-              item.id === provider.id
-                ? 'border-zinc-900 bg-zinc-100 font-medium dark:border-zinc-100 dark:bg-zinc-800'
-                : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800'
-            } disabled:cursor-not-allowed disabled:opacity-60`}
+            disabled={disabled}
           >
-            <span className="block truncate">{item.label}</span>
-            {item.id === 'kilocode' && <span className="block truncate text-[10px] text-amber-600 dark:text-amber-300">runtime test required</span>}
-          </button>
-        ))}
+            <SelectTrigger className="h-9 w-[170px]">
+              <span className="truncate text-left">{provider.label}</span>
+            </SelectTrigger>
+            <SelectContent align="end">
+              {PROVIDERS.map(item => (
+                <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button type="button" variant="outline" size="sm" onClick={refreshCatalog} disabled={disabled || isFetching}>
+            <RefreshCw className={`size-4 ${isFetching ? 'animate-spin' : ''}`} />
+            โหลดใหม่
+          </Button>
+        </div>
       </div>
 
-      <div className={`rounded-md border px-3 py-2 text-xs ${catalogTone(catalog?.status)}`}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="font-medium">{statusLabel(catalog?.status)}</span>
-          {catalog?.cache?.hit && <span>Using cache</span>}
-        </div>
-        <p className="mt-1">{catalogSummary(catalog, provider)}</p>
-        {hiddenUnknownCount > 0 && (
-          <p className="mt-1">ซ่อน {hiddenUnknownCount} models ที่ provider ไม่ส่ง image capability ชัดเจน</p>
-        )}
+      <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{statusLabel(catalog?.status)}</span>
+        <span className="ml-2">{modelCatalogSummary(catalog)}</span>
       </div>
 
       <Popover open={open} onOpenChange={setOpen}>
@@ -294,7 +292,7 @@ function ModelPicker({
           aria-expanded={open}
           disabled={disabled || catalog?.status !== 'ready'}
           onClick={() => setOpen(value => !value)}
-          className="inline-flex h-10 w-full items-center justify-between rounded-md border bg-background px-3 text-sm shadow-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex min-h-11 w-full items-center justify-between rounded-md border bg-background px-3 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className="truncate text-left">
             {value ? (selected?.name || compactModel(value)) : 'เลือก model...'}
@@ -302,11 +300,11 @@ function ModelPicker({
           <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
         </PopoverTrigger>
         <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-          <Command>
-            <CommandInput placeholder="ค้นหา model..." />
+          <Command shouldFilter={false}>
+            <CommandInput placeholder="ค้นหา model..." value={query} onValueChange={setQuery} />
             <CommandList>
               <CommandEmpty>ไม่พบ model ที่เลือกได้</CommandEmpty>
-              {visibleModels.map(model => {
+              {displayedModels.map(model => {
                 const ref = fullRef(provider, model.id)
                 const active = ref === value
                 return (
@@ -323,809 +321,237 @@ function ModelPicker({
                       <Check className={`size-4 shrink-0 ${active ? 'opacity-100' : 'opacity-0'}`} />
                       <div className="min-w-0">
                         <p className="truncate">{model.name || model.id}</p>
-                        <p className="truncate font-mono text-xs text-zinc-400">{ref}</p>
+                        <p className="truncate font-mono text-xs text-muted-foreground">{ref}</p>
                       </div>
                     </div>
-                    {formatPrice(model) && <span className="hidden shrink-0 text-xs text-zinc-400 sm:inline">{formatPrice(model)}</span>}
+                    {formatPrice(model) && <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">{formatPrice(model)}</span>}
                   </CommandItem>
                 )
               })}
+              {filteredModels.length > displayedModels.length && (
+                <div className="px-3 py-2 text-xs text-muted-foreground">
+                  แสดง 80 รายการแรกจาก {filteredModels.length} รายการ พิมพ์คำค้นเพิ่มเพื่อกรอง
+                </div>
+              )}
             </CommandList>
           </Command>
         </PopoverContent>
       </Popover>
 
       {value && (
-        <div className="rounded-md border px-3 py-2 text-xs text-zinc-500">
-          <p className="break-all font-mono text-zinc-700 dark:text-zinc-300">{value}</p>
-          {selected && formatPrice(selected) && <p className="mt-1">{formatPrice(selected)}</p>}
+        <div className="rounded-md border px-3 py-2 text-xs">
+          <p className="break-all font-mono">{value}</p>
+          {selected && formatPrice(selected) && <p className="mt-1 text-muted-foreground">{formatPrice(selected)}</p>}
         </div>
       )}
     </div>
   )
 }
 
-function ReadinessBadge({ status }: { status?: string }) {
-  return <Badge variant={statusVariant(status)}>{statusLabel(status)}</Badge>
-}
-
-type RuntimeRef = {
-  role: string
-  ref: string
-  capability: 'text' | 'image'
-}
-
-type RuntimeView = {
-  status: string
-  summary: string
-  durationMs?: number | null
-  runtimeVersion?: string | null
-  testedAt?: string | null
-  expectedOutput?: string | null
-  outputPreview?: string | null
-  failureReason?: string | null
-}
-
-type RuntimeTestProgress = {
-  active: boolean
-  title: string
-  total: number
-  completed: number
-  failed: number
-  current?: RuntimeRef | null
-  message: string
-  cancelled?: boolean
-  startedAt: number
-}
-
-function RuntimeBadge({ status }: { status?: string }) {
-  return <Badge variant={statusVariant(status)}>{statusLabel(status)}</Badge>
-}
-
-function RuntimeVerificationPanel({
-  refs,
-  stateFor,
-  onTestOne,
-  onTestAll,
-  testing,
-}: {
-  refs: RuntimeRef[]
-  stateFor: (ref: RuntimeRef) => RuntimeView
-  onTestOne: (ref: RuntimeRef) => void
-  onTestAll: () => void
-  testing: boolean
-}) {
-  const visibleRefs = refs.filter(item => item.ref)
-  return (
-    <div className="rounded-md border p-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm font-medium">Runtime verification</p>
-          <p className="mt-1 text-xs text-zinc-500">
-            Catalog และ key ยังไม่พอ ต้องทดสอบผ่าน OpenClaw runtime ก่อน Save เพื่อกัน model ที่ runtime ไม่รู้จัก
-          </p>
-        </div>
-        <Button type="button" variant="outline" size="sm" onClick={onTestAll} disabled={testing || visibleRefs.length === 0}>
-          <PlayCircle className="size-4" />
-          Test all before save
-        </Button>
-      </div>
-
-      <div className="mt-3 space-y-2">
-        {visibleRefs.length === 0 ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-            เลือก primary model ก่อนเริ่มทดสอบ runtime
-          </div>
-        ) : visibleRefs.map(item => {
-          const state = stateFor(item)
-          return (
-            <div key={`${item.capability}:${item.role}:${item.ref}`} className={`rounded-md border px-3 py-2 text-xs ${runtimeStatusTone(state.status)}`}>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <RuntimeBadge status={state.status} />
-                    <span className="font-medium">{item.role}</span>
-                    <span className="rounded bg-white/60 px-1.5 py-0.5 text-[11px] dark:bg-zinc-950/30">{item.capability}</span>
-                  </div>
-                  <p className="mt-1 break-all font-mono text-zinc-700 dark:text-zinc-200">{item.ref}</p>
-                  <p className="mt-1">{state.summary}</p>
-                  {(state.failureReason || state.outputPreview) && (
-                    <div className="mt-1 space-y-1 text-zinc-500 dark:text-zinc-300">
-                      {state.failureReason && <p>Reason: {state.failureReason}</p>}
-                      {state.outputPreview && <p className="break-all font-mono">Output: {state.outputPreview}</p>}
-                    </div>
-                  )}
-                  {(state.durationMs || state.runtimeVersion) && (
-                    <p className="mt-1 flex flex-wrap items-center gap-2 text-zinc-500 dark:text-zinc-300">
-                      {state.durationMs ? <span className="inline-flex items-center gap-1"><Timer className="size-3" />{state.durationMs}ms</span> : null}
-                      {state.runtimeVersion ? <span className="font-mono">{state.runtimeVersion}</span> : null}
-                    </p>
-                  )}
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={() => onTestOne(item)} disabled={testing}>
-                  <PlayCircle className="size-4" />
-                  Test
-                </Button>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function RuntimeTestProgressPanel({
-  progress,
-  onCancel,
-  onClose,
-}: {
-  progress: RuntimeTestProgress
-  onCancel: () => void
-  onClose: () => void
-}) {
-  const percent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0
-  const status = progress.cancelled
-    ? 'ยกเลิกแล้ว'
-    : progress.active
-      ? 'กำลังทดสอบ'
-      : progress.failed
-        ? 'ทดสอบเสร็จ มีบางตัวไม่ผ่าน'
-        : 'ทดสอบเสร็จ'
-
-  return (
-    <div className="rounded-md border border-sky-200 bg-sky-50/80 px-4 py-3 text-sky-950 dark:border-sky-950 dark:bg-sky-950/20 dark:text-sky-100">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={progress.active ? 'secondary' : progress.failed ? 'destructive' : 'default'}>
-              {status}
-            </Badge>
-            <p className="text-sm font-medium">{progress.title}</p>
-          </div>
-          <p className="mt-2 text-sm opacity-85">{progress.message}</p>
-          {progress.current?.ref && (
-            <p className="mt-1 break-all font-mono text-xs opacity-75">
-              {progress.current.capability === 'image' ? 'รูปภาพ' : 'ข้อความ'}: {progress.current.ref}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {progress.active ? (
-            <Button type="button" variant="outline" className="min-h-11 bg-white/70 sm:min-h-9 dark:bg-zinc-950/40" onClick={onCancel}>
-              <XCircle className="size-4" />
-              ยกเลิกการทดสอบ
-            </Button>
-          ) : (
-            <Button type="button" variant="outline" className="min-h-11 bg-white/70 sm:min-h-9 dark:bg-zinc-950/40" onClick={onClose}>
-              ปิดสถานะ
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-3">
-        <div className="flex items-center justify-between gap-2 text-xs opacity-75">
-          <span>{progress.completed}/{progress.total} รายการ</span>
-          <span>ไม่ผ่าน {progress.failed} รายการ</span>
-        </div>
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-zinc-950/40">
-          <div
-            className={`h-full rounded-full transition-all ${progress.failed ? 'bg-amber-500' : 'bg-sky-600'}`}
-            style={{ width: `${Math.max(progress.active && percent === 0 ? 8 : percent, 0)}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function AdvisorModelRow({
-  item,
-  state,
-}: {
-  item: RuntimeRef
-  state: RuntimeView
-}) {
-  return (
-    <div className="rounded-md border px-3 py-3 text-xs">
-      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <RuntimeBadge status={state.status} />
-            <span className="font-medium">{item.role}</span>
-            <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300">
-              {item.capability}
-            </span>
-          </div>
-          <p className="break-all font-mono leading-relaxed text-zinc-600 dark:text-zinc-300">{item.ref}</p>
-          {(state.failureReason || state.outputPreview) && (
-            <p className="break-all text-zinc-500">
-              {state.failureReason ? `${state.failureReason}: ` : ''}{state.outputPreview || ''}
-            </p>
-          )}
-        </div>
-        <p className="text-zinc-500 md:max-w-[260px] md:text-right">{state.summary}</p>
-      </div>
-    </div>
-  )
-}
-
-function ModelAdvisor({
-  textRefs,
-  imageRefs,
-  stateFor,
-  onApplyText,
-  onTestText,
-  onTestImage,
-  onClearImage,
-  testing,
-}: {
-  textRefs: RuntimeRef[]
-  imageRefs: RuntimeRef[]
-  stateFor: (ref: RuntimeRef) => RuntimeView
-  onApplyText: () => void
-  onTestText: () => void
-  onTestImage: () => void
-  onClearImage: () => void
-  testing: boolean
-}) {
-  const textStates = textRefs.map(item => ({ item, state: stateFor(item) }))
-  const imageStates = imageRefs.map(item => ({ item, state: stateFor(item) }))
-  const verifiedTextCount = textStates.filter(({ state }) => isRuntimeVerified(state.status)).length
-  const textReady = textRefs.length > 0 && verifiedTextCount === textRefs.length
-  const imageVerifiedCount = imageStates.filter(({ state }) => isRuntimeVerified(state.status)).length
-  const imageHasUnsupported = imageStates.some(({ state }) => state.status === 'not_image_capable')
-  const imageReady = imageRefs.length > 0 && imageVerifiedCount === imageRefs.length
-
-  return (
-    <Card className="border-sky-200 bg-sky-50/70 dark:border-sky-950 dark:bg-sky-950/20">
-      <CardHeader>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base text-sky-900 dark:text-sky-100">
-              <ShieldCheck className="size-4" />
-              Model Advisor
-            </CardTitle>
-            <p className="mt-1 max-w-3xl text-sm text-sky-800/80 dark:text-sky-200/80">
-              เลือก model จากผลทดสอบจริง ไม่ใช่จาก catalog อย่างเดียว: key ต้องพร้อม, model ต้องมีอยู่จริง, และ OpenClaw runtime ต้องเรียกได้สำเร็จ
-            </p>
-          </div>
-          <div className="grid gap-2 sm:flex sm:flex-wrap">
-            <Button type="button" className="w-full sm:w-auto" onClick={onApplyText} disabled={testing}>
-              <Zap className="size-4" />
-              Apply recommended text
-            </Button>
-            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onTestText} disabled={testing}>
-              <PlayCircle className="size-4" />
-              Test text chain
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-3">
-          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">Recommended text setup</p>
-              <Badge variant={textReady ? 'default' : 'secondary'}>{textReady ? 'Ready' : 'Needs test'}</Badge>
-            </div>
-            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-              เหมาะกับ Telegram chat ทั่วไป: primary เร็ว, fallback สองชั้น, ค่าใช้จ่ายต่ำ และผ่าน runtime test ได้จริงเมื่อ verified ครบ
-            </p>
-            <p className="mt-2 text-xs text-zinc-500">{verifiedTextCount}/{textRefs.length} text model verified</p>
-          </div>
-
-          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">Image understanding</p>
-              <Badge variant={imageReady ? 'default' : 'destructive'}>{imageReady ? 'Ready' : 'Not ready'}</Badge>
-            </div>
-            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-              {imageHasUnsupported
-                ? 'OpenClaw runtime ยังไม่รับ image input สำหรับชุด OpenRouter ที่ทดสอบ จึงไม่ควร save เป็น production image model'
-                : 'ต้องมี image model ที่ผ่าน runtime test ก่อนเปิดใช้กับลูกค้าที่ส่งรูปสินค้า'}
-            </p>
-            <div className="mt-2 grid gap-2 sm:flex sm:flex-wrap">
-              <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={onTestImage} disabled={testing || imageRefs.length === 0}>
-                <PlayCircle className="size-4" />
-                Test image chain
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={onClearImage} disabled={testing}>
-                Disable image config
-              </Button>
-            </div>
-          </div>
-
-          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">Admin rule</p>
-              <Badge variant="secondary">Safe default</Badge>
-            </div>
-            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-              แสดง model ที่ผ่านจริงก่อน ส่วน provider อื่นเช่น Kilo หรือ image model ให้ใช้ได้หลัง runtime test ผ่านเท่านั้น
-            </p>
-          </div>
-        </div>
-
-        <div className="grid gap-3 xl:grid-cols-2">
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-sky-900 dark:text-sky-100">Recommended text chain</p>
-            {textStates.map(({ item, state }) => (
-              <AdvisorModelRow key={`${item.capability}:${item.ref}`} item={item} state={state} />
-            ))}
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-sky-900 dark:text-sky-100">Image candidates</p>
-            {imageStates.map(({ item, state }) => (
-              <AdvisorModelRow key={`${item.capability}:${item.ref}`} item={item} state={state} />
-            ))}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function KiloAdvisor({
-  catalog,
+function ProviderKeyCard({
+  provider,
+  active,
   hasKey,
-  candidates,
-  stateFor,
-  onFindUsable,
-  onApplyText,
-  testing,
+  testState,
+  onClick,
 }: {
-  catalog?: ModelCatalog
+  provider: ProviderConfig
+  active: boolean
   hasKey: boolean
-  candidates: RuntimeRef[]
-  stateFor: (ref: RuntimeRef) => RuntimeView
-  onFindUsable: () => void
-  onApplyText: () => void
-  testing: boolean
+  testState: KeyTestState
+  onClick: () => void
 }) {
-  const candidateStates = candidates.map(item => ({ item, state: stateFor(item) }))
-  const verified = candidateStates
-    .filter(({ state }) => isRuntimeVerified(state.status))
-    .sort((a, b) => (a.state.durationMs || Number.MAX_SAFE_INTEGER) - (b.state.durationMs || Number.MAX_SAFE_INTEGER))
-  const failed = candidateStates.filter(({ state }) => (
-    state.status !== 'runtime_unverified' &&
-    !isRuntimeVerified(state.status)
-  ))
-  const recommendedRefs = [
-    KILO_RECOMMENDED.primary,
-    ...KILO_RECOMMENDED.fallbacks,
-  ]
-  const recommendedReady = recommendedRefs.every(ref => isRuntimeVerified(stateFor({ role: ref, ref, capability: 'text' }).status))
+  const status = provider.noApiKey ? 'ไม่ต้องใช้ key' : hasKey ? 'มี key' : 'ไม่มี key'
+  const stateLabel = testState === 'ok' ? 'ทดสอบผ่าน' : testState === 'fail' ? 'ทดสอบไม่ผ่าน' : status
+  const stateVariant = testState === 'ok'
+    ? 'default'
+    : testState === 'fail'
+      ? 'destructive'
+      : hasKey || provider.noApiKey
+        ? 'secondary'
+        : 'destructive'
 
   return (
-    <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-950 dark:bg-amber-950/20">
-      <CardHeader>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle className="flex flex-wrap items-center gap-2 text-base text-amber-950 dark:text-amber-100">
-              <KeyRound className="size-4" />
-              Kilo AI runtime readiness
-              <Badge variant="secondary">Experimental until runtime verified</Badge>
-            </CardTitle>
-            <p className="mt-1 max-w-3xl text-sm text-amber-900/80 dark:text-amber-100/80">
-              Catalog ready หมายถึงเห็นรายชื่อ model เท่านั้น ต้อง runtime verified ก่อนใช้กับ Telegram production
-            </p>
-          </div>
-          <div className="grid gap-2 sm:flex sm:flex-wrap">
-            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onFindUsable} disabled={testing || !hasKey || catalog?.status !== 'ready' || candidates.length === 0}>
-              <PlayCircle className="size-4" />
-              Find usable Kilo models
-            </Button>
-            <Button type="button" className="w-full sm:w-auto" onClick={onApplyText} disabled={testing || !recommendedReady}>
-              <Zap className="size-4" />
-              Apply verified Kilo text
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-4">
-          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <p className="text-sm font-medium">Catalog</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <ReadinessBadge status={catalog?.status || 'runtime_unverified'} />
-              <span className="text-xs text-zinc-500">{catalog?.models?.length || 0} models</span>
-            </div>
-            {(catalog?.warnings || []).map(warning => (
-              <p key={warning} className="mt-2 text-xs text-amber-800 dark:text-amber-200">{warning}</p>
-            ))}
-          </div>
-          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <p className="text-sm font-medium">Key</p>
-            <div className="mt-2">
-              <ReadinessBadge status={hasKey ? 'ready' : 'missing_key'} />
-            </div>
-            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-              {hasKey ? 'มี Kilo key สำหรับ inference จริง' : 'บันทึก Kilo key ก่อน runtime test'}
-            </p>
-          </div>
-          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <p className="text-sm font-medium">Usable text models</p>
-            <p className="mt-2 text-2xl font-semibold">{verified.length}</p>
-            <p className="text-xs text-zinc-500">ผ่าน runtime test จาก shortlist นี้</p>
-          </div>
-          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <p className="text-sm font-medium">Image policy</p>
-            <Badge className="mt-2" variant="destructive">Not production-ready</Badge>
-            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-              จากผลทดสอบปัจจุบัน Kilo image ยังคืน error หรือไม่รองรับ image ผ่าน runtime
-            </p>
-          </div>
-        </div>
-
-        <div className="grid gap-3 xl:grid-cols-2">
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-amber-950 dark:text-amber-100">Verified, fastest first</p>
-            {verified.length === 0 ? (
-              <div className="rounded-md border bg-white/70 px-3 py-3 text-sm text-zinc-600 dark:bg-zinc-950/30 dark:text-zinc-300">
-                กด Find usable Kilo models เพื่อทดสอบ runtime ก่อนเลือกใช้
-              </div>
-            ) : verified.map(({ item, state }) => (
-              <AdvisorModelRow key={`kilo-ok:${item.ref}`} item={item} state={state} />
-            ))}
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-amber-950 dark:text-amber-100">Failed or untested shortlist</p>
-            {candidateStates.map(({ item, state }) => (
-              <AdvisorModelRow key={`kilo-all:${item.ref}`} item={item} state={state} />
-            ))}
-            {failed.length > 0 && (
-              <p className="text-xs text-amber-800 dark:text-amber-200">
-                ถ้าเป็น model_not_found หรือ timeout ไม่ควร save เป็น production model แม้ catalog จะแสดงชื่ออยู่
-              </p>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md border px-2.5 py-2 text-left transition ${
+        active ? 'border-foreground bg-muted' : 'border-border hover:border-foreground/40'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 break-words text-sm font-medium leading-tight">{provider.label}</p>
+        <Badge variant={stateVariant} className="shrink-0 text-[10px] sm:text-xs">{stateLabel}</Badge>
+      </div>
+      <p className="mt-1 hidden truncate font-mono text-xs text-muted-foreground sm:block">{provider.envKey}</p>
+    </button>
   )
 }
 
-function SetupStatusCard({
-  title,
-  status,
-  badge,
-  children,
+function TextModelTestPanel({
+  model,
+  result,
+  testing,
+  elapsedText,
+  onTest,
+  onCancel,
 }: {
-  title: string
-  status: 'ready' | 'warn' | 'fail' | 'idle'
-  badge: string
-  children: ReactNode
+  model: string
+  result?: ModelMessageTestResult
+  testing: boolean
+  elapsedText: string
+  onTest: () => void
+  onCancel: () => void
 }) {
-  const tone = status === 'ready'
-    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-950 dark:border-emerald-950 dark:bg-emerald-950/20 dark:text-emerald-100'
-    : status === 'fail'
-      ? 'border-red-200 bg-red-50/70 text-red-950 dark:border-red-950 dark:bg-red-950/20 dark:text-red-100'
-      : status === 'warn'
-        ? 'border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-100'
-        : 'border-zinc-200 bg-zinc-50/80 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100'
-  const badgeVariant = status === 'ready' ? 'default' : status === 'fail' ? 'destructive' : 'secondary'
+  const passed = Boolean(result?.ok)
+
   return (
-    <div className={`rounded-md border px-3 py-3 ${tone}`}>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-medium">{title}</p>
-        <Badge variant={badgeVariant}>{badge}</Badge>
+    <div className={`space-y-3 rounded-md border px-3 py-3 ${passed ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-950 dark:bg-emerald-950/20' : 'bg-muted/20'}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={passed ? 'default' : result ? 'destructive' : 'secondary'}>
+              {passed ? 'ทดสอบผ่าน' : result ? statusLabel(result.status) : 'ยังไม่ทดสอบ'}
+            </Badge>
+            {result?.durationMs ? <span className="text-xs text-muted-foreground">{result.durationMs}ms</span> : null}
+          </div>
+          <p className="break-all font-mono text-xs text-muted-foreground">{model}</p>
+          {result?.safeMessage && (
+            <p className={`text-sm ${passed ? 'text-emerald-700 dark:text-emerald-300' : 'text-destructive'}`}>
+              {result.safeMessage}
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {testing ? (
+            <Button type="button" variant="outline" onClick={onCancel}>
+              <XCircle className="size-4" />
+              ยกเลิก
+            </Button>
+          ) : null}
+          <Button type="button" variant={passed ? 'outline' : 'default'} onClick={onTest} disabled={testing}>
+            <PlayCircle className="size-4" />
+            {testing ? `กำลังทดสอบ ${elapsedText}` : passed ? 'ทดสอบอีกครั้ง' : 'ทดสอบ model นี้'}
+          </Button>
+        </div>
       </div>
-      <div className="mt-2 text-sm leading-relaxed opacity-85">{children}</div>
+      {testing && (
+        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-950 dark:bg-sky-950/25 dark:text-sky-100">
+          กำลังเรียก OpenClaw runtime จริง โปรดรอผลทดสอบ
+        </div>
+      )}
+      {result?.outputPreview && (
+        <div className="rounded-md border bg-background/70 px-3 py-2 text-sm">
+          <p className="text-xs font-medium text-muted-foreground">ตัวอย่างคำตอบ</p>
+          <p className="mt-1 break-words">{result.outputPreview}</p>
+        </div>
+      )}
     </div>
   )
 }
 
-function AdminModelSetup({
-  textRefs,
-  imageRefs,
-  kiloRefs,
-  stateFor,
-  primary,
-  fallbackCount,
-  imagePrimary,
-  imageFallbackCount,
-  kiloCatalog,
-  kiloHasKey,
-  readinessOk,
-  blockingCount,
-  warningCount,
-  draftValidated,
-  testing,
-  validating,
-  saving,
-  restarting,
-  canValidate,
-  canSave,
-  onApplyOpenRouter,
-  onFindKilo,
-  onApplyKilo,
-  onTestText,
-  onValidate,
-  onSave,
-  onRestart,
-  onClearImage,
+function TechnicalDetails({
+  readiness,
+  runtimeResults,
 }: {
-  textRefs: RuntimeRef[]
-  imageRefs: RuntimeRef[]
-  kiloRefs: RuntimeRef[]
-  stateFor: (ref: RuntimeRef) => RuntimeView
-  primary: string
-  fallbackCount: number
-  imagePrimary: string
-  imageFallbackCount: number
-  kiloCatalog?: ModelCatalog
-  kiloHasKey: boolean
-  readinessOk: boolean
-  blockingCount: number
-  warningCount: number
-  draftValidated: boolean
-  testing: boolean
-  validating: boolean
-  saving: boolean
-  restarting: boolean
-  canValidate: boolean
-  canSave: boolean
-  onApplyOpenRouter: () => void
-  onFindKilo: () => void
-  onApplyKilo: () => void
-  onTestText: () => void
-  onValidate: () => void
-  onSave: () => void
-  onRestart: () => void
-  onClearImage: () => void
+  readiness: Awaited<ReturnType<typeof getModelReadiness>> | undefined
+  runtimeResults: Record<string, ModelRuntimeTestResult>
 }) {
-  const textStates = textRefs.map(item => stateFor(item))
-  const textReady = textRefs.length > 0 && textStates.every(state => isRuntimeVerified(state.status))
-  const textFailed = textStates.some(state => state.status && !['runtime_unverified', 'runtime_verified', 'ok'].includes(state.status))
-  const imageStates = imageRefs.map(item => stateFor(item))
-  const imageConfigured = Boolean(imagePrimary)
-  const imageReady = imageRefs.length > 0 && imageStates.every(state => isRuntimeVerified(state.status))
-  const imageFailed = imageStates.some(state => state.status && !['runtime_unverified', 'runtime_verified', 'ok'].includes(state.status))
-  const kiloStates = kiloRefs.map(item => stateFor(item))
-  const kiloVerifiedCount = kiloStates.filter(state => isRuntimeVerified(state.status)).length
-  const kiloReady = kiloVerifiedCount > 0
-
-  const nextActions = []
-  if (!primary) nextActions.push('เลือกหรือใช้ชุด model แนะนำสำหรับข้อความ')
-  else if (!textReady) nextActions.push('กดทดสอบแชทให้ผ่านก่อน')
-  else if (!draftValidated) nextActions.push('กดตรวจสอบก่อนบันทึก')
-  else if (!readinessOk) nextActions.push('กดบันทึกค่า แล้วรีสตาร์ท Gateway')
-  if (imageConfigured && !imageReady) nextActions.push('รูปสินค้ายังไม่พร้อม: ปิดการอ่านรูป หรือเลือก model ที่ทดสอบผ่าน')
-  if (!kiloHasKey) nextActions.push('ถ้าจะใช้ Kilo ให้บันทึก Kilo key ใน Advanced')
-  const visibleActions = nextActions.slice(0, 4)
+  const providerEntries = Object.entries(readiness?.providers || {})
+  const runtimeEntries = Object.entries(runtimeResults)
 
   return (
-    <Card className="border-zinc-300 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-950/40">
-      <CardHeader>
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <ShieldCheck className="size-5" />
-              Model Setup
-            </CardTitle>
-            <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-300">
-              สำหรับ admin ทั่วไป ให้ทำตามแถวนี้ก่อน: เลือกชุด model, ทดสอบใช้งานจริง, ตรวจสอบ, บันทึก แล้วรีสตาร์ท.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onApplyOpenRouter} disabled={testing || saving}>
-              <Zap className="size-4" />
-              ใช้ OpenRouter แนะนำ
-            </Button>
-            <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onFindKilo} disabled={testing || !kiloHasKey || kiloCatalog?.status !== 'ready'}>
-              <PlayCircle className="size-4" />
-              หา Kilo ที่ใช้ได้
-            </Button>
-            <Button type="button" className="min-h-11 sm:min-h-9" onClick={onApplyKilo} disabled={testing || !kiloReady}>
-              <CheckCircle2 className="size-4" />
-              ใช้ Kilo ที่ผ่านแล้ว
-            </Button>
-          </div>
+    <details className="group rounded-md border bg-card">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+        <div>
+          <p className="text-sm font-medium">รายละเอียดสำหรับทีมเทคนิค</p>
+          <p className="mt-1 text-xs text-muted-foreground">สถานะ provider, readiness และผล runtime test ล่าสุด</p>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-3">
-          <SetupStatusCard
-            title="ข้อความ Telegram"
-            status={textReady ? 'ready' : textFailed ? 'fail' : 'warn'}
-            badge={textReady ? 'พร้อมใช้' : textFailed ? 'ต้องแก้' : 'ต้องทดสอบ'}
-          >
-            <p className="break-all font-mono text-xs">{primary || 'ยังไม่เลือก primary model'}</p>
-            <p className="mt-1">มี model สำรอง {fallbackCount} ตัว</p>
-          </SetupStatusCard>
-          <SetupStatusCard
-            title="Kilo AI"
-            status={kiloReady ? 'ready' : kiloHasKey ? 'warn' : 'idle'}
-            badge={kiloReady ? `${kiloVerifiedCount} ใช้ได้` : kiloHasKey ? 'รอทดสอบ' : 'ยังไม่มี key'}
-          >
-            <p>{catalogSummary(kiloCatalog, PROVIDERS.find(provider => provider.id === 'kilocode'))}</p>
-            <p className="mt-1">ใช้กับ production หลังทดสอบใช้งานจริงผ่านเท่านั้น</p>
-          </SetupStatusCard>
-          <SetupStatusCard
-            title="รูปสินค้า"
-            status={!imageConfigured ? 'idle' : imageReady ? 'ready' : imageFailed ? 'fail' : 'warn'}
-            badge={!imageConfigured ? 'ปิดอยู่' : imageReady ? 'พร้อมใช้' : imageFailed ? 'ยังใช้ไม่ได้' : 'ต้องทดสอบ'}
-          >
-            <p className="break-all font-mono text-xs">{imagePrimary || 'ไม่ได้ตั้ง image model'}</p>
-            <p className="mt-1">มี model อ่านรูปสำรอง {imageFallbackCount} ตัว</p>
-          </SetupStatusCard>
-        </div>
-
-        <div className="grid gap-3 xl:grid-cols-[1fr_420px]">
-          <div className="rounded-md border bg-white px-3 py-3 dark:bg-zinc-950/50">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={readinessOk ? 'default' : 'secondary'}>{readinessOk ? 'พร้อมบันทึก' : 'ต้องตรวจเพิ่ม'}</Badge>
-              <span className="text-sm text-zinc-600 dark:text-zinc-300">
-                {blockingCount} ปัญหาที่บล็อก, {warningCount} คำเตือน
-              </span>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onTestText} disabled={!primary || testing}>
-                <PlayCircle className="size-4" />
-                ทดสอบแชท
-              </Button>
-              <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onValidate} disabled={!canValidate || validating}>
-                <ShieldCheck className="size-4" />
-                ตรวจสอบก่อนบันทึก
-              </Button>
-              <Button type="button" className="min-h-11 sm:min-h-9" onClick={onSave} disabled={!canSave || saving}>
-                <Save className="size-4" />
-                บันทึกค่า
-              </Button>
-              <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onRestart} disabled={restarting}>
-                <RotateCcw className="size-4" />
-                รีสตาร์ท Gateway
-              </Button>
-              {imageConfigured && !imageReady && (
-                <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onClearImage} disabled={testing || saving}>
-                  <ImageIcon className="size-4" />
-                  ปิดการอ่านรูป
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-md border bg-white px-3 py-3 dark:bg-zinc-950/50">
-            <p className="text-sm font-medium">ควรทำต่อ</p>
-            {visibleActions.length ? (
-              <ol className="mt-2 space-y-1.5 text-sm text-zinc-600 dark:text-zinc-300">
-                {visibleActions.map((item, index) => (
-                  <li key={item} className="flex gap-2">
-                    <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                      {index + 1}
-                    </span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">ไม่มี action เร่งด่วน เหลือแค่ทดสอบ Telegram จริงหลัง restart</p>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function AgentMatrix({ agents }: { agents: AgentModelReadiness[] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Per-Agent Readiness</CardTitle>
-        <p className="text-sm text-zinc-500">ดูว่า agent ไหน inherit default และ agent ไหน override model/image model เอง</p>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3 md:hidden">
-          {agents.map(agent => (
-            <div key={agent.id} className="space-y-3 rounded-md border px-3 py-3 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium">{agent.id}</p>
-                <p className="text-xs text-zinc-500">
-                  model: {agent.modelSource}, image: {agent.imageModelSource}
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-zinc-500">Primary</p>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground transition group-open:rotate-180" />
+      </summary>
+      <div className="space-y-4 border-t p-4">
+        {readiness?.blockingIssues.length ? (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-destructive">Blocking issues</p>
+            {readiness.blockingIssues.slice(0, 8).map(issue => (
+              <div key={`${issue.scope}-${issue.ref}-${issue.status}`} className="rounded-md border px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <ReadinessBadge status={agent.model.primary.status} />
-                  <RuntimeBadge status={agent.model.primary.runtimeStatus || 'runtime_unverified'} />
-                  <span className="min-w-0 break-all font-mono text-xs">{agent.model.primary.ref || '-'}</span>
+                  <Badge variant="destructive">{statusLabel(issue.status)}</Badge>
+                  <span className="break-all font-mono text-xs">{issue.scope}</span>
                 </div>
+                <p className="mt-1 text-xs text-muted-foreground">{issue.summary}</p>
               </div>
+            ))}
+          </div>
+        ) : null}
 
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div>
-                  <p className="font-medium text-zinc-500">Fallbacks</p>
-                  <p>{agent.model.fallbacks.length}</p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Provider status</p>
+            {providerEntries.length === 0 ? (
+              <div className="rounded-md border px-3 py-2 text-sm text-muted-foreground">ยังไม่มีข้อมูล provider</div>
+            ) : providerEntries.map(([provider, status]) => (
+              <div key={provider} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{provider}</p>
+                  <p className="truncate text-xs text-muted-foreground">{status.modelCount} models · {status.source}</p>
                 </div>
-                <div>
-                  <p className="font-medium text-zinc-500">Image</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <ReadinessBadge status={agent.usesImageTool ? agent.imageModel.primary.status : 'ready'} />
-                    {agent.usesImageTool && <RuntimeBadge status={agent.imageModel.primary.runtimeStatus || 'runtime_unverified'} />}
-                  </div>
-                </div>
+                <Badge variant={badgeVariant(status.status)}>{statusLabel(status.status)}</Badge>
               </div>
+            ))}
+          </div>
 
-              <p className="break-all font-mono text-xs text-zinc-600 dark:text-zinc-300">
-                {agent.usesImageTool ? (agent.imageModel.primary.ref || 'not configured') : 'not used'}
-              </p>
-            </div>
-          ))}
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Runtime test cache on this page</p>
+            {runtimeEntries.length === 0 ? (
+              <div className="rounded-md border px-3 py-2 text-sm text-muted-foreground">ยังไม่มีการทดสอบในหน้านี้</div>
+            ) : runtimeEntries.map(([key, result]) => (
+              <div key={key} className="rounded-md border px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={result.ok ? 'default' : 'destructive'}>{result.ok ? 'ผ่าน' : statusLabel(result.status)}</Badge>
+                  <span className="break-all font-mono text-xs">{result.model}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{result.safeMessage || result.summary}</p>
+                {result.outputPreview && <p className="mt-1 break-words font-mono text-xs text-muted-foreground">{result.outputPreview}</p>}
+              </div>
+            ))}
+          </div>
         </div>
-
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="text-left text-xs text-zinc-500">
-              <tr className="border-b">
-                <th className="py-2 pr-3 font-medium">Agent</th>
-                <th className="py-2 pr-3 font-medium">Primary</th>
-                <th className="py-2 pr-3 font-medium">Fallbacks</th>
-                <th className="py-2 pr-3 font-medium">Image</th>
-                <th className="py-2 pr-3 font-medium">Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map(agent => (
-                <tr key={agent.id} className="border-b last:border-b-0">
-                  <td className="py-2 pr-3 font-medium">{agent.id}</td>
-                  <td className="py-2 pr-3">
-                    <div className="flex items-center gap-2">
-                      <ReadinessBadge status={agent.model.primary.status} />
-                      <RuntimeBadge status={agent.model.primary.runtimeStatus || 'runtime_unverified'} />
-                      <span className="max-w-[260px] truncate font-mono text-xs">{agent.model.primary.ref || '-'}</span>
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3">{agent.model.fallbacks.length}</td>
-                  <td className="py-2 pr-3">
-                    <div className="flex items-center gap-2">
-                      <ReadinessBadge status={agent.usesImageTool ? agent.imageModel.primary.status : 'ready'} />
-                      {agent.usesImageTool && <RuntimeBadge status={agent.imageModel.primary.runtimeStatus || 'runtime_unverified'} />}
-                      <span className="max-w-[260px] truncate font-mono text-xs">
-                        {agent.usesImageTool ? (agent.imageModel.primary.ref || 'not configured') : 'not used'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 text-xs text-zinc-500">
-                    model: {agent.modelSource}, image: {agent.imageModelSource}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </details>
   )
 }
 
 export default function ModelPage() {
   const qc = useQueryClient()
-  const [section, setSection] = useState<Section>('primary')
   const [providerForKey, setProviderForKey] = useState<ProviderConfig>(PROVIDERS[0])
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
-  const [testResult, setTestResult] = useState<'idle' | 'ok' | 'fail'>('idle')
-  const [oauthUrl, setOauthUrl] = useState('')
-  const [oauthRedirectUrl, setOauthRedirectUrl] = useState('')
-
+  const [keyTestStates, setKeyTestStates] = useState<Record<string, KeyTestState>>({})
   const [primary, setPrimary] = useState('')
   const [fallbackDraft, setFallbackDraft] = useState('')
   const [fallbacks, setFallbacks] = useState<string[]>([])
   const [imagePrimary, setImagePrimary] = useState('')
-  const [imageFallbackDraft, setImageFallbackDraft] = useState('')
   const [imageFallbacks, setImageFallbacks] = useState<string[]>([])
   const [imageTimeoutMs, setImageTimeoutMs] = useState(30000)
-  const [validatedHash, setValidatedHash] = useState('')
+  const [imagePrompt, setImagePrompt] = useState('อธิบายสิ่งที่เห็นในรูปนี้สั้น ๆ')
+  const [imageUpload, setImageUpload] = useState<ImageUploadDraft | null>(null)
+  const [imageTestResult, setImageTestResult] = useState<ModelRuntimeTestResult | null>(null)
+  const [imageTesting, setImageTesting] = useState(false)
+  const [imageTestStartedAt, setImageTestStartedAt] = useState<number | null>(null)
+  const [testPrompt, setTestPrompt] = useState('สวัสดีครับ')
+  const [textTestResults, setTextTestResults] = useState<Record<string, ModelMessageTestResult>>({})
+  const [textTestingModel, setTextTestingModel] = useState('')
+  const [messageTestStartedAt, setMessageTestStartedAt] = useState<number | null>(null)
+  const [lastImageTestHash, setLastImageTestHash] = useState('')
+  const [savedHash, setSavedHash] = useState('')
   const [showRestartHint, setShowRestartHint] = useState(false)
   const [runtimeResults, setRuntimeResults] = useState<Record<string, ModelRuntimeTestResult>>({})
-  const [runtimeTestProgress, setRuntimeTestProgress] = useState<RuntimeTestProgress | null>(null)
-  const runtimeAbortRef = useRef<AbortController | null>(null)
-  const runtimeCancelRef = useRef(false)
+  const [progressNowMs, setProgressNowMs] = useState(Date.now())
+  const [deleteKeyDialogOpen, setDeleteKeyDialogOpen] = useState(false)
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false)
+  const messageAbortRef = useRef<AbortController | null>(null)
+  const imageAbortRef = useRef<AbortController | null>(null)
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
   const { data: readiness, isFetching: readinessFetching } = useQuery({
@@ -1133,33 +559,36 @@ export default function ModelPage() {
     queryFn: () => getModelReadiness(),
     staleTime: 30_000,
   })
-  const { data: kiloCatalog } = useQuery({
-    queryKey: ['models-catalog', 'kilocode'],
-    queryFn: () => getModelCatalog('kilocode'),
-    staleTime: 5 * 60 * 1000,
-    retry: 1,
-  })
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const wanted = params.get('section')
-    if (wanted === 'fallbacks' || wanted === 'image' || wanted === 'primary') setSection(wanted)
-  }, [])
 
   useEffect(() => {
     if (!config) return
     const defaults = config.agents?.defaults || {}
-    setPrimary(defaults.model?.primary || '')
-    setFallbacks(defaults.model?.fallbacks || [])
-    setImagePrimary(defaults.imageModel?.primary || '')
-    setImageFallbacks(defaults.imageModel?.fallbacks || [])
-    setImageTimeoutMs(defaults.imageModel?.timeoutMs || 30000)
+    const nextPrimary = defaults.model?.primary || ''
+    const nextFallbacks = defaults.model?.fallbacks || []
+    const nextImagePrimary = defaults.imageModel?.primary || ''
+    const nextImageFallbacks = defaults.imageModel?.fallbacks || []
+    const nextImageTimeout = defaults.imageModel?.timeoutMs || 30000
+    const nextPayload: ModelSettingsPayload = {
+      defaults: {
+        model: { primary: nextPrimary, fallbacks: nextFallbacks },
+        imageModel: nextImagePrimary
+          ? { primary: nextImagePrimary, fallbacks: nextImageFallbacks, timeoutMs: nextImageTimeout }
+          : null,
+      },
+    }
+
+    setPrimary(nextPrimary)
+    setFallbacks(nextFallbacks)
+    setImagePrimary(nextImagePrimary)
+    setImageFallbacks(nextImageFallbacks)
+    setImageTimeoutMs(nextImageTimeout)
+    setSavedHash(settingsHash(nextPayload))
+    setShowRestartHint(false)
   }, [config])
 
   useEffect(() => {
     if (!config) return
-    setApiKey(config.env?.[providerForKey.envKey] || '')
-    setTestResult('idle')
+    setApiKey('')
   }, [config, providerForKey])
 
   const payload = useMemo<ModelSettingsPayload>(() => ({
@@ -1171,107 +600,67 @@ export default function ModelPage() {
     },
   }), [fallbacks, imageFallbacks, imagePrimary, imageTimeoutMs, primary])
 
-  const currentHash = draftHash(payload)
-  const draftValidated = validatedHash === currentHash
-  const runtimeRefs = useMemo<RuntimeRef[]>(() => {
-    const refs: RuntimeRef[] = []
-    if (primary) refs.push({ role: 'Primary model', ref: primary, capability: 'text' })
-    fallbacks.forEach((ref, index) => {
-      if (ref) refs.push({ role: `Fallback ${index + 1}`, ref, capability: 'text' })
-    })
-    if (imagePrimary) refs.push({ role: 'Image primary', ref: imagePrimary, capability: 'image' })
-    imageFallbacks.forEach((ref, index) => {
-      if (ref) refs.push({ role: `Image fallback ${index + 1}`, ref, capability: 'image' })
-    })
-    const seen = new Set<string>()
-    return refs.filter(item => {
-      const key = runtimeKey(item.ref, item.capability)
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-  }, [fallbacks, imageFallbacks, imagePrimary, primary])
-  const recommendedTextRefs = useMemo<RuntimeRef[]>(() => ([
-    { role: 'Primary model', ref: OPENROUTER_RECOMMENDED.primary, capability: 'text' },
-    ...OPENROUTER_RECOMMENDED.fallbacks.map((ref, index) => ({
-      role: `Fallback ${index + 1}`,
-      ref,
-      capability: 'text' as const,
-    })),
-  ]), [])
-  const recommendedImageRefs = useMemo<RuntimeRef[]>(() => ([
-    { role: 'Image primary', ref: OPENROUTER_RECOMMENDED.imagePrimary, capability: 'image' },
-    ...OPENROUTER_RECOMMENDED.imageFallbacks.map((ref, index) => ({
-      role: `Image fallback ${index + 1}`,
-      ref,
-      capability: 'image' as const,
-    })),
-  ]), [])
-  const kiloTextRefs = useMemo<RuntimeRef[]>(() => (
-    KILO_TEXT_CANDIDATES
-      .filter(ref => catalogHasRef(kiloCatalog, ref))
-      .map((ref, index) => ({
-        role: ref === KILO_RECOMMENDED.primary
-          ? 'Kilo primary'
-          : KILO_RECOMMENDED.fallbacks.includes(ref)
-            ? `Kilo fallback ${KILO_RECOMMENDED.fallbacks.indexOf(ref) + 1}`
-            : `Kilo candidate ${index + 1}`,
-        ref,
-        capability: 'text' as const,
-      }))
-  ), [kiloCatalog])
+  const currentHash = settingsHash(payload)
+  const currentImageHash = imageModelHash(imagePrimary, imageFallbacks, imageTimeoutMs)
+  const hasDraftChanges = Boolean(savedHash && currentHash !== savedHash)
+  const currentKey = config?.env?.[providerForKey.envKey] || ''
+  const keyChanged = !providerForKey.noApiKey && Boolean(apiKey.trim()) && apiKey.trim() !== currentKey
+  const selectedTextModels = [primary, ...fallbacks].filter(Boolean)
+  const missingTextProvider = selectedTextModels
+    .map(model => providerFromRef(model))
+    .find(provider => !provider.noApiKey && !config?.env?.[provider.envKey])
+  const unverifiedTextModels = selectedTextModels.filter(model => !textTestResults[model]?.ok)
+  const textModelsReady = Boolean(primary) && unverifiedTextModels.length === 0
+  const messageTesting = Boolean(textTestingModel)
 
-  const readinessRuntimeByKey = useMemo(() => {
-    const map = new Map<string, RuntimeView>()
-    const add = (item?: {
-      ref?: string
-      capability?: string | null
-      runtimeStatus?: string | null
-      runtimeSummary?: string | null
-      runtimeDurationMs?: number | null
-      runtimeVersion?: string | null
-      runtimeTestedAt?: string | null
-    }) => {
-      if (!item?.ref) return
-      const capability = item.capability === 'image' ? 'image' : 'text'
-      map.set(runtimeKey(item.ref, capability), {
-        status: item.runtimeStatus || 'runtime_unverified',
-        summary: item.runtimeSummary || 'Runtime test has not been run for this model',
-        durationMs: item.runtimeDurationMs,
-        runtimeVersion: item.runtimeVersion,
-        testedAt: item.runtimeTestedAt,
-      })
-    }
-    add(readiness?.defaults.model.primary)
-    readiness?.defaults.model.fallbacks.forEach(add)
-    add(readiness?.defaults.imageModel.primary)
-    readiness?.defaults.imageModel.fallbacks.forEach(add)
-    return map
-  }, [readiness])
-
-  function runtimeStateFor(item: RuntimeRef): RuntimeView {
-    const key = runtimeKey(item.ref, item.capability)
-    const local = runtimeResults[key]
-    if (local) {
-      return {
-        status: local.ok ? 'runtime_verified' : local.status,
-        summary: local.safeMessage || local.summary,
-        durationMs: local.durationMs,
-        runtimeVersion: local.runtimeVersion,
-        testedAt: local.testedAt,
-        expectedOutput: local.expectedOutput,
-        outputPreview: local.outputPreview || local.data?.outputPreview,
-        failureReason: local.failureReason,
-      }
-    }
-    return readinessRuntimeByKey.get(key) || {
-      status: 'runtime_unverified',
-      summary: 'Runtime test has not been run for this model',
-      durationMs: null,
-      runtimeVersion: null,
-      testedAt: null,
-    }
+  function runtimeState(ref: string, capability: 'text' | 'image') {
+    const local = runtimeResults[runtimeKey(ref, capability)]
+    if (local) return local.ok ? 'runtime_verified' : local.status
+    const chain = capability === 'image' ? readiness?.defaults.imageModel : readiness?.defaults.model
+    const refs = [chain?.primary, ...(chain?.fallbacks || [])].filter(Boolean)
+    const found = refs.find(item => item?.ref === ref)
+    return found?.runtimeStatus || 'runtime_unverified'
   }
+
+  const imageReady = !imagePrimary || isRuntimeVerified(runtimeState(imagePrimary, 'image')) || lastImageTestHash === currentImageHash
+  const canSave = Boolean(primary)
+    && !missingTextProvider
+    && textModelsReady
+    && imageReady
+    && !keyChanged
+    && hasDraftChanges
+    && !messageTesting
+    && !imageTesting
+  const saveReason = !primary
+    ? 'เลือก Model หลักก่อน'
+    : missingTextProvider
+      ? `ตั้งค่า ${missingTextProvider.label} key ก่อน`
+      : keyChanged
+        ? 'บันทึก key ที่แก้ไขไว้ก่อน'
+        : !textModelsReady
+          ? `ทดสอบ Model ข้อความให้ผ่านก่อน (${unverifiedTextModels.length} ตัว)`
+          : !imageReady
+            ? 'ทดสอบ Model รูปภาพ หรือปิดไว้ก่อน'
+            : !hasDraftChanges
+              ? 'ยังไม่มีการเปลี่ยนแปลง'
+              : ''
+
+  useEffect(() => {
+    if (!hasDraftChanges && !keyChanged && !messageTesting && !imageTesting) return
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasDraftChanges, imageTesting, keyChanged, messageTesting])
+
+  useEffect(() => {
+    if (!messageTesting && !imageTesting) return
+    setProgressNowMs(Date.now())
+    const timer = window.setInterval(() => setProgressNowMs(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [imageTesting, messageTesting])
 
   const saveKeyMutation = useMutation({
     mutationFn: async () => {
@@ -1285,6 +674,8 @@ export default function ModelPage() {
       await qc.invalidateQueries({ queryKey: ['config'] })
       await qc.invalidateQueries({ queryKey: ['model-readiness'] })
       await qc.invalidateQueries({ queryKey: ['models-catalog'] })
+      resetTextTest()
+      resetImageTest()
       toast.success('บันทึก provider key แล้ว')
     },
     onError: () => toast.error('บันทึก provider key ไม่สำเร็จ'),
@@ -1295,14 +686,14 @@ export default function ModelPage() {
       if (!config || providerForKey.noApiKey) return
       const nextEnv = { ...(config.env || {}) }
       delete nextEnv[providerForKey.envKey]
-      await putConfig({
-        ...config,
-        env: nextEnv,
-      })
+      await putConfig({ ...config, env: nextEnv })
     },
     onSuccess: async () => {
+      setDeleteKeyDialogOpen(false)
       setApiKey('')
-      setTestResult('idle')
+      setKeyTestStates(prev => ({ ...prev, [providerForKey.id]: 'idle' }))
+      resetTextTest()
+      resetImageTest()
       await qc.invalidateQueries({ queryKey: ['config'] })
       await qc.invalidateQueries({ queryKey: ['model-readiness'] })
       await qc.invalidateQueries({ queryKey: ['models-catalog'] })
@@ -1312,33 +703,15 @@ export default function ModelPage() {
   })
 
   const testKeyMutation = useMutation({
-    mutationFn: () => testProvider(providerForKey.id, apiKey.trim()),
+    mutationFn: () => testProvider(providerForKey.id, apiKey.trim() || currentKey),
     onSuccess: ok => {
-      setTestResult(ok ? 'ok' : 'fail')
+      setKeyTestStates(prev => ({ ...prev, [providerForKey.id]: ok ? 'ok' : 'fail' }))
       if (ok) toast.success('Provider key ใช้งานได้')
       else toast.error('Provider key ใช้งานไม่ได้')
     },
     onError: () => {
-      setTestResult('fail')
+      setKeyTestStates(prev => ({ ...prev, [providerForKey.id]: 'fail' }))
       toast.error('ทดสอบ provider key ไม่สำเร็จ')
-    },
-  })
-
-  const validateMutation = useMutation({
-    mutationFn: () => putModelSettings(payload, true),
-    onSuccess: async data => {
-      qc.setQueryData(['model-readiness'], data.readiness)
-      setValidatedHash(currentHash)
-      toast.success('Validate ผ่านแล้ว พร้อม Save')
-    },
-    onError: (error: unknown) => {
-      setValidatedHash('')
-      const data = (error as { response?: { data?: { error?: string; blockingIssues?: Array<{ summary?: string; ref?: string }> } } })?.response?.data
-      const firstIssue = data?.blockingIssues?.[0]
-      const message = firstIssue
-        ? `${data?.error || 'Validate ไม่ผ่าน'}: ${firstIssue.ref ? `${firstIssue.ref} ` : ''}${firstIssue.summary || ''}`
-        : data?.error || 'Validate ไม่ผ่าน'
-      toast.error(message)
     },
   })
 
@@ -1347,8 +720,8 @@ export default function ModelPage() {
     onSuccess: async data => {
       qc.setQueryData(['model-readiness'], data.readiness)
       await qc.invalidateQueries({ queryKey: ['config'] })
+      setSavedHash(currentHash)
       setShowRestartHint(true)
-      setValidatedHash(currentHash)
       toast.success(`บันทึก model settings แล้ว${data.write?.backupId ? ` · backup ${data.write.backupId}` : ''}`)
     },
     onError: (error: unknown) => {
@@ -1363,7 +736,10 @@ export default function ModelPage() {
 
   const restartMutation = useMutation({
     mutationFn: restartGateway,
-    onSuccess: () => toast.success('Restart Gateway สำเร็จ'),
+    onSuccess: () => {
+      setRestartDialogOpen(false)
+      toast.success('Restart Gateway สำเร็จ')
+    },
     onError: () => toast.error('Restart Gateway ไม่สำเร็จ'),
   })
 
@@ -1371,741 +747,749 @@ export default function ModelPage() {
     try {
       const next = await getModelReadiness(true)
       qc.setQueryData(['model-readiness'], next)
-      toast.success('Refresh readiness แล้ว')
+      toast.success('Refresh สถานะแล้ว')
     } catch {
-      toast.error('Refresh readiness ไม่สำเร็จ')
+      toast.error('Refresh สถานะไม่สำเร็จ')
     }
   }
 
-  function cancelRuntimeTests() {
-    runtimeCancelRef.current = true
-    runtimeAbortRef.current?.abort()
-    setRuntimeTestProgress(prev => prev
-      ? { ...prev, active: false, cancelled: true, message: 'ยกเลิกการทดสอบแล้ว รายการที่ยังไม่เริ่มจะไม่ถูกทดสอบต่อ' }
-      : prev
-    )
+  function resetTextTest() {
+    setTextTestResults({})
   }
 
-  function isAbortError(error: unknown) {
-    const err = error as { code?: string; name?: string; message?: string }
-    return err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError' || /aborted|canceled/i.test(err?.message || '')
+  function resetImageTest() {
+    setLastImageTestHash('')
+    setImageTestResult(null)
   }
 
-  async function runRuntimeTestQueue(items: RuntimeRef[], options: {
-    title: string
-    validateAfter?: boolean
-    emptyMessage?: string
-    successMessage?: string
-  }) {
-    const refs = items.filter(item => item.ref)
-    if (!refs.length) {
-      toast.warning(options.emptyMessage || 'เลือก model ก่อนทดสอบ')
-      return { results: [] as Array<{ item: RuntimeRef; result: ModelRuntimeTestResult }>, failed: 0, cancelled: false }
-    }
-    if (runtimeTestProgress?.active) {
-      toast.warning('มีการทดสอบ model กำลังทำงานอยู่')
-      return { results: [] as Array<{ item: RuntimeRef; result: ModelRuntimeTestResult }>, failed: 0, cancelled: false }
-    }
-
-    runtimeCancelRef.current = false
-    setRuntimeTestProgress({
-      active: true,
-      title: options.title,
-      total: refs.length,
-      completed: 0,
-      failed: 0,
-      current: refs[0],
-      message: `กำลังเริ่มทดสอบ 1/${refs.length}`,
-      startedAt: Date.now(),
-    })
-
-    const results: Array<{ item: RuntimeRef; result: ModelRuntimeTestResult }> = []
-    let failed = 0
-    let cancelled = false
-
-    for (let index = 0; index < refs.length; index++) {
-      if (runtimeCancelRef.current) {
-        cancelled = true
-        break
-      }
-      const item = refs[index]
-      const controller = new AbortController()
-      runtimeAbortRef.current = controller
-      setRuntimeTestProgress(prev => prev
-        ? {
-            ...prev,
-            active: true,
-            current: item,
-            message: `กำลังทดสอบ ${index + 1}/${refs.length}: ${compactModel(item.ref)}`,
-          }
-        : prev
-      )
-
-      try {
-        const result = await testModelRuntime({
-          model: item.ref,
-          capability: item.capability,
-          mode: 'gateway',
-          refresh: true,
-        }, controller.signal)
-        results.push({ item, result })
-        setRuntimeResults(prev => ({ ...prev, [runtimeKey(item.ref, item.capability)]: result }))
-        if (!result.ok) failed += 1
-        setRuntimeTestProgress(prev => prev
-          ? {
-              ...prev,
-              completed: index + 1,
-              failed,
-              current: index + 1 < refs.length ? refs[index + 1] : item,
-              message: result.ok
-                ? `ผ่าน ${index + 1}/${refs.length}: ${compactModel(item.ref)}`
-                : `ไม่ผ่าน ${index + 1}/${refs.length}: ${result.safeMessage || result.summary || compactModel(item.ref)}`,
-            }
-          : prev
-        )
-      } catch (error) {
-        if (runtimeCancelRef.current || isAbortError(error)) {
-          cancelled = true
-          break
-        }
-        failed += 1
-        setRuntimeTestProgress(prev => prev
-          ? {
-              ...prev,
-              completed: index + 1,
-              failed,
-              current: index + 1 < refs.length ? refs[index + 1] : item,
-              message: `ทดสอบไม่สำเร็จ ${index + 1}/${refs.length}: ${compactModel(item.ref)}`,
-            }
-          : prev
-        )
-      } finally {
-        runtimeAbortRef.current = null
-      }
-    }
-
-    await qc.invalidateQueries({ queryKey: ['model-readiness'] })
-
-    if (cancelled) {
-      setValidatedHash('')
-      setRuntimeTestProgress(prev => prev
-        ? {
-            ...prev,
-            active: false,
-            cancelled: true,
-            failed,
-            message: `ยกเลิกแล้ว ทดสอบไป ${results.length}/${refs.length} รายการ`,
-          }
-        : prev
-      )
-      toast.info('ยกเลิกการทดสอบ model แล้ว')
-      return { results, failed, cancelled }
-    }
-
-    setRuntimeTestProgress(prev => prev
-      ? {
-          ...prev,
-          active: false,
-          failed,
-          completed: refs.length,
-          current: null,
-          message: failed
-            ? `ทดสอบเสร็จ มี ${failed} รายการที่ไม่ผ่าน`
-            : 'ทดสอบเสร็จ ผ่านทุก model',
-        }
-      : prev
-    )
-
-    if (failed) {
-      toast.error(`ทดสอบ model ไม่ผ่าน ${failed} รายการ`)
-      setValidatedHash('')
-    } else {
-      toast.success(options.successMessage || 'ทดสอบ model ผ่านทุกตัว')
-      if (options.validateAfter) validateMutation.mutate()
-    }
-
-    return { results, failed, cancelled }
+  function applyOpenRouterRecommended() {
+    setPrimary(OPENROUTER_RECOMMENDED.primary)
+    setFallbacks(OPENROUTER_RECOMMENDED.fallbacks)
+    resetTextTest()
+    toast.info('ใส่ชุด OpenRouter ที่แนะนำแล้ว กดทดสอบก่อนบันทึก')
   }
 
-  async function testRuntimeRefs(items: RuntimeRef[], validateAfter = false) {
-    return runRuntimeTestQueue(items, {
-      title: validateAfter ? 'ทดสอบและตรวจสอบก่อนบันทึก' : 'ทดสอบ model',
-      validateAfter,
-      emptyMessage: 'เลือก model ก่อนทดสอบ',
-    })
+  function applyKiloRecommended() {
+    setPrimary(KILO_RECOMMENDED.primary)
+    setFallbacks(KILO_RECOMMENDED.fallbacks)
+    resetTextTest()
+    toast.info('ใส่ชุด Kilo AI แนะนำแล้ว กดทดสอบแต่ละ model ก่อนบันทึก')
   }
 
-  async function findUsableKiloModels() {
-    if (!config?.env?.KILOCODE_API_KEY) {
-      toast.warning('บันทึก Kilo key ก่อนทดสอบ runtime')
+  function addFallback() {
+    if (!fallbackDraft) return
+    if (fallbackDraft === primary || fallbacks.includes(fallbackDraft)) {
+      toast.warning('Model นี้อยู่ในชุดแล้ว')
       return
     }
-    if (kiloCatalog?.status !== 'ready') {
-      toast.warning('Kilo catalog ยังไม่พร้อม กรุณา refresh หรือบันทึก key ก่อน')
-      return
-    }
-    if (!kiloTextRefs.length) {
-      toast.warning('ไม่พบ Kilo shortlist ใน catalog ปัจจุบัน')
-      return
-    }
-    const { results, failed, cancelled } = await runRuntimeTestQueue(kiloTextRefs, {
-      title: 'หา Kilo model ที่ใช้ได้จริง',
-      successMessage: 'ทดสอบ Kilo shortlist เสร็จแล้ว',
-    })
-    if (cancelled) return
-    const passed = results.filter(({ result }) => result.ok).length
-    if (passed) toast.success(`พบ Kilo model ที่ runtime ใช้ได้ ${passed} รายการ`)
-    if (failed) toast.warning(`Kilo runtime test ไม่ผ่าน ${failed} รายการ`)
-    setValidatedHash('')
+    setFallbacks(items => [...items, fallbackDraft])
+    setFallbackDraft('')
   }
 
-  async function startOAuth() {
-    try {
-      const { url } = await startAnthropicOAuth()
-      setOauthUrl(url)
-      setOauthRedirectUrl('')
-    } catch {
-      toast.error('เริ่ม Anthropic OAuth ไม่สำเร็จ')
-    }
+  function removeFallback(index: number) {
+    setFallbacks(items => items.filter((_, i) => i !== index))
   }
 
-  async function submitOAuth() {
-    if (!oauthRedirectUrl.trim()) return
-    try {
-      const res = await fetch('/api/oauth/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ redirectUrl: oauthRedirectUrl.trim() }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      setOauthUrl('')
-      setOauthRedirectUrl('')
-      await qc.invalidateQueries({ queryKey: ['config'] })
-      await qc.invalidateQueries({ queryKey: ['model-readiness'] })
-      toast.success(data.message || 'เชื่อมต่อ Anthropic OAuth แล้ว')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'เชื่อมต่อ OAuth ไม่สำเร็จ')
-    }
-  }
-
-  function setTab(next: Section) {
-    setSection(next)
-    const url = new URL(window.location.href)
-    url.searchParams.set('section', next)
-    window.history.replaceState(null, '', url.toString())
-  }
-
-  function addFallback(image = false) {
-    const value = image ? imageFallbackDraft : fallbackDraft
-    if (!value) return
-    if (image) {
-      if (!imageFallbacks.includes(value) && value !== imagePrimary) setImageFallbacks(items => [...items, value])
-      setImageFallbackDraft('')
-    } else {
-      if (!fallbacks.includes(value) && value !== primary) setFallbacks(items => [...items, value])
-      setFallbackDraft('')
-    }
-    setValidatedHash('')
-  }
-
-  function removeFallback(index: number, image = false) {
-    if (image) setImageFallbacks(items => items.filter((_, i) => i !== index))
-    else setFallbacks(items => items.filter((_, i) => i !== index))
-    setValidatedHash('')
-  }
-
-  function moveFallback(index: number, direction: -1 | 1, image = false) {
-    const setter = image ? setImageFallbacks : setFallbacks
-    setter(items => {
+  function moveFallback(index: number, direction: -1 | 1) {
+    setFallbacks(items => {
       const next = [...items]
       const target = index + direction
       if (target < 0 || target >= next.length) return next
       ;[next[index], next[target]] = [next[target], next[index]]
       return next
     })
-    setValidatedHash('')
   }
 
-  const currentKey = config?.env?.[providerForKey.envKey] || ''
-  const keyChanged = !providerForKey.noApiKey && apiKey.trim() !== currentKey
+  function clearImageModel() {
+    setImagePrimary('')
+    setImageFallbacks([])
+    resetImageTest()
+  }
+
+  async function handleImageFileChange(file: File | null) {
+    if (!file) {
+      setImageUpload(null)
+      resetImageTest()
+      return
+    }
+    try {
+      const upload = await readImageUpload(file)
+      setImageUpload(upload)
+      resetImageTest()
+    } catch (error) {
+      const err = error as { message?: string }
+      if (err.message === 'too_large') {
+        toast.error(`รูปภาพต้องมีขนาดไม่เกิน ${Math.round(MAX_IMAGE_UPLOAD_BYTES / 1024 / 1024)}MB`)
+      } else if (err.message === 'unsupported_type') {
+        toast.error('รองรับเฉพาะ PNG, JPG, WEBP หรือ GIF')
+      } else {
+        toast.error('อ่านไฟล์รูปภาพไม่สำเร็จ')
+      }
+      setImageUpload(null)
+      resetImageTest()
+    }
+  }
+
+  async function runTextModelTest(model: string) {
+    if (!testPrompt.trim()) {
+      toast.warning('พิมพ์ข้อความทดสอบก่อน')
+      return
+    }
+    if (keyChanged) {
+      toast.warning('บันทึก provider key ที่แก้ไขไว้ก่อนทดสอบ model')
+      return
+    }
+    const provider = providerFromRef(model)
+    if (!provider.noApiKey && !config?.env?.[provider.envKey]) {
+      toast.warning(`ตั้งค่า ${provider.label} key ก่อน`)
+      return
+    }
+
+    messageAbortRef.current?.abort()
+    const controller = new AbortController()
+    messageAbortRef.current = controller
+    setTextTestingModel(model)
+    setMessageTestStartedAt(Date.now())
+
+    try {
+      const result = await testModelMessage({
+        primary: model,
+        fallbacks: [],
+        prompt: testPrompt.trim(),
+        capability: 'text',
+      }, controller.signal)
+      setTextTestResults(prev => ({ ...prev, [model]: result }))
+      if (result.ok) {
+        await qc.invalidateQueries({ queryKey: ['model-readiness'] })
+        toast.success(`${compactModel(model)} ทดสอบผ่าน`)
+      } else {
+        toast.error(result.safeMessage || 'ทดสอบส่งข้อความไม่ผ่าน')
+      }
+    } catch (error) {
+      const err = error as { code?: string; name?: string; message?: string }
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError') {
+        toast.info('ยกเลิกการทดสอบแล้ว')
+      } else {
+        toast.error('ทดสอบส่งข้อความไม่สำเร็จ')
+      }
+    } finally {
+      setTextTestingModel('')
+      messageAbortRef.current = null
+    }
+  }
+
+  async function runImageTest() {
+    if (!imagePrimary) {
+      toast.warning('เลือก Model รูปภาพก่อน')
+      return
+    }
+    if (!imageUpload) {
+      toast.warning('อัปโหลดรูปภาพก่อนทดสอบ')
+      return
+    }
+    if (!imagePrompt.trim()) {
+      toast.warning('พิมพ์ข้อความทดสอบรูปภาพก่อน')
+      return
+    }
+    const imageProvider = providerFromRef(imagePrimary)
+    if (!imageProvider.noApiKey && !config?.env?.[imageProvider.envKey]) {
+      toast.warning(`ตั้งค่า ${imageProvider.label} key ก่อน`)
+      return
+    }
+    imageAbortRef.current?.abort()
+    const controller = new AbortController()
+    imageAbortRef.current = controller
+    setImageTesting(true)
+    setImageTestStartedAt(Date.now())
+    setImageTestResult(null)
+
+    try {
+      const result = await testModelImageMessage({
+        model: imagePrimary,
+        prompt: imagePrompt.trim(),
+        image: {
+          base64: imageUpload.base64,
+          mimeType: imageUpload.mimeType,
+          fileName: imageUpload.fileName,
+        },
+      }, controller.signal)
+      setImageTestResult(result)
+      setRuntimeResults(prev => ({ ...prev, [runtimeKey(imagePrimary, 'image')]: result }))
+      if (result.ok) {
+        setLastImageTestHash(currentImageHash)
+        await qc.invalidateQueries({ queryKey: ['model-readiness'] })
+        toast.success('ทดสอบ Model รูปภาพผ่าน')
+      } else {
+        setLastImageTestHash('')
+        toast.error(result.safeMessage || result.summary || 'ทดสอบ Model รูปภาพไม่ผ่าน')
+      }
+    } catch (error) {
+      const err = error as { code?: string; name?: string; message?: string }
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError') {
+        toast.info('ยกเลิกการทดสอบรูปภาพแล้ว')
+      } else {
+        toast.error('ทดสอบ Model รูปภาพไม่สำเร็จ')
+      }
+      resetImageTest()
+    } finally {
+      setImageTesting(false)
+      imageAbortRef.current = null
+    }
+  }
 
   function confirmDeleteKey() {
     if (!currentKey || providerForKey.noApiKey) return
-    const ok = window.confirm(`ลบ ${providerForKey.label} key ออกจากระบบใช่ไหม?`)
-    if (ok) deleteKeyMutation.mutate()
+    setDeleteKeyDialogOpen(true)
   }
 
-  function applyRecommendedOpenRouterText() {
-    setPrimary(OPENROUTER_RECOMMENDED.primary)
-    setFallbacks(OPENROUTER_RECOMMENDED.fallbacks)
-    setValidatedHash('')
-    setSection('fallbacks')
-    const url = new URL(window.location.href)
-    url.searchParams.set('section', 'fallbacks')
-    window.history.replaceState(null, '', url.toString())
-    toast.info('ใส่ชุด OpenRouter text ที่แนะนำแล้ว กด Test all + Validate ก่อน Save')
+  function confirmRestartGateway() {
+    setRestartDialogOpen(true)
   }
 
-  function applyVerifiedKiloText() {
-    const refs = [KILO_RECOMMENDED.primary, ...KILO_RECOMMENDED.fallbacks]
-    const missing = refs.filter(ref => !isRuntimeVerified(runtimeStateFor({ role: ref, ref, capability: 'text' }).status))
-    if (missing.length) {
-      toast.error('ต้อง runtime verify Kilo primary และ fallback ให้ครบก่อน apply')
-      return
-    }
-    setPrimary(KILO_RECOMMENDED.primary)
-    setFallbacks(KILO_RECOMMENDED.fallbacks)
-    setValidatedHash('')
-    setSection('fallbacks')
-    const url = new URL(window.location.href)
-    url.searchParams.set('section', 'fallbacks')
-    window.history.replaceState(null, '', url.toString())
-    toast.info('ใส่ชุด Kilo text ที่ verified แล้ว กด Validate ก่อน Save')
-  }
-
-  function clearImageConfig() {
-    setImagePrimary('')
-    setImageFallbacks([])
-    setImageFallbackDraft('')
-    setImageTimeoutMs(OPENROUTER_RECOMMENDED.imageTimeoutMs)
-    setValidatedHash('')
-    setSection('image')
-    const url = new URL(window.location.href)
-    url.searchParams.set('section', 'image')
-    window.history.replaceState(null, '', url.toString())
-    toast.info('ปิด image model draft แล้ว จนกว่าจะมี model ที่ runtime test ผ่าน')
-  }
-
-  const draftTextRefs = runtimeRefs.filter(item => item.capability === 'text')
-  const draftImageRefs = runtimeRefs.filter(item => item.capability === 'image')
-  const overallReady = Boolean(readiness?.ok && !readiness.runtimeVerificationIssues?.length)
-  const runtimeTesting = Boolean(runtimeTestProgress?.active)
-  const busy = runtimeTesting || validateMutation.isPending
+  const selectedProviderStatus = keyTestStates[providerForKey.id] || 'idle'
+  const elapsedText = messageTesting && messageTestStartedAt
+    ? `${Math.max(0, Math.round((progressNowMs - messageTestStartedAt) / 1000))}s`
+    : ''
+  const imageElapsedText = imageTesting && imageTestStartedAt
+    ? `${Math.max(0, Math.round((progressNowMs - imageTestStartedAt) / 1000))}s`
+    : ''
+  const primaryPassed = Boolean(primary && textTestResults[primary]?.ok)
+  const fallbackPassedCount = fallbacks.filter(model => textTestResults[model]?.ok).length
+  const providerKeyCount = PROVIDERS.filter(provider => provider.noApiKey || config?.env?.[provider.envKey]).length
+  const imageStateLabel = imagePrimary ? (imageReady ? 'พร้อม' : 'ต้องทดสอบ') : 'ปิดอยู่'
 
   return (
-    <div className="w-full space-y-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">เลือก Model ให้ Chatbot</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            หน้านี้เช็คว่า key, model และ OpenClaw runtime ใช้งานด้วยกันได้จริง ก่อนนำไปใช้กับ Telegram.
-          </p>
+    <div className="mx-auto w-full max-w-7xl space-y-5">
+      <div className="rounded-lg border bg-card">
+        <div className="flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <h1 className="text-2xl font-semibold tracking-tight">ตั้งค่า Model และ Provider</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              ตั้ง key, เลือก model, ทดสอบจาก runtime จริง แล้วบันทึกให้ Gateway ใช้กับ chatbot
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={refreshReadiness} disabled={readinessFetching}>
+              <RefreshCw className={`size-4 ${readinessFetching ? 'animate-spin' : ''}`} />
+              รีเฟรช
+            </Button>
+            <Button type="button" variant="outline" onClick={confirmRestartGateway} disabled={restartMutation.isPending}>
+              <RotateCcw className="size-4" />
+              Restart Gateway
+            </Button>
+          </div>
         </div>
-        <div className="grid gap-2 sm:flex sm:flex-wrap">
-          <Button variant="outline" className="min-h-11 w-full sm:min-h-9 sm:w-auto" onClick={refreshReadiness} disabled={readinessFetching}>
-            <RefreshCw className={`size-4 ${readinessFetching ? 'animate-spin' : ''}`} />
-            รีเฟรชสถานะ
-          </Button>
-          <Button variant="outline" className="min-h-11 w-full sm:min-h-9 sm:w-auto" onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
-            <RotateCcw className="size-4" />
-            รีสตาร์ท Gateway
-          </Button>
+        <div className="grid grid-cols-2 gap-px bg-border xl:grid-cols-4">
+          <div className="bg-card px-5 py-3">
+            <p className="text-xs font-medium text-muted-foreground">Provider keys</p>
+            <p className="mt-1 text-lg font-semibold">{providerKeyCount}/{PROVIDERS.length}</p>
+          </div>
+          <div className="bg-card px-5 py-3">
+            <p className="text-xs font-medium text-muted-foreground">Model หลัก</p>
+            <p className="mt-1 truncate text-lg font-semibold">{primaryPassed ? 'ทดสอบผ่าน' : primary ? 'รอทดสอบ' : 'ยังไม่เลือก'}</p>
+          </div>
+          <div className="bg-card px-5 py-3">
+            <p className="text-xs font-medium text-muted-foreground">Model สำรอง</p>
+            <p className="mt-1 text-lg font-semibold">{fallbackPassedCount}/{fallbacks.length}</p>
+          </div>
+          <div className="bg-card px-5 py-3">
+            <p className="text-xs font-medium text-muted-foreground">Model รูปภาพ</p>
+            <p className="mt-1 text-lg font-semibold">{imageStateLabel}</p>
+          </div>
         </div>
       </div>
 
-      <AdminModelSetup
-        textRefs={draftTextRefs}
-        imageRefs={draftImageRefs}
-        kiloRefs={kiloTextRefs}
-        stateFor={runtimeStateFor}
-        primary={primary}
-        fallbackCount={fallbacks.length}
-        imagePrimary={imagePrimary}
-        imageFallbackCount={imageFallbacks.length}
-        kiloCatalog={kiloCatalog}
-        kiloHasKey={Boolean(config?.env?.KILOCODE_API_KEY)}
-        readinessOk={overallReady}
-        blockingCount={readiness?.blockingIssues.length || 0}
-        warningCount={readiness?.warnings.length || 0}
-        draftValidated={draftValidated}
-        testing={runtimeTesting}
-        validating={validateMutation.isPending}
-        saving={saveSettingsMutation.isPending}
-        restarting={restartMutation.isPending}
-        canValidate={Boolean(primary) && !validateMutation.isPending}
-        canSave={draftValidated && !saveSettingsMutation.isPending}
-        onApplyOpenRouter={applyRecommendedOpenRouterText}
-        onFindKilo={findUsableKiloModels}
-        onApplyKilo={applyVerifiedKiloText}
-        onTestText={() => testRuntimeRefs(draftTextRefs)}
-        onValidate={() => validateMutation.mutate()}
-        onSave={() => saveSettingsMutation.mutate()}
-        onRestart={() => restartMutation.mutate()}
-        onClearImage={clearImageConfig}
-      />
-
-      {runtimeTestProgress && (
-        <RuntimeTestProgressPanel
-          progress={runtimeTestProgress}
-          onCancel={cancelRuntimeTests}
-          onClose={() => setRuntimeTestProgress(null)}
-        />
-      )}
-
-      <details className="group rounded-md border bg-white dark:bg-zinc-950/50">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-          <div className="min-w-0">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <Settings2 className="size-4" />
-              รายละเอียดการทดสอบ
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">เปิดเมื่ออยากดูผลทดสอบจริง รายชื่อ model แนะนำ และรายการ Kilo แบบละเอียด</p>
-          </div>
-          <ChevronDown className="size-4 shrink-0 text-zinc-500 transition group-open:rotate-180" />
-        </summary>
-        <div className="space-y-4 border-t p-4">
-          <ModelAdvisor
-            textRefs={recommendedTextRefs}
-            imageRefs={recommendedImageRefs}
-            stateFor={runtimeStateFor}
-            onApplyText={applyRecommendedOpenRouterText}
-            onTestText={() => testRuntimeRefs(recommendedTextRefs)}
-            onTestImage={() => testRuntimeRefs(recommendedImageRefs)}
-            onClearImage={clearImageConfig}
-            testing={busy}
-          />
-
-          <KiloAdvisor
-            catalog={kiloCatalog}
-            hasKey={Boolean(config?.env?.KILOCODE_API_KEY)}
-            candidates={kiloTextRefs}
-            stateFor={runtimeStateFor}
-            onFindUsable={findUsableKiloModels}
-            onApplyText={applyVerifiedKiloText}
-            testing={busy}
-          />
-        </div>
-      </details>
-
-      {readiness?.blockingIssues.length ? (
-        <Card className="border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base text-red-700 dark:text-red-300">
-              <AlertTriangle className="size-4" />
-              Validation Blocking Issues
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {readiness.blockingIssues.slice(0, 8).map(issue => (
-              <div key={`${issue.scope}-${issue.ref}-${issue.status}`} className="rounded-md border border-red-200 bg-white/70 px-3 py-2 text-sm dark:border-red-900 dark:bg-zinc-950/40">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="destructive">{statusLabel(issue.status)}</Badge>
-                  <span className="font-mono text-xs">{issue.scope}</span>
-                </div>
-                <p className="mt-1 text-xs text-red-700 dark:text-red-300">{issue.summary}</p>
+      <section className="overflow-hidden rounded-lg border bg-card">
+        <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="border-b p-5 xl:border-b-0 xl:border-r">
+            <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold">Provider keys</h2>
+                <p className="text-sm text-muted-foreground">เลือก provider ที่มี key แล้วทดสอบก่อนใช้กับ model</p>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {showRestartHint && (
-        <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20">
-          <CardContent className="flex flex-col gap-3 pt-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="font-medium text-amber-800 dark:text-amber-200">Model settings saved</p>
-              <p className="text-sm text-amber-700 dark:text-amber-300">Restart gateway และ reset active sessions หลังเปลี่ยน model เพื่อให้ runtime ใช้ค่าใหม่ทันที</p>
+              <Badge variant="secondary">{providerKeyCount} พร้อมใช้งาน</Badge>
             </div>
-            <Button onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
-              <RotateCcw className="size-4" />
-              Restart now
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      <details className="group rounded-md border bg-white dark:bg-zinc-950/50">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-          <div className="min-w-0">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <KeyRound className="size-4" />
-              ตั้งค่าขั้นสูง
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">บันทึก provider key หรือเลือก model เองเมื่อชุดแนะนำยังไม่พอ</p>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+            {PROVIDERS.map(provider => (
+              <ProviderKeyCard
+                key={provider.id}
+                provider={provider}
+                active={providerForKey.id === provider.id}
+                hasKey={Boolean(config?.env?.[provider.envKey])}
+                testState={keyTestStates[provider.id] || 'idle'}
+                onClick={() => setProviderForKey(provider)}
+              />
+            ))}
           </div>
-          <ChevronDown className="size-4 shrink-0 text-zinc-500 transition group-open:rotate-180" />
-        </summary>
-        <div className="grid gap-5 border-t p-4 xl:grid-cols-[360px_1fr]">
-          <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <KeyRound className="size-4" />
-                Provider Key
-              </CardTitle>
-              <p className="text-sm text-zinc-500">เพิ่ม ทดสอบ หรือลบ key ของ provider ที่เลือก</p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-1.5">
-                {PROVIDERS.map(provider => (
-                  <button
-                    key={provider.id}
-                    type="button"
-                    onClick={() => setProviderForKey(provider)}
-                    className={`rounded-md border px-2 py-1.5 text-left text-xs transition ${
-                      providerForKey.id === provider.id
-                        ? 'border-zinc-900 bg-zinc-100 font-medium dark:border-zinc-100 dark:bg-zinc-800'
-                        : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800'
-                    }`}
-                  >
-                    {provider.label}
-                  </button>
-                ))}
+          </div>
+
+          <div className="bg-muted/20 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">{providerForKey.label}</p>
+                <p className="font-mono text-xs text-muted-foreground">{providerForKey.envKey}</p>
               </div>
+              <Badge variant={badgeVariant(selectedProviderStatus === 'idle' ? (currentKey ? 'ready' : 'missing_key') : selectedProviderStatus)}>
+                {selectedProviderStatus === 'idle'
+                  ? currentKey ? 'มี key' : 'ไม่มี key'
+                  : selectedProviderStatus === 'ok' ? 'ทดสอบผ่าน' : 'ทดสอบไม่ผ่าน'}
+              </Badge>
+            </div>
 
-              {providerForKey.noApiKey ? (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
-                  Provider นี้โหลด catalog ได้โดยไม่ต้องมี key แต่การ infer จริงอาจยังต้องตั้ง billing/key ตาม provider
+            {providerForKey.noApiKey ? (
+              <div className="mt-3 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                Provider นี้ไม่ต้องใส่ key เพื่อโหลดรายชื่อ model
+              </div>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    type={showKey ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={event => {
+                      setApiKey(event.target.value)
+                      setKeyTestStates(prev => ({ ...prev, [providerForKey.id]: 'idle' }))
+                    }}
+                    placeholder={currentKey ? 'มี key แล้ว, ใส่ค่าใหม่เมื่อต้องการแก้ไข' : `${providerForKey.envKey}=...`}
+                    className="font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setShowKey(value => !value)}
+                    aria-label={showKey ? 'ซ่อน key' : 'แสดง key'}
+                    title={showKey ? 'ซ่อน key' : 'แสดง key'}
+                  >
+                    <Eye className="size-4" />
+                  </Button>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <Input
-                      type={showKey ? 'text' : 'password'}
-                      value={apiKey}
-                      onChange={event => {
-                        setApiKey(event.target.value)
-                        setTestResult('idle')
-                      }}
-                      placeholder={`${providerForKey.envKey}=...`}
-                      className="font-mono text-sm"
-                    />
-                    <Button type="button" variant="outline" size="sm" onClick={() => setShowKey(value => !value)} aria-label={showKey ? 'Hide key' : 'Show key'}>
-                      <Eye className="size-4" />
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => testKeyMutation.mutate()} disabled={!apiKey.trim() || testKeyMutation.isPending}>
-                      <ShieldCheck className="size-4" />
-                      ทดสอบ key
-                    </Button>
-                    <Button type="button" size="sm" onClick={() => saveKeyMutation.mutate()} disabled={!keyChanged || saveKeyMutation.isPending}>
-                      <Save className="size-4" />
-                      บันทึก key
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30"
-                      onClick={confirmDeleteKey}
-                      disabled={!currentKey || deleteKeyMutation.isPending}
-                    >
-                      <Trash2 className="size-4" />
-                      ลบ key
-                    </Button>
-                    {testResult === 'ok' && <Badge>Key ใช้ได้</Badge>}
-                    {testResult === 'fail' && <Badge variant="destructive">Key ใช้ไม่ได้</Badge>}
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => testKeyMutation.mutate()} disabled={(!apiKey.trim() && !currentKey) || testKeyMutation.isPending}>
+                    <ShieldCheck className="size-4" />
+                    ทดสอบ key
+                  </Button>
+                  <Button type="button" onClick={() => saveKeyMutation.mutate()} disabled={!keyChanged || saveKeyMutation.isPending}>
+                    <Save className="size-4" />
+                    บันทึก key
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                    onClick={confirmDeleteKey}
+                    disabled={!currentKey || deleteKeyMutation.isPending}
+                  >
+                    <Trash2 className="size-4" />
+                    ลบ key
+                  </Button>
                 </div>
-              )}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
-              {providerForKey.id === 'anthropic' && (
-                <div className="space-y-2 rounded-md border px-3 py-3">
-                  <p className="text-sm font-medium">Anthropic OAuth</p>
-                  <p className="text-xs text-zinc-500">ใช้เมื่อ server เก็บ token แบบ Claude account OAuth</p>
-                  {!oauthUrl ? (
-                    <Button type="button" variant="outline" size="sm" onClick={startOAuth}>Start OAuth</Button>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <Input readOnly value={oauthUrl} className="font-mono text-xs" />
-                        <Button type="button" variant="outline" size="sm" onClick={() => window.open(oauthUrl, '_blank')}>Open</Button>
-                      </div>
-                      <Input
-                        value={oauthRedirectUrl}
-                        onChange={event => setOauthRedirectUrl(event.target.value)}
-                        placeholder="วาง callback URL หลัง login"
-                        className="font-mono text-xs"
-                      />
-                      <Button type="button" size="sm" onClick={submitOAuth} disabled={!oauthRedirectUrl.trim()}>Submit OAuth</Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Provider Status</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {Object.entries(readiness?.providers || {}).length === 0 ? (
-                <p className="text-sm text-zinc-500">Provider catalog จะปรากฏหลัง validate หรือ refresh readiness</p>
-              ) : Object.entries(readiness?.providers || {}).map(([provider, status]) => (
-                <div key={provider} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{provider}</p>
-                    <p className="truncate text-xs text-zinc-500">{status.modelCount} models · {status.source}</p>
-                  </div>
-                  <ReadinessBadge status={status.status} />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+      <section className="overflow-hidden rounded-lg border bg-card">
+        <div className="flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Model ข้อความ</h2>
+            <p className="text-sm text-muted-foreground">เลือก model ที่ใช้ตอบแชท แล้วกดทดสอบ model แต่ละตัวก่อนบันทึก</p>
+          </div>
+          <div className="grid gap-2 sm:min-w-[360px]">
+            <label htmlFor="model-test-prompt" className="text-xs font-medium text-muted-foreground">ข้อความทดสอบ</label>
+            <Input
+              id="model-test-prompt"
+              value={testPrompt}
+              onChange={event => {
+                setTestPrompt(event.target.value)
+                resetTextTest()
+              }}
+              placeholder="เช่น สวัสดีครับ"
+              className="h-10"
+              disabled={messageTesting}
+            />
+          </div>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Model Settings</CardTitle>
-            <p className="text-sm text-zinc-500">Validate ต้องผ่านก่อน Save เพื่อกันค่า model ที่ไม่มีจริงหรือ image model ที่ไม่รองรับรูป</p>
-          </CardHeader>
-          <CardContent>
-            <RuntimeVerificationPanel
-              refs={runtimeRefs}
-              stateFor={runtimeStateFor}
-              onTestOne={item => testRuntimeRefs([item])}
-              onTestAll={() => testRuntimeRefs(runtimeRefs, true)}
-              testing={runtimeTesting || validateMutation.isPending}
+        <div className="grid gap-0 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+          <div className="space-y-4 border-b p-5 xl:border-b-0 xl:border-r">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-base font-medium">Model หลัก</h3>
+                <p className="text-sm text-muted-foreground">บังคับเลือก ใช้ตอบ chat ปกติ</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">ชุดแนะนำ</span>
+                <Button type="button" variant="outline" size="sm" onClick={applyOpenRouterRecommended}>
+                  <CheckCircle2 className="size-4" />
+                  ใช้ OpenRouter
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={applyKiloRecommended}>
+                  <CheckCircle2 className="size-4" />
+                  ใช้ Kilo AI
+                </Button>
+              </div>
+            </div>
+            <ModelPicker
+              label="เลือก Model หลัก"
+              value={primary}
+              onChange={setPrimary}
             />
-            <Tabs value={section} onValueChange={value => setTab(value as Section)} className="mt-5 space-y-5">
-              <TabsList className="w-full flex-wrap justify-start">
-                <TabsTrigger value="primary"><Zap className="size-4" />Primary Model</TabsTrigger>
-                <TabsTrigger value="fallbacks"><Layers className="size-4" />Fallback Models</TabsTrigger>
-                <TabsTrigger value="image"><ImageIcon className="size-4" />Image Understanding</TabsTrigger>
-              </TabsList>
+            {primary && (
+              <TextModelTestPanel
+                model={primary}
+                result={textTestResults[primary]}
+                testing={textTestingModel === primary}
+                elapsedText={elapsedText}
+                onTest={() => void runTextModelTest(primary)}
+                onCancel={() => messageAbortRef.current?.abort()}
+              />
+            )}
+          </div>
 
-              <TabsContent value="primary" className="space-y-4">
-                <ModelPicker
-                  label="Default primary model"
-                  value={primary}
-                  onChange={value => {
-                    setPrimary(value)
-                    setValidatedHash('')
-                  }}
-                />
-                <Button type="button" variant="outline" onClick={() => primary && testRuntimeRefs([{ role: 'Primary model', ref: primary, capability: 'text' }])} disabled={!primary || runtimeTesting}>
-                  <PlayCircle className="size-4" />
-                  Test selected primary
-                </Button>
-              </TabsContent>
-
-              <TabsContent value="fallbacks" className="space-y-4">
-                <ModelPicker label="Add fallback model" value={fallbackDraft} onChange={setFallbackDraft} />
-                <Button type="button" variant="outline" onClick={() => addFallback(false)} disabled={!fallbackDraft}>
-                  Add fallback
-                </Button>
-                <Button type="button" variant="outline" onClick={() => testRuntimeRefs(fallbacks.map((ref, index) => ({ role: `Fallback ${index + 1}`, ref, capability: 'text' as const })))} disabled={!fallbacks.length || runtimeTesting}>
-                  <PlayCircle className="size-4" />
-                  Test fallback chain
-                </Button>
-                <div className="space-y-2">
-                  {fallbacks.length === 0 && (
-                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-                      ยังไม่มี fallback model ถ้า provider หลัก timeout Telegram อาจช้า หรือเห็น error จาก model
-                    </div>
-                  )}
-                  {fallbacks.map((item, index) => (
-                    <div key={item} className="flex items-center gap-2 rounded-md border px-3 py-2">
-                      <span className="w-6 text-sm text-zinc-500">{index + 1}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-sm">{item}</span>
-                      <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, -1)} disabled={index === 0} aria-label="Move fallback up">
+          <div className="space-y-4 bg-muted/10 p-5">
+            <div>
+              <h3 className="text-base font-medium">Model สำรอง</h3>
+              <p className="text-sm text-muted-foreground">ไม่บังคับ ใช้เมื่อ model หลัก timeout หรือ error</p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+              <ModelPicker label="เพิ่ม Model สำรอง" value={fallbackDraft} onChange={setFallbackDraft} />
+              <Button type="button" variant="outline" className="min-h-11" onClick={addFallback} disabled={!fallbackDraft}>
+                <Plus className="size-4" />
+                เพิ่ม
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {fallbacks.length === 0 ? (
+                <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                  ยังไม่มี Model สำรอง ถ้าไม่ต้องการ fallback สามารถปล่อยว่างได้
+                </div>
+              ) : fallbacks.map((item, index) => (
+                <div key={item} className="space-y-2 rounded-md border px-3 py-2">
+                  <div className="grid gap-2 sm:grid-cols-[32px_1fr_auto] sm:items-center">
+                    <span className="text-sm text-muted-foreground">{index + 1}</span>
+                    <span className="min-w-0 break-all font-mono text-sm">{item}</span>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => moveFallback(index, -1)}
+                        disabled={index === 0}
+                        aria-label="เลื่อน Model สำรองขึ้น"
+                        title="เลื่อนขึ้น"
+                      >
                         <ArrowUp className="size-4" />
                       </Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, 1)} disabled={index === fallbacks.length - 1} aria-label="Move fallback down">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => moveFallback(index, 1)}
+                        disabled={index === fallbacks.length - 1}
+                        aria-label="เลื่อน Model สำรองลง"
+                        title="เลื่อนลง"
+                      >
                         <ArrowDown className="size-4" />
                       </Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => removeFallback(index)} aria-label="Remove fallback">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => removeFallback(index)}
+                        aria-label="ลบ Model สำรอง"
+                        title="ลบ Model สำรอง"
+                      >
                         <Trash2 className="size-4" />
                       </Button>
                     </div>
-                  ))}
+                  </div>
+                  <TextModelTestPanel
+                    model={item}
+                    result={textTestResults[item]}
+                    testing={textTestingModel === item}
+                    elapsedText={elapsedText}
+                    onTest={() => void runTextModelTest(item)}
+                    onCancel={() => messageAbortRef.current?.abort()}
+                  />
                 </div>
-              </TabsContent>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
 
-              <TabsContent value="image" className="space-y-4">
+      <section className="rounded-lg border bg-card">
+        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold">Model รูปภาพ</h2>
+              <Badge variant={imagePrimary ? imageReady ? 'default' : 'secondary' : 'secondary'}>{imageStateLabel}</Badge>
+            </div>
+                <p className="text-sm text-muted-foreground">ไม่บังคับ เปิดเฉพาะเมื่อลูกค้าส่งรูปสินค้าให้ chatbot</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setImagePrimary(OPENROUTER_RECOMMENDED.imagePrimary)
+                    setLastImageTestHash('')
+                  }}
+                >
+                  <ImageIcon className="size-4" />
+                  ใช้รูปภาพแนะนำ
+                </Button>
+                <Button type="button" variant="outline" onClick={clearImageModel} disabled={!imagePrimary}>
+                  <XCircle className="size-4" />
+                  ปิด Model รูปภาพ
+                </Button>
+              </div>
+            </div>
+
+        <div className="border-t px-5 py-4">
+            {!imagePrimary ? (
+              <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                ยังไม่เปิด Model รูปภาพ ส่วน chat ข้อความยังใช้งานได้ตามปกติ
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {!imageReady && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
+                    ต้องทดสอบ Model รูปภาพให้ผ่าน หรือกดปิด Model รูปภาพก่อน จึงจะบันทึกค่าได้
+                  </div>
+                )}
                 <ModelPicker
-                  label="Default image understanding model"
+                  label="เลือก Model รูปภาพ"
                   value={imagePrimary}
                   imageOnly
                   onChange={value => {
                     setImagePrimary(value)
-                    setValidatedHash('')
+                    resetImageTest()
                   }}
                 />
-                <Button type="button" variant="outline" onClick={() => testRuntimeRefs([{ role: 'Image primary', ref: imagePrimary, capability: 'image' }, ...imageFallbacks.map((ref, index) => ({ role: `Image fallback ${index + 1}`, ref, capability: 'image' as const }))])} disabled={!imagePrimary || runtimeTesting}>
-                  <PlayCircle className="size-4" />
-                  Test image chain
-                </Button>
-                <div className="max-w-xs space-y-1">
-                  <label className="text-sm font-medium" htmlFor="image-timeout">Image timeout (ms)</label>
-                  <Input
-                    id="image-timeout"
-                    type="number"
-                    min={1000}
-                    max={180000}
-                    step={1000}
-                    value={imageTimeoutMs}
-                    onChange={event => {
-                      setImageTimeoutMs(Number(event.target.value))
-                      setValidatedHash('')
-                    }}
-                  />
-                </div>
-                <div className="rounded-md border px-3 py-3">
-                  <ModelPicker label="Add image fallback" value={imageFallbackDraft} imageOnly onChange={setImageFallbackDraft} disabled={!imagePrimary} />
-                  <Button type="button" variant="outline" className="mt-3" onClick={() => addFallback(true)} disabled={!imageFallbackDraft || !imagePrimary}>
-                    Add image fallback
-                  </Button>
-                  <div className="mt-3 space-y-2">
-                    {imageFallbacks.map((item, index) => (
-                      <div key={item} className="flex items-center gap-2 rounded-md border px-3 py-2">
-                        <span className="w-6 text-sm text-zinc-500">{index + 1}</span>
-                        <span className="min-w-0 flex-1 truncate font-mono text-sm">{item}</span>
-                        <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, -1, true)} disabled={index === 0} aria-label="Move image fallback up">
-                          <ArrowUp className="size-4" />
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={() => moveFallback(index, 1, true)} disabled={index === imageFallbacks.length - 1} aria-label="Move image fallback down">
-                          <ArrowDown className="size-4" />
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={() => removeFallback(index, true)} aria-label="Remove image fallback">
-                          <Trash2 className="size-4" />
+                <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
+                  <div className="space-y-2">
+                    <label htmlFor="image-model-test-file" className="text-sm font-medium">รูปทดสอบ</label>
+                    <label
+                      htmlFor="image-model-test-file"
+                      className="flex min-h-40 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed bg-muted/30 text-center text-sm text-muted-foreground transition hover:bg-muted/50"
+                    >
+                      {imageUpload ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={imageUpload.previewUrl} alt="รูปที่ใช้ทดสอบ model" className="h-full max-h-56 w-full object-contain" />
+                      ) : (
+                        <span className="px-4">คลิกเพื่ออัปโหลดรูป PNG, JPG, WEBP หรือ GIF</span>
+                      )}
+                    </label>
+                    <Input
+                      id="image-model-test-file"
+                      type="file"
+                      accept={SUPPORTED_IMAGE_UPLOAD_TYPES.join(',')}
+                      className="hidden"
+                      disabled={imageTesting}
+                      onChange={event => {
+                        void handleImageFileChange(event.target.files?.[0] || null)
+                        event.currentTarget.value = ''
+                      }}
+                    />
+                    {imageUpload && (
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span className="min-w-0 truncate">{imageUpload.fileName}</span>
+                        <span>{Math.ceil(imageUpload.size / 1024)}KB</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => void handleImageFileChange(null)}
+                          disabled={imageTesting}
+                        >
+                          ลบรูป
                         </Button>
                       </div>
-                    ))}
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <label htmlFor="image-model-test-prompt" className="text-sm font-medium">ข้อความทดสอบรูปภาพ</label>
+                      <Textarea
+                        id="image-model-test-prompt"
+                        value={imagePrompt}
+                        onChange={event => {
+                          setImagePrompt(event.target.value)
+                          resetImageTest()
+                        }}
+                        placeholder="เช่น รูปนี้เป็นสินค้าอะไร ตอบสั้น ๆ"
+                        className="min-h-24"
+                        disabled={imageTesting}
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {imageTesting ? (
+                        <Button type="button" variant="outline" onClick={() => imageAbortRef.current?.abort()}>
+                          <XCircle className="size-4" />
+                          ยกเลิก
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={runImageTest}
+                        disabled={!imagePrimary || !imageUpload || !imagePrompt.trim() || imageTesting}
+                      >
+                        <PlayCircle className="size-4" />
+                        {imageTesting ? `กำลังทดสอบ ${imageElapsedText}` : 'ทดสอบรูปภาพ'}
+                      </Button>
+                    </div>
+
+                    {imageTesting && (
+                      <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-950 dark:bg-sky-950/25 dark:text-sky-100">
+                        กำลังส่งรูปเข้า OpenClaw runtime จริง โปรดรอคำตอบจาก AI
+                      </div>
+                    )}
+
+                    {imageTestResult && (
+                      <div className={`space-y-3 rounded-md border px-3 py-3 ${imageTestResult.ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-950 dark:bg-emerald-950/25' : 'border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/25'}`}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={imageTestResult.ok ? 'default' : 'destructive'}>
+                            {imageTestResult.ok ? 'ทดสอบผ่าน' : statusLabel(imageTestResult.status)}
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">{imageTestResult.durationMs}ms</span>
+                        </div>
+                        <p className="text-sm">{imageTestResult.safeMessage || (imageTestResult.ok ? 'Model รูปภาพใช้งานได้จริง' : 'Model รูปภาพใช้งานไม่ได้')}</p>
+                        {imageTestResult.outputPreview && (
+                          <div className="rounded-md border bg-background/70 px-3 py-2 text-sm">
+                            <p className="text-xs font-medium text-muted-foreground">คำตอบจาก AI</p>
+                            <p className="mt-1 break-words">{imageTestResult.outputPreview}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </TabsContent>
-
-              <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-zinc-500">
-                  {draftValidated ? 'Validated draft พร้อมบันทึก' : 'ต้อง Validate draft ปัจจุบันก่อน Save'}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" onClick={() => validateMutation.mutate()} disabled={!primary || validateMutation.isPending}>
-                    <ShieldCheck className="size-4" />
-                    {validateMutation.isPending ? 'Validating...' : 'Validate'}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => testRuntimeRefs(runtimeRefs, true)} disabled={!primary || runtimeTesting || validateMutation.isPending}>
-                    <PlayCircle className="size-4" />
-                    Test all + Validate
-                  </Button>
-                  <Button type="button" onClick={() => saveSettingsMutation.mutate()} disabled={!draftValidated || saveSettingsMutation.isPending}>
-                    <Save className="size-4" />
-                    {saveSettingsMutation.isPending ? 'Saving...' : 'Save settings'}
-                  </Button>
-                </div>
               </div>
-            </Tabs>
-          </CardContent>
-          </Card>
+            )}
         </div>
-      </details>
+      </section>
 
-      <details className="group rounded-md border bg-white dark:bg-zinc-950/50">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Per-agent status</p>
-            <p className="mt-1 text-xs text-zinc-500">ดูว่า agent ไหน inherit default หรือ override model เอง</p>
+      <section className="rounded-lg border bg-card px-5 py-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              {saveReason ? (
+                <>
+                  <Badge variant="secondary">ยังบันทึกไม่ได้</Badge>
+                  <span className="text-muted-foreground">{saveReason}</span>
+                </>
+              ) : (
+                <>
+                  <Badge>พร้อมบันทึก</Badge>
+                  <span className="text-muted-foreground">หลังบันทึกแล้วให้ Restart Gateway</span>
+                </>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" onClick={() => saveSettingsMutation.mutate()} disabled={!canSave || saveSettingsMutation.isPending}>
+                <Save className="size-4" />
+                {saveSettingsMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกค่า Model'}
+              </Button>
+              <Button type="button" variant="outline" onClick={confirmRestartGateway} disabled={restartMutation.isPending}>
+                <RotateCcw className="size-4" />
+                Restart Gateway
+              </Button>
+            </div>
           </div>
-          <ChevronDown className="size-4 shrink-0 text-zinc-500 transition group-open:rotate-180" />
-        </summary>
-        <div className="border-t p-4">
-          <AgentMatrix agents={readiness?.agents || []} />
-        </div>
-      </details>
+
+          {unverifiedTextModels.length ? (
+            <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm">
+              <p className="font-medium">Model ข้อความที่ยังต้องทดสอบ</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {unverifiedTextModels.map(model => (
+                  <Badge key={model} variant="secondary" className="max-w-full break-all font-mono text-[11px]">
+                    {compactModel(model)}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {showRestartHint && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
+              บันทึกแล้ว กรุณา Restart Gateway เพื่อให้ Telegram ใช้ค่าใหม่
+            </div>
+          )}
+
+          {readiness?.runtimeVerificationIssues?.length ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
+              <div className="flex items-center gap-2 font-medium">
+                <AlertTriangle className="size-4" />
+                ยังมี model ที่ runtime ไม่ได้ยืนยัน
+              </div>
+              <p className="mt-1">กดทดสอบที่กล่องของแต่ละ model หรือทดสอบ Model รูปภาพถ้าเปิดใช้งาน</p>
+            </div>
+          ) : null}
+      </section>
+
+      <Dialog open={deleteKeyDialogOpen} onOpenChange={setDeleteKeyDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ลบ Provider Key?</DialogTitle>
+            <DialogDescription>
+              ระบบจะลบ key ของ {providerForKey.label} ออกจาก config หลังลบแล้ว model ที่ใช้ provider นี้อาจใช้งานไม่ได้จนกว่าจะใส่ key ใหม่
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            <p className="font-medium">{providerForKey.label}</p>
+            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{providerForKey.envKey}</p>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" disabled={deleteKeyMutation.isPending} />}>
+              ยกเลิก
+            </DialogClose>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => deleteKeyMutation.mutate()}
+              disabled={deleteKeyMutation.isPending}
+            >
+              <Trash2 className="size-4" />
+              {deleteKeyMutation.isPending ? 'กำลังลบ...' : 'ลบ key'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={restartDialogOpen} onOpenChange={setRestartDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Restart Gateway?</DialogTitle>
+            <DialogDescription>
+              ใช้เมื่อบันทึกค่า model แล้วต้องการให้ Telegram และ channel อื่นใช้ค่าใหม่ ระหว่าง restart อาจมีช่วงสั้น ๆ ที่ bot ไม่รับข้อความ
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
+            ตรวจสอบว่าไม่มีการทดสอบ model ค้างอยู่ก่อน restart
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" disabled={restartMutation.isPending} />}>
+              ยกเลิก
+            </DialogClose>
+            <Button
+              type="button"
+              onClick={() => restartMutation.mutate()}
+              disabled={restartMutation.isPending}
+            >
+              <RotateCcw className="size-4" />
+              {restartMutation.isPending ? 'กำลัง restart...' : 'Restart Gateway'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <TechnicalDetails readiness={readiness} runtimeResults={runtimeResults} />
     </div>
   )
 }
