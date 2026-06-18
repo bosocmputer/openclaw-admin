@@ -183,6 +183,7 @@ export type ModelReadinessStatus =
   | 'missing_key'
   | 'auth_error'
   | 'provider_error'
+  | 'invalid_output'
   | 'timeout'
   | 'unknown_provider'
   | 'model_not_found'
@@ -200,7 +201,9 @@ export type ModelRuntimeTestStatus =
   | 'auth_error'
   | 'timeout'
   | 'provider_error'
+  | 'invalid_output'
   | 'runtime_unavailable'
+  | 'runtime_verified'
   | string
 
 export interface ModelRuntimeTestResult {
@@ -213,6 +216,9 @@ export interface ModelRuntimeTestResult {
   durationMs: number
   summary: string
   safeMessage: string
+  expectedOutput?: string | null
+  outputPreview?: string | null
+  failureReason?: string | null
   testedAt?: string
   detail?: string
   cache?: { hit: boolean; ttlSeconds: number }

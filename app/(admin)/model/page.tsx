@@ -64,6 +64,26 @@ const OPENROUTER_RECOMMENDED = {
   imageTimeoutMs: 30000,
 }
 
+const KILO_RECOMMENDED = {
+  primary: 'kilocode/google/gemini-3.1-flash-lite',
+  fallbacks: [
+    'kilocode/kilo-auto/small',
+    'kilocode/openai/gpt-4o-mini',
+  ],
+}
+
+const KILO_TEXT_CANDIDATES = [
+  KILO_RECOMMENDED.primary,
+  ...KILO_RECOMMENDED.fallbacks,
+  'kilocode/deepseek/deepseek-v4-flash',
+  'kilocode/qwen/qwen3.6-flash',
+  'kilocode/qwen/qwen3.5-flash-02-23',
+  'kilocode/kilo-auto/free',
+  'kilocode/google/gemini-3.5-flash',
+  'kilocode/kilo-auto/efficient',
+  'kilocode/kilo-auto/balanced',
+]
+
 function providerFromRef(ref: string): ProviderConfig {
   const providerId = ref.includes('/') ? ref.split('/')[0] : 'openrouter'
   return PROVIDERS.find(provider => provider.id === providerId) || PROVIDERS[0]
@@ -92,6 +112,7 @@ function statusLabel(status?: string) {
   if (status === 'missing_key') return 'Missing key'
   if (status === 'auth_error') return 'Auth failed'
   if (status === 'provider_error') return 'Provider error'
+  if (status === 'invalid_output') return 'Invalid output'
   if (status === 'timeout') return 'Timeout'
   if (status === 'model_not_found') return 'Not found'
   if (status === 'not_image_capable') return 'Not image-capable'
@@ -126,6 +147,16 @@ function inputModalities(model?: OpenRouterModel): string[] {
 
 function isImageCapable(model?: OpenRouterModel) {
   return inputModalities(model).includes('image')
+}
+
+function catalogHasRef(catalog: ModelCatalog | undefined, ref: string) {
+  if (!catalog || catalog.status !== 'ready') return false
+  const provider = providerFromRef(ref)
+  const modelId = modelIdFromRef(ref, provider)
+  return (catalog.models || []).some(model => (
+    model.id === modelId ||
+    `${provider.modelPrefix}/${model.id}` === ref
+  ))
 }
 
 function formatPrice(model?: OpenRouterModel) {
@@ -326,6 +357,9 @@ type RuntimeView = {
   durationMs?: number | null
   runtimeVersion?: string | null
   testedAt?: string | null
+  expectedOutput?: string | null
+  outputPreview?: string | null
+  failureReason?: string | null
 }
 
 function RuntimeBadge({ status }: { status?: string }) {
@@ -379,6 +413,12 @@ function RuntimeVerificationPanel({
                   </div>
                   <p className="mt-1 break-all font-mono text-zinc-700 dark:text-zinc-200">{item.ref}</p>
                   <p className="mt-1">{state.summary}</p>
+                  {(state.failureReason || state.outputPreview) && (
+                    <div className="mt-1 space-y-1 text-zinc-500 dark:text-zinc-300">
+                      {state.failureReason && <p>Reason: {state.failureReason}</p>}
+                      {state.outputPreview && <p className="break-all font-mono">Output: {state.outputPreview}</p>}
+                    </div>
+                  )}
                   {(state.durationMs || state.runtimeVersion) && (
                     <p className="mt-1 flex flex-wrap items-center gap-2 text-zinc-500 dark:text-zinc-300">
                       {state.durationMs ? <span className="inline-flex items-center gap-1"><Timer className="size-3" />{state.durationMs}ms</span> : null}
@@ -428,6 +468,11 @@ function AdvisorModelRow({
             </span>
           </div>
           <p className="break-all font-mono leading-relaxed text-zinc-600 dark:text-zinc-300">{item.ref}</p>
+          {(state.failureReason || state.outputPreview) && (
+            <p className="break-all text-zinc-500">
+              {state.failureReason ? `${state.failureReason}: ` : ''}{state.outputPreview || ''}
+            </p>
+          )}
         </div>
         <p className="text-zinc-500 md:max-w-[260px] md:text-right">{state.summary}</p>
       </div>
@@ -544,6 +589,126 @@ function ModelAdvisor({
             {imageStates.map(({ item, state }) => (
               <AdvisorModelRow key={`${item.capability}:${item.ref}`} item={item} state={state} />
             ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function KiloAdvisor({
+  catalog,
+  hasKey,
+  candidates,
+  stateFor,
+  onFindUsable,
+  onApplyText,
+  testing,
+}: {
+  catalog?: ModelCatalog
+  hasKey: boolean
+  candidates: RuntimeRef[]
+  stateFor: (ref: RuntimeRef) => RuntimeView
+  onFindUsable: () => void
+  onApplyText: () => void
+  testing: boolean
+}) {
+  const candidateStates = candidates.map(item => ({ item, state: stateFor(item) }))
+  const verified = candidateStates
+    .filter(({ state }) => isRuntimeVerified(state.status))
+    .sort((a, b) => (a.state.durationMs || Number.MAX_SAFE_INTEGER) - (b.state.durationMs || Number.MAX_SAFE_INTEGER))
+  const failed = candidateStates.filter(({ state }) => (
+    state.status !== 'runtime_unverified' &&
+    !isRuntimeVerified(state.status)
+  ))
+  const recommendedRefs = [
+    KILO_RECOMMENDED.primary,
+    ...KILO_RECOMMENDED.fallbacks,
+  ]
+  const recommendedReady = recommendedRefs.every(ref => isRuntimeVerified(stateFor({ role: ref, ref, capability: 'text' }).status))
+
+  return (
+    <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-950 dark:bg-amber-950/20">
+      <CardHeader>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base text-amber-950 dark:text-amber-100">
+              <KeyRound className="size-4" />
+              Kilo AI runtime readiness
+              <Badge variant="secondary">Experimental until runtime verified</Badge>
+            </CardTitle>
+            <p className="mt-1 max-w-3xl text-sm text-amber-900/80 dark:text-amber-100/80">
+              Catalog ready หมายถึงเห็นรายชื่อ model เท่านั้น ต้อง runtime verified ก่อนใช้กับ Telegram production
+            </p>
+          </div>
+          <div className="grid gap-2 sm:flex sm:flex-wrap">
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onFindUsable} disabled={testing || !hasKey || catalog?.status !== 'ready' || candidates.length === 0}>
+              <PlayCircle className="size-4" />
+              Find usable Kilo models
+            </Button>
+            <Button type="button" className="w-full sm:w-auto" onClick={onApplyText} disabled={testing || !recommendedReady}>
+              <Zap className="size-4" />
+              Apply verified Kilo text
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
+            <p className="text-sm font-medium">Catalog</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <ReadinessBadge status={catalog?.status || 'runtime_unverified'} />
+              <span className="text-xs text-zinc-500">{catalog?.models?.length || 0} models</span>
+            </div>
+            {(catalog?.warnings || []).map(warning => (
+              <p key={warning} className="mt-2 text-xs text-amber-800 dark:text-amber-200">{warning}</p>
+            ))}
+          </div>
+          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
+            <p className="text-sm font-medium">Key</p>
+            <div className="mt-2">
+              <ReadinessBadge status={hasKey ? 'ready' : 'missing_key'} />
+            </div>
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+              {hasKey ? 'มี Kilo key สำหรับ inference จริง' : 'บันทึก Kilo key ก่อน runtime test'}
+            </p>
+          </div>
+          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
+            <p className="text-sm font-medium">Usable text models</p>
+            <p className="mt-2 text-2xl font-semibold">{verified.length}</p>
+            <p className="text-xs text-zinc-500">ผ่าน runtime test จาก shortlist นี้</p>
+          </div>
+          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
+            <p className="text-sm font-medium">Image policy</p>
+            <Badge className="mt-2" variant="destructive">Not production-ready</Badge>
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+              จากผลทดสอบปัจจุบัน Kilo image ยังคืน error หรือไม่รองรับ image ผ่าน runtime
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 xl:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-amber-950 dark:text-amber-100">Verified, fastest first</p>
+            {verified.length === 0 ? (
+              <div className="rounded-md border bg-white/70 px-3 py-3 text-sm text-zinc-600 dark:bg-zinc-950/30 dark:text-zinc-300">
+                กด Find usable Kilo models เพื่อทดสอบ runtime ก่อนเลือกใช้
+              </div>
+            ) : verified.map(({ item, state }) => (
+              <AdvisorModelRow key={`kilo-ok:${item.ref}`} item={item} state={state} />
+            ))}
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-amber-950 dark:text-amber-100">Failed or untested shortlist</p>
+            {candidateStates.map(({ item, state }) => (
+              <AdvisorModelRow key={`kilo-all:${item.ref}`} item={item} state={state} />
+            ))}
+            {failed.length > 0 && (
+              <p className="text-xs text-amber-800 dark:text-amber-200">
+                ถ้าเป็น model_not_found หรือ timeout ไม่ควร save เป็น production model แม้ catalog จะแสดงชื่ออยู่
+              </p>
+            )}
           </div>
         </div>
       </CardContent>
@@ -671,6 +836,12 @@ export default function ModelPage() {
     queryFn: () => getModelReadiness(),
     staleTime: 30_000,
   })
+  const { data: kiloCatalog } = useQuery({
+    queryKey: ['models-catalog', 'kilocode'],
+    queryFn: () => getModelCatalog('kilocode'),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  })
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -739,6 +910,19 @@ export default function ModelPage() {
       capability: 'image' as const,
     })),
   ]), [])
+  const kiloTextRefs = useMemo<RuntimeRef[]>(() => (
+    KILO_TEXT_CANDIDATES
+      .filter(ref => catalogHasRef(kiloCatalog, ref))
+      .map((ref, index) => ({
+        role: ref === KILO_RECOMMENDED.primary
+          ? 'Kilo primary'
+          : KILO_RECOMMENDED.fallbacks.includes(ref)
+            ? `Kilo fallback ${KILO_RECOMMENDED.fallbacks.indexOf(ref) + 1}`
+            : `Kilo candidate ${index + 1}`,
+        ref,
+        capability: 'text' as const,
+      }))
+  ), [kiloCatalog])
 
   const readinessRuntimeByKey = useMemo(() => {
     const map = new Map<string, RuntimeView>()
@@ -778,6 +962,9 @@ export default function ModelPage() {
         durationMs: local.durationMs,
         runtimeVersion: local.runtimeVersion,
         testedAt: local.testedAt,
+        expectedOutput: local.expectedOutput,
+        outputPreview: local.outputPreview || local.data?.outputPreview,
+        failureReason: local.failureReason,
       }
     }
     return readinessRuntimeByKey.get(key) || {
@@ -911,6 +1098,31 @@ export default function ModelPage() {
     if (validateAfter) validateMutation.mutate()
   }
 
+  async function findUsableKiloModels() {
+    if (!config?.env?.KILOCODE_API_KEY) {
+      toast.warning('บันทึก Kilo key ก่อนทดสอบ runtime')
+      return
+    }
+    if (kiloCatalog?.status !== 'ready') {
+      toast.warning('Kilo catalog ยังไม่พร้อม กรุณา refresh หรือบันทึก key ก่อน')
+      return
+    }
+    if (!kiloTextRefs.length) {
+      toast.warning('ไม่พบ Kilo shortlist ใน catalog ปัจจุบัน')
+      return
+    }
+    let passed = 0
+    let failed = 0
+    for (const item of kiloTextRefs) {
+      const result = await runtimeTestMutation.mutateAsync(item)
+      if (result.ok) passed += 1
+      else failed += 1
+    }
+    if (passed) toast.success(`พบ Kilo model ที่ runtime ใช้ได้ ${passed} รายการ`)
+    if (failed) toast.warning(`Kilo runtime test ไม่ผ่าน ${failed} รายการ`)
+    setValidatedHash('')
+  }
+
   async function startOAuth() {
     try {
       const { url } = await startAnthropicOAuth()
@@ -993,6 +1205,23 @@ export default function ModelPage() {
     toast.info('ใส่ชุด OpenRouter text ที่แนะนำแล้ว กด Test all + Validate ก่อน Save')
   }
 
+  function applyVerifiedKiloText() {
+    const refs = [KILO_RECOMMENDED.primary, ...KILO_RECOMMENDED.fallbacks]
+    const missing = refs.filter(ref => !isRuntimeVerified(runtimeStateFor({ role: ref, ref, capability: 'text' }).status))
+    if (missing.length) {
+      toast.error('ต้อง runtime verify Kilo primary และ fallback ให้ครบก่อน apply')
+      return
+    }
+    setPrimary(KILO_RECOMMENDED.primary)
+    setFallbacks(KILO_RECOMMENDED.fallbacks)
+    setValidatedHash('')
+    setSection('fallbacks')
+    const url = new URL(window.location.href)
+    url.searchParams.set('section', 'fallbacks')
+    window.history.replaceState(null, '', url.toString())
+    toast.info('ใส่ชุด Kilo text ที่ verified แล้ว กด Validate ก่อน Save')
+  }
+
   function clearImageConfig() {
     setImagePrimary('')
     setImageFallbacks([])
@@ -1035,6 +1264,16 @@ export default function ModelPage() {
         onTestText={() => testRuntimeRefs(recommendedTextRefs)}
         onTestImage={() => testRuntimeRefs(recommendedImageRefs)}
         onClearImage={clearImageConfig}
+        testing={runtimeTestMutation.isPending || validateMutation.isPending}
+      />
+
+      <KiloAdvisor
+        catalog={kiloCatalog}
+        hasKey={Boolean(config?.env?.KILOCODE_API_KEY)}
+        candidates={kiloTextRefs}
+        stateFor={runtimeStateFor}
+        onFindUsable={findUsableKiloModels}
+        onApplyText={applyVerifiedKiloText}
         testing={runtimeTestMutation.isPending || validateMutation.isPending}
       />
 
