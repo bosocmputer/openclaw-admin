@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getConfig,
@@ -48,6 +48,7 @@ import {
   ShieldCheck,
   Timer,
   Trash2,
+  XCircle,
   Zap,
 } from 'lucide-react'
 
@@ -365,6 +366,18 @@ type RuntimeView = {
   failureReason?: string | null
 }
 
+type RuntimeTestProgress = {
+  active: boolean
+  title: string
+  total: number
+  completed: number
+  failed: number
+  current?: RuntimeRef | null
+  message: string
+  cancelled?: boolean
+  startedAt: number
+}
+
 function RuntimeBadge({ status }: { status?: string }) {
   return <Badge variant={statusVariant(status)}>{statusLabel(status)}</Badge>
 }
@@ -437,6 +450,71 @@ function RuntimeVerificationPanel({
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+function RuntimeTestProgressPanel({
+  progress,
+  onCancel,
+  onClose,
+}: {
+  progress: RuntimeTestProgress
+  onCancel: () => void
+  onClose: () => void
+}) {
+  const percent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0
+  const status = progress.cancelled
+    ? 'ยกเลิกแล้ว'
+    : progress.active
+      ? 'กำลังทดสอบ'
+      : progress.failed
+        ? 'ทดสอบเสร็จ มีบางตัวไม่ผ่าน'
+        : 'ทดสอบเสร็จ'
+
+  return (
+    <div className="rounded-md border border-sky-200 bg-sky-50/80 px-4 py-3 text-sky-950 dark:border-sky-950 dark:bg-sky-950/20 dark:text-sky-100">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={progress.active ? 'secondary' : progress.failed ? 'destructive' : 'default'}>
+              {status}
+            </Badge>
+            <p className="text-sm font-medium">{progress.title}</p>
+          </div>
+          <p className="mt-2 text-sm opacity-85">{progress.message}</p>
+          {progress.current?.ref && (
+            <p className="mt-1 break-all font-mono text-xs opacity-75">
+              {progress.current.capability === 'image' ? 'รูปภาพ' : 'ข้อความ'}: {progress.current.ref}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {progress.active ? (
+            <Button type="button" variant="outline" className="min-h-11 bg-white/70 sm:min-h-9 dark:bg-zinc-950/40" onClick={onCancel}>
+              <XCircle className="size-4" />
+              ยกเลิกการทดสอบ
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" className="min-h-11 bg-white/70 sm:min-h-9 dark:bg-zinc-950/40" onClick={onClose}>
+              ปิดสถานะ
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <div className="flex items-center justify-between gap-2 text-xs opacity-75">
+          <span>{progress.completed}/{progress.total} รายการ</span>
+          <span>ไม่ผ่าน {progress.failed} รายการ</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-zinc-950/40">
+          <div
+            className={`h-full rounded-full transition-all ${progress.failed ? 'bg-amber-500' : 'bg-sky-600'}`}
+            style={{ width: `${Math.max(progress.active && percent === 0 ? 8 : percent, 0)}%` }}
+          />
+        </div>
       </div>
     </div>
   )
@@ -1045,6 +1123,9 @@ export default function ModelPage() {
   const [validatedHash, setValidatedHash] = useState('')
   const [showRestartHint, setShowRestartHint] = useState(false)
   const [runtimeResults, setRuntimeResults] = useState<Record<string, ModelRuntimeTestResult>>({})
+  const [runtimeTestProgress, setRuntimeTestProgress] = useState<RuntimeTestProgress | null>(null)
+  const runtimeAbortRef = useRef<AbortController | null>(null)
+  const runtimeCancelRef = useRef(false)
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
   const { data: readiness, isFetching: readinessFetching } = useQuery({
@@ -1243,25 +1324,6 @@ export default function ModelPage() {
     },
   })
 
-  const runtimeTestMutation = useMutation({
-    mutationFn: (item: RuntimeRef) => testModelRuntime({
-      model: item.ref,
-      capability: item.capability,
-      mode: 'gateway',
-      refresh: true,
-    }),
-    onSuccess: async (result, item) => {
-      setRuntimeResults(prev => ({ ...prev, [runtimeKey(item.ref, item.capability)]: result }))
-      await qc.invalidateQueries({ queryKey: ['model-readiness'] })
-      if (result.ok) {
-        toast.success(`Runtime test ผ่าน: ${compactModel(item.ref)}`)
-      } else {
-        toast.error(result.safeMessage || result.summary || 'Runtime test ไม่ผ่าน')
-      }
-    },
-    onError: () => toast.error('Runtime test ไม่สำเร็จ'),
-  })
-
   const validateMutation = useMutation({
     mutationFn: () => putModelSettings(payload, true),
     onSuccess: async data => {
@@ -1315,24 +1377,162 @@ export default function ModelPage() {
     }
   }
 
-  async function testRuntimeRefs(items: RuntimeRef[], validateAfter = false) {
+  function cancelRuntimeTests() {
+    runtimeCancelRef.current = true
+    runtimeAbortRef.current?.abort()
+    setRuntimeTestProgress(prev => prev
+      ? { ...prev, active: false, cancelled: true, message: 'ยกเลิกการทดสอบแล้ว รายการที่ยังไม่เริ่มจะไม่ถูกทดสอบต่อ' }
+      : prev
+    )
+  }
+
+  function isAbortError(error: unknown) {
+    const err = error as { code?: string; name?: string; message?: string }
+    return err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError' || /aborted|canceled/i.test(err?.message || '')
+  }
+
+  async function runRuntimeTestQueue(items: RuntimeRef[], options: {
+    title: string
+    validateAfter?: boolean
+    emptyMessage?: string
+    successMessage?: string
+  }) {
     const refs = items.filter(item => item.ref)
     if (!refs.length) {
-      toast.warning('เลือก model ก่อนทดสอบ runtime')
-      return
+      toast.warning(options.emptyMessage || 'เลือก model ก่อนทดสอบ')
+      return { results: [] as Array<{ item: RuntimeRef; result: ModelRuntimeTestResult }>, failed: 0, cancelled: false }
     }
+    if (runtimeTestProgress?.active) {
+      toast.warning('มีการทดสอบ model กำลังทำงานอยู่')
+      return { results: [] as Array<{ item: RuntimeRef; result: ModelRuntimeTestResult }>, failed: 0, cancelled: false }
+    }
+
+    runtimeCancelRef.current = false
+    setRuntimeTestProgress({
+      active: true,
+      title: options.title,
+      total: refs.length,
+      completed: 0,
+      failed: 0,
+      current: refs[0],
+      message: `กำลังเริ่มทดสอบ 1/${refs.length}`,
+      startedAt: Date.now(),
+    })
+
+    const results: Array<{ item: RuntimeRef; result: ModelRuntimeTestResult }> = []
     let failed = 0
-    for (const item of refs) {
-      const result = await runtimeTestMutation.mutateAsync(item)
-      if (!result.ok) failed += 1
+    let cancelled = false
+
+    for (let index = 0; index < refs.length; index++) {
+      if (runtimeCancelRef.current) {
+        cancelled = true
+        break
+      }
+      const item = refs[index]
+      const controller = new AbortController()
+      runtimeAbortRef.current = controller
+      setRuntimeTestProgress(prev => prev
+        ? {
+            ...prev,
+            active: true,
+            current: item,
+            message: `กำลังทดสอบ ${index + 1}/${refs.length}: ${compactModel(item.ref)}`,
+          }
+        : prev
+      )
+
+      try {
+        const result = await testModelRuntime({
+          model: item.ref,
+          capability: item.capability,
+          mode: 'gateway',
+          refresh: true,
+        }, controller.signal)
+        results.push({ item, result })
+        setRuntimeResults(prev => ({ ...prev, [runtimeKey(item.ref, item.capability)]: result }))
+        if (!result.ok) failed += 1
+        setRuntimeTestProgress(prev => prev
+          ? {
+              ...prev,
+              completed: index + 1,
+              failed,
+              current: index + 1 < refs.length ? refs[index + 1] : item,
+              message: result.ok
+                ? `ผ่าน ${index + 1}/${refs.length}: ${compactModel(item.ref)}`
+                : `ไม่ผ่าน ${index + 1}/${refs.length}: ${result.safeMessage || result.summary || compactModel(item.ref)}`,
+            }
+          : prev
+        )
+      } catch (error) {
+        if (runtimeCancelRef.current || isAbortError(error)) {
+          cancelled = true
+          break
+        }
+        failed += 1
+        setRuntimeTestProgress(prev => prev
+          ? {
+              ...prev,
+              completed: index + 1,
+              failed,
+              current: index + 1 < refs.length ? refs[index + 1] : item,
+              message: `ทดสอบไม่สำเร็จ ${index + 1}/${refs.length}: ${compactModel(item.ref)}`,
+            }
+          : prev
+        )
+      } finally {
+        runtimeAbortRef.current = null
+      }
     }
-    if (failed) {
-      toast.error(`Runtime test ไม่ผ่าน ${failed} รายการ`)
+
+    await qc.invalidateQueries({ queryKey: ['model-readiness'] })
+
+    if (cancelled) {
       setValidatedHash('')
-      return
+      setRuntimeTestProgress(prev => prev
+        ? {
+            ...prev,
+            active: false,
+            cancelled: true,
+            failed,
+            message: `ยกเลิกแล้ว ทดสอบไป ${results.length}/${refs.length} รายการ`,
+          }
+        : prev
+      )
+      toast.info('ยกเลิกการทดสอบ model แล้ว')
+      return { results, failed, cancelled }
     }
-    toast.success('Runtime test ผ่านทุก model ใน draft')
-    if (validateAfter) validateMutation.mutate()
+
+    setRuntimeTestProgress(prev => prev
+      ? {
+          ...prev,
+          active: false,
+          failed,
+          completed: refs.length,
+          current: null,
+          message: failed
+            ? `ทดสอบเสร็จ มี ${failed} รายการที่ไม่ผ่าน`
+            : 'ทดสอบเสร็จ ผ่านทุก model',
+        }
+      : prev
+    )
+
+    if (failed) {
+      toast.error(`ทดสอบ model ไม่ผ่าน ${failed} รายการ`)
+      setValidatedHash('')
+    } else {
+      toast.success(options.successMessage || 'ทดสอบ model ผ่านทุกตัว')
+      if (options.validateAfter) validateMutation.mutate()
+    }
+
+    return { results, failed, cancelled }
+  }
+
+  async function testRuntimeRefs(items: RuntimeRef[], validateAfter = false) {
+    return runRuntimeTestQueue(items, {
+      title: validateAfter ? 'ทดสอบและตรวจสอบก่อนบันทึก' : 'ทดสอบ model',
+      validateAfter,
+      emptyMessage: 'เลือก model ก่อนทดสอบ',
+    })
   }
 
   async function findUsableKiloModels() {
@@ -1348,13 +1548,12 @@ export default function ModelPage() {
       toast.warning('ไม่พบ Kilo shortlist ใน catalog ปัจจุบัน')
       return
     }
-    let passed = 0
-    let failed = 0
-    for (const item of kiloTextRefs) {
-      const result = await runtimeTestMutation.mutateAsync(item)
-      if (result.ok) passed += 1
-      else failed += 1
-    }
+    const { results, failed, cancelled } = await runRuntimeTestQueue(kiloTextRefs, {
+      title: 'หา Kilo model ที่ใช้ได้จริง',
+      successMessage: 'ทดสอบ Kilo shortlist เสร็จแล้ว',
+    })
+    if (cancelled) return
+    const passed = results.filter(({ result }) => result.ok).length
     if (passed) toast.success(`พบ Kilo model ที่ runtime ใช้ได้ ${passed} รายการ`)
     if (failed) toast.warning(`Kilo runtime test ไม่ผ่าน ${failed} รายการ`)
     setValidatedHash('')
@@ -1481,7 +1680,8 @@ export default function ModelPage() {
   const draftTextRefs = runtimeRefs.filter(item => item.capability === 'text')
   const draftImageRefs = runtimeRefs.filter(item => item.capability === 'image')
   const overallReady = Boolean(readiness?.ok && !readiness.runtimeVerificationIssues?.length)
-  const busy = runtimeTestMutation.isPending || validateMutation.isPending
+  const runtimeTesting = Boolean(runtimeTestProgress?.active)
+  const busy = runtimeTesting || validateMutation.isPending
 
   return (
     <div className="w-full space-y-5">
@@ -1519,7 +1719,7 @@ export default function ModelPage() {
         blockingCount={readiness?.blockingIssues.length || 0}
         warningCount={readiness?.warnings.length || 0}
         draftValidated={draftValidated}
-        testing={runtimeTestMutation.isPending}
+        testing={runtimeTesting}
         validating={validateMutation.isPending}
         saving={saveSettingsMutation.isPending}
         restarting={restartMutation.isPending}
@@ -1534,6 +1734,14 @@ export default function ModelPage() {
         onRestart={() => restartMutation.mutate()}
         onClearImage={clearImageConfig}
       />
+
+      {runtimeTestProgress && (
+        <RuntimeTestProgressPanel
+          progress={runtimeTestProgress}
+          onCancel={cancelRuntimeTests}
+          onClose={() => setRuntimeTestProgress(null)}
+        />
+      )}
 
       <details className="group rounded-md border bg-white dark:bg-zinc-950/50">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
@@ -1748,9 +1956,9 @@ export default function ModelPage() {
             <RuntimeVerificationPanel
               refs={runtimeRefs}
               stateFor={runtimeStateFor}
-              onTestOne={item => runtimeTestMutation.mutate(item)}
+              onTestOne={item => testRuntimeRefs([item])}
               onTestAll={() => testRuntimeRefs(runtimeRefs, true)}
-              testing={runtimeTestMutation.isPending || validateMutation.isPending}
+              testing={runtimeTesting || validateMutation.isPending}
             />
             <Tabs value={section} onValueChange={value => setTab(value as Section)} className="mt-5 space-y-5">
               <TabsList className="w-full flex-wrap justify-start">
@@ -1768,7 +1976,7 @@ export default function ModelPage() {
                     setValidatedHash('')
                   }}
                 />
-                <Button type="button" variant="outline" onClick={() => primary && runtimeTestMutation.mutate({ role: 'Primary model', ref: primary, capability: 'text' })} disabled={!primary || runtimeTestMutation.isPending}>
+                <Button type="button" variant="outline" onClick={() => primary && testRuntimeRefs([{ role: 'Primary model', ref: primary, capability: 'text' }])} disabled={!primary || runtimeTesting}>
                   <PlayCircle className="size-4" />
                   Test selected primary
                 </Button>
@@ -1779,7 +1987,7 @@ export default function ModelPage() {
                 <Button type="button" variant="outline" onClick={() => addFallback(false)} disabled={!fallbackDraft}>
                   Add fallback
                 </Button>
-                <Button type="button" variant="outline" onClick={() => testRuntimeRefs(fallbacks.map((ref, index) => ({ role: `Fallback ${index + 1}`, ref, capability: 'text' as const })))} disabled={!fallbacks.length || runtimeTestMutation.isPending}>
+                <Button type="button" variant="outline" onClick={() => testRuntimeRefs(fallbacks.map((ref, index) => ({ role: `Fallback ${index + 1}`, ref, capability: 'text' as const })))} disabled={!fallbacks.length || runtimeTesting}>
                   <PlayCircle className="size-4" />
                   Test fallback chain
                 </Button>
@@ -1817,7 +2025,7 @@ export default function ModelPage() {
                     setValidatedHash('')
                   }}
                 />
-                <Button type="button" variant="outline" onClick={() => testRuntimeRefs([{ role: 'Image primary', ref: imagePrimary, capability: 'image' }, ...imageFallbacks.map((ref, index) => ({ role: `Image fallback ${index + 1}`, ref, capability: 'image' as const }))])} disabled={!imagePrimary || runtimeTestMutation.isPending}>
+                <Button type="button" variant="outline" onClick={() => testRuntimeRefs([{ role: 'Image primary', ref: imagePrimary, capability: 'image' }, ...imageFallbacks.map((ref, index) => ({ role: `Image fallback ${index + 1}`, ref, capability: 'image' as const }))])} disabled={!imagePrimary || runtimeTesting}>
                   <PlayCircle className="size-4" />
                   Test image chain
                 </Button>
@@ -1870,7 +2078,7 @@ export default function ModelPage() {
                     <ShieldCheck className="size-4" />
                     {validateMutation.isPending ? 'Validating...' : 'Validate'}
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => testRuntimeRefs(runtimeRefs, true)} disabled={!primary || runtimeTestMutation.isPending || validateMutation.isPending}>
+                  <Button type="button" variant="outline" onClick={() => testRuntimeRefs(runtimeRefs, true)} disabled={!primary || runtimeTesting || validateMutation.isPending}>
                     <PlayCircle className="size-4" />
                     Test all + Validate
                   </Button>

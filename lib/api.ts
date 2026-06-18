@@ -570,8 +570,8 @@ export async function testModelRuntime(params: {
   capability?: 'text' | 'image'
   mode?: 'gateway'
   refresh?: boolean
-}): Promise<ModelRuntimeTestResult> {
-  const { data } = await api.post('/api/models/runtime-test', params)
+}, signal?: AbortSignal): Promise<ModelRuntimeTestResult> {
+  const { data } = await api.post('/api/models/runtime-test', params, { signal })
   return data
 }
 
