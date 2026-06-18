@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getConfig,
@@ -32,8 +32,10 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  CheckCircle2,
   Check,
   ChevronsUpDown,
+  ChevronDown,
   Eye,
   Image as ImageIcon,
   KeyRound,
@@ -42,6 +44,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Settings2,
   ShieldCheck,
   Timer,
   Trash2,
@@ -716,6 +719,229 @@ function KiloAdvisor({
   )
 }
 
+function SetupStatusCard({
+  title,
+  status,
+  badge,
+  children,
+}: {
+  title: string
+  status: 'ready' | 'warn' | 'fail' | 'idle'
+  badge: string
+  children: ReactNode
+}) {
+  const tone = status === 'ready'
+    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-950 dark:border-emerald-950 dark:bg-emerald-950/20 dark:text-emerald-100'
+    : status === 'fail'
+      ? 'border-red-200 bg-red-50/70 text-red-950 dark:border-red-950 dark:bg-red-950/20 dark:text-red-100'
+      : status === 'warn'
+        ? 'border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-100'
+        : 'border-zinc-200 bg-zinc-50/80 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100'
+  const badgeVariant = status === 'ready' ? 'default' : status === 'fail' ? 'destructive' : 'secondary'
+  return (
+    <div className={`rounded-md border px-3 py-3 ${tone}`}>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium">{title}</p>
+        <Badge variant={badgeVariant}>{badge}</Badge>
+      </div>
+      <div className="mt-2 text-sm leading-relaxed opacity-85">{children}</div>
+    </div>
+  )
+}
+
+function AdminModelSetup({
+  textRefs,
+  imageRefs,
+  kiloRefs,
+  stateFor,
+  primary,
+  fallbackCount,
+  imagePrimary,
+  imageFallbackCount,
+  kiloCatalog,
+  kiloHasKey,
+  readinessOk,
+  blockingCount,
+  warningCount,
+  draftValidated,
+  testing,
+  validating,
+  saving,
+  restarting,
+  canValidate,
+  canSave,
+  onApplyOpenRouter,
+  onFindKilo,
+  onApplyKilo,
+  onTestText,
+  onValidate,
+  onSave,
+  onRestart,
+  onClearImage,
+}: {
+  textRefs: RuntimeRef[]
+  imageRefs: RuntimeRef[]
+  kiloRefs: RuntimeRef[]
+  stateFor: (ref: RuntimeRef) => RuntimeView
+  primary: string
+  fallbackCount: number
+  imagePrimary: string
+  imageFallbackCount: number
+  kiloCatalog?: ModelCatalog
+  kiloHasKey: boolean
+  readinessOk: boolean
+  blockingCount: number
+  warningCount: number
+  draftValidated: boolean
+  testing: boolean
+  validating: boolean
+  saving: boolean
+  restarting: boolean
+  canValidate: boolean
+  canSave: boolean
+  onApplyOpenRouter: () => void
+  onFindKilo: () => void
+  onApplyKilo: () => void
+  onTestText: () => void
+  onValidate: () => void
+  onSave: () => void
+  onRestart: () => void
+  onClearImage: () => void
+}) {
+  const textStates = textRefs.map(item => stateFor(item))
+  const textReady = textRefs.length > 0 && textStates.every(state => isRuntimeVerified(state.status))
+  const textFailed = textStates.some(state => state.status && !['runtime_unverified', 'runtime_verified', 'ok'].includes(state.status))
+  const imageStates = imageRefs.map(item => stateFor(item))
+  const imageConfigured = Boolean(imagePrimary)
+  const imageReady = imageRefs.length > 0 && imageStates.every(state => isRuntimeVerified(state.status))
+  const imageFailed = imageStates.some(state => state.status && !['runtime_unverified', 'runtime_verified', 'ok'].includes(state.status))
+  const kiloStates = kiloRefs.map(item => stateFor(item))
+  const kiloVerifiedCount = kiloStates.filter(state => isRuntimeVerified(state.status)).length
+  const kiloReady = kiloVerifiedCount > 0
+
+  const nextActions = []
+  if (!primary) nextActions.push('เลือกหรือ apply ชุด model สำหรับข้อความ')
+  else if (!textReady) nextActions.push('กด Test current text models ให้ผ่านก่อน')
+  else if (!draftValidated) nextActions.push('กด Validate เพื่อตรวจ config ก่อนบันทึก')
+  else if (!readinessOk) nextActions.push('กด Save settings แล้ว restart gateway')
+  if (imageConfigured && !imageReady) nextActions.push('รูปสินค้ายังไม่พร้อม: ปิด image config หรือเลือก model ที่ผ่านจริง')
+  if (!kiloHasKey) nextActions.push('ถ้าจะใช้ Kilo ให้บันทึก Kilo key ใน Advanced')
+  const visibleActions = nextActions.slice(0, 4)
+
+  return (
+    <Card className="border-zinc-300 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-950/40">
+      <CardHeader>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <ShieldCheck className="size-5" />
+              Model Setup
+            </CardTitle>
+            <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-300">
+              สำหรับ admin ทั่วไป ให้ทำตามแถวนี้ก่อน: เลือกชุด model, ทดสอบ, validate, save แล้ว restart.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={onApplyOpenRouter} disabled={testing || saving}>
+              <Zap className="size-4" />
+              ใช้ OpenRouter แนะนำ
+            </Button>
+            <Button type="button" variant="outline" onClick={onFindKilo} disabled={testing || !kiloHasKey || kiloCatalog?.status !== 'ready'}>
+              <PlayCircle className="size-4" />
+              หา Kilo ที่ใช้ได้
+            </Button>
+            <Button type="button" onClick={onApplyKilo} disabled={testing || !kiloReady}>
+              <CheckCircle2 className="size-4" />
+              ใช้ Kilo ที่ผ่านแล้ว
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <SetupStatusCard
+            title="ข้อความ Telegram"
+            status={textReady ? 'ready' : textFailed ? 'fail' : 'warn'}
+            badge={textReady ? 'พร้อมใช้' : textFailed ? 'ต้องแก้' : 'ต้องทดสอบ'}
+          >
+            <p className="break-all font-mono text-xs">{primary || 'ยังไม่เลือก primary model'}</p>
+            <p className="mt-1">{fallbackCount} fallback model(s)</p>
+          </SetupStatusCard>
+          <SetupStatusCard
+            title="Kilo AI"
+            status={kiloReady ? 'ready' : kiloHasKey ? 'warn' : 'idle'}
+            badge={kiloReady ? `${kiloVerifiedCount} ใช้ได้` : kiloHasKey ? 'รอ test' : 'ยังไม่มี key'}
+          >
+            <p>{catalogSummary(kiloCatalog, PROVIDERS.find(provider => provider.id === 'kilocode'))}</p>
+            <p className="mt-1">ใช้กับ production หลัง runtime verified เท่านั้น</p>
+          </SetupStatusCard>
+          <SetupStatusCard
+            title="รูปสินค้า"
+            status={!imageConfigured ? 'idle' : imageReady ? 'ready' : imageFailed ? 'fail' : 'warn'}
+            badge={!imageConfigured ? 'ปิดอยู่' : imageReady ? 'พร้อมใช้' : imageFailed ? 'ยังใช้ไม่ได้' : 'ต้องทดสอบ'}
+          >
+            <p className="break-all font-mono text-xs">{imagePrimary || 'ไม่ได้ตั้ง image model'}</p>
+            <p className="mt-1">{imageFallbackCount} image fallback(s)</p>
+          </SetupStatusCard>
+        </div>
+
+        <div className="grid gap-3 xl:grid-cols-[1fr_420px]">
+          <div className="rounded-md border bg-white px-3 py-3 dark:bg-zinc-950/50">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={readinessOk ? 'default' : 'secondary'}>{readinessOk ? 'พร้อมบันทึก' : 'ต้องตรวจเพิ่ม'}</Badge>
+              <span className="text-sm text-zinc-600 dark:text-zinc-300">
+                {blockingCount} blocking issue(s), {warningCount} warning(s)
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={onTestText} disabled={!primary || testing}>
+                <PlayCircle className="size-4" />
+                Test current text models
+              </Button>
+              <Button type="button" variant="outline" onClick={onValidate} disabled={!canValidate || validating}>
+                <ShieldCheck className="size-4" />
+                Validate
+              </Button>
+              <Button type="button" onClick={onSave} disabled={!canSave || saving}>
+                <Save className="size-4" />
+                Save settings
+              </Button>
+              <Button type="button" variant="outline" onClick={onRestart} disabled={restarting}>
+                <RotateCcw className="size-4" />
+                Restart gateway
+              </Button>
+              {imageConfigured && !imageReady && (
+                <Button type="button" variant="outline" onClick={onClearImage} disabled={testing || saving}>
+                  <ImageIcon className="size-4" />
+                  ปิด image config
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-md border bg-white px-3 py-3 dark:bg-zinc-950/50">
+            <p className="text-sm font-medium">ควรทำต่อ</p>
+            {visibleActions.length ? (
+              <ol className="mt-2 space-y-1.5 text-sm text-zinc-600 dark:text-zinc-300">
+                {visibleActions.map((item, index) => (
+                  <li key={item} className="flex gap-2">
+                    <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      {index + 1}
+                    </span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">ไม่มี action เร่งด่วน เหลือแค่ทดสอบ Telegram จริงหลัง restart</p>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function AgentMatrix({ agents }: { agents: AgentModelReadiness[] }) {
   return (
     <Card>
@@ -1235,13 +1461,18 @@ export default function ModelPage() {
     toast.info('ปิด image model draft แล้ว จนกว่าจะมี model ที่ runtime test ผ่าน')
   }
 
+  const draftTextRefs = runtimeRefs.filter(item => item.capability === 'text')
+  const draftImageRefs = runtimeRefs.filter(item => item.capability === 'image')
+  const overallReady = Boolean(readiness?.ok && !readiness.runtimeVerificationIssues?.length)
+  const busy = runtimeTestMutation.isPending || validateMutation.isPending
+
   return (
     <div className="w-full space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Model Readiness</h1>
+          <h1 className="text-2xl font-bold">เลือก Model ให้ Chatbot</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            ให้ระบบช่วยเลือก model ที่ใช้ได้จริงกับ OpenClaw runtime ก่อนค่อย save เข้า production
+            หน้านี้เช็คว่า key, model และ OpenClaw runtime ใช้งานด้วยกันได้จริง ก่อนนำไปใช้กับ Telegram.
           </p>
         </div>
         <div className="grid gap-2 sm:flex sm:flex-wrap">
@@ -1256,26 +1487,71 @@ export default function ModelPage() {
         </div>
       </div>
 
-      <ModelAdvisor
-        textRefs={recommendedTextRefs}
-        imageRefs={recommendedImageRefs}
+      <AdminModelSetup
+        textRefs={draftTextRefs}
+        imageRefs={draftImageRefs}
+        kiloRefs={kiloTextRefs}
         stateFor={runtimeStateFor}
-        onApplyText={applyRecommendedOpenRouterText}
-        onTestText={() => testRuntimeRefs(recommendedTextRefs)}
-        onTestImage={() => testRuntimeRefs(recommendedImageRefs)}
+        primary={primary}
+        fallbackCount={fallbacks.length}
+        imagePrimary={imagePrimary}
+        imageFallbackCount={imageFallbacks.length}
+        kiloCatalog={kiloCatalog}
+        kiloHasKey={Boolean(config?.env?.KILOCODE_API_KEY)}
+        readinessOk={overallReady}
+        blockingCount={readiness?.blockingIssues.length || 0}
+        warningCount={readiness?.warnings.length || 0}
+        draftValidated={draftValidated}
+        testing={runtimeTestMutation.isPending}
+        validating={validateMutation.isPending}
+        saving={saveSettingsMutation.isPending}
+        restarting={restartMutation.isPending}
+        canValidate={Boolean(primary) && !validateMutation.isPending}
+        canSave={draftValidated && !saveSettingsMutation.isPending}
+        onApplyOpenRouter={applyRecommendedOpenRouterText}
+        onFindKilo={findUsableKiloModels}
+        onApplyKilo={applyVerifiedKiloText}
+        onTestText={() => testRuntimeRefs(draftTextRefs)}
+        onValidate={() => validateMutation.mutate()}
+        onSave={() => saveSettingsMutation.mutate()}
+        onRestart={() => restartMutation.mutate()}
         onClearImage={clearImageConfig}
-        testing={runtimeTestMutation.isPending || validateMutation.isPending}
       />
 
-      <KiloAdvisor
-        catalog={kiloCatalog}
-        hasKey={Boolean(config?.env?.KILOCODE_API_KEY)}
-        candidates={kiloTextRefs}
-        stateFor={runtimeStateFor}
-        onFindUsable={findUsableKiloModels}
-        onApplyText={applyVerifiedKiloText}
-        testing={runtimeTestMutation.isPending || validateMutation.isPending}
-      />
+      <details className="group rounded-md border bg-white dark:bg-zinc-950/50">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <Settings2 className="size-4" />
+              Advanced diagnostics
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">เปิดเมื่ออยากดู runtime result, recommended chain และ Kilo shortlist แบบละเอียด</p>
+          </div>
+          <ChevronDown className="size-4 shrink-0 text-zinc-500 transition group-open:rotate-180" />
+        </summary>
+        <div className="space-y-4 border-t p-4">
+          <ModelAdvisor
+            textRefs={recommendedTextRefs}
+            imageRefs={recommendedImageRefs}
+            stateFor={runtimeStateFor}
+            onApplyText={applyRecommendedOpenRouterText}
+            onTestText={() => testRuntimeRefs(recommendedTextRefs)}
+            onTestImage={() => testRuntimeRefs(recommendedImageRefs)}
+            onClearImage={clearImageConfig}
+            testing={busy}
+          />
+
+          <KiloAdvisor
+            catalog={kiloCatalog}
+            hasKey={Boolean(config?.env?.KILOCODE_API_KEY)}
+            candidates={kiloTextRefs}
+            stateFor={runtimeStateFor}
+            onFindUsable={findUsableKiloModels}
+            onApplyText={applyVerifiedKiloText}
+            testing={busy}
+          />
+        </div>
+      </details>
 
       <div className="grid gap-3 md:grid-cols-3">
         <Card>
@@ -1331,8 +1607,19 @@ export default function ModelPage() {
         </Card>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
-        <div className="space-y-4">
+      <details className="group rounded-md border bg-white dark:bg-zinc-950/50">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <KeyRound className="size-4" />
+              Advanced setup
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">บันทึก provider key หรือเลือก model เองเมื่อชุดแนะนำยังไม่พอ</p>
+          </div>
+          <ChevronDown className="size-4 shrink-0 text-zinc-500 transition group-open:rotate-180" />
+        </summary>
+        <div className="grid gap-5 border-t p-4 xl:grid-cols-[360px_1fr]">
+          <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -1584,10 +1871,22 @@ export default function ModelPage() {
               </div>
             </Tabs>
           </CardContent>
-        </Card>
-      </div>
+          </Card>
+        </div>
+      </details>
 
-      <AgentMatrix agents={readiness?.agents || []} />
+      <details className="group rounded-md border bg-white dark:bg-zinc-950/50">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Per-agent status</p>
+            <p className="mt-1 text-xs text-zinc-500">ดูว่า agent ไหน inherit default หรือ override model เอง</p>
+          </div>
+          <ChevronDown className="size-4 shrink-0 text-zinc-500 transition group-open:rotate-180" />
+        </summary>
+        <div className="border-t p-4">
+          <AgentMatrix agents={readiness?.agents || []} />
+        </div>
+      </details>
     </div>
   )
 }
