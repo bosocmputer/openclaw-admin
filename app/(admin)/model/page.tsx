@@ -559,7 +559,47 @@ function AgentMatrix({ agents }: { agents: AgentModelReadiness[] }) {
         <p className="text-sm text-zinc-500">ดูว่า agent ไหน inherit default และ agent ไหน override model/image model เอง</p>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
+        <div className="space-y-3 md:hidden">
+          {agents.map(agent => (
+            <div key={agent.id} className="space-y-3 rounded-md border px-3 py-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium">{agent.id}</p>
+                <p className="text-xs text-zinc-500">
+                  model: {agent.modelSource}, image: {agent.imageModelSource}
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-zinc-500">Primary</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <ReadinessBadge status={agent.model.primary.status} />
+                  <RuntimeBadge status={agent.model.primary.runtimeStatus || 'runtime_unverified'} />
+                  <span className="min-w-0 break-all font-mono text-xs">{agent.model.primary.ref || '-'}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <p className="font-medium text-zinc-500">Fallbacks</p>
+                  <p>{agent.model.fallbacks.length}</p>
+                </div>
+                <div>
+                  <p className="font-medium text-zinc-500">Image</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <ReadinessBadge status={agent.usesImageTool ? agent.imageModel.primary.status : 'ready'} />
+                    {agent.usesImageTool && <RuntimeBadge status={agent.imageModel.primary.runtimeStatus || 'runtime_unverified'} />}
+                  </div>
+                </div>
+              </div>
+
+              <p className="break-all font-mono text-xs text-zinc-600 dark:text-zinc-300">
+                {agent.usesImageTool ? (agent.imageModel.primary.ref || 'not configured') : 'not used'}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[820px] text-sm">
             <thead className="text-left text-xs text-zinc-500">
               <tr className="border-b">
