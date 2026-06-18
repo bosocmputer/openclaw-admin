@@ -666,6 +666,13 @@ export default function ModelPage() {
     && !messageTesting
     && !imageTesting
     && !canSave
+  const settingsAlreadySaved = Boolean(primary)
+    && !missingTextProvider
+    && textModelsReady
+    && !keyChanged
+    && !hasDraftChanges
+    && !messageTesting
+    && !imageTesting
   const saveReason = !primary
     ? 'เลือก Model หลักก่อน'
     : missingTextProvider
@@ -674,9 +681,7 @@ export default function ModelPage() {
         ? 'บันทึก key ที่แก้ไขไว้ก่อน'
         : !textModelsReady
           ? `เลือกไว้ได้ แต่ยังไม่ผ่านการทดสอบ (${unverifiedTextModels.length} ตัว)`
-          : !hasDraftChanges
-            ? 'ยังไม่มีการเปลี่ยนแปลง'
-            : ''
+          : ''
 
   useEffect(() => {
     if (!hasDraftChanges && !keyChanged && !messageTesting && !imageTesting) return
@@ -1436,6 +1441,11 @@ export default function ModelPage() {
                   <Badge variant="secondary">บันทึกปกติยังไม่พร้อม</Badge>
                   <span className="text-muted-foreground">{saveReason}</span>
                 </>
+              ) : settingsAlreadySaved ? (
+                <>
+                  <Badge>บันทึกแล้ว</Badge>
+                  <span className="text-muted-foreground">ค่าปัจจุบันอยู่ใน config แล้ว กด Restart Gateway เพื่อให้ chatbot ใช้ค่าใหม่</span>
+                </>
               ) : (
                 <>
                   <Badge>พร้อมบันทึก</Badge>
@@ -1446,7 +1456,7 @@ export default function ModelPage() {
             <div className="flex flex-wrap gap-2">
               <Button type="button" onClick={() => saveSettingsMutation.mutate(false)} disabled={!canSave || saveSettingsMutation.isPending}>
                 <Save className="size-4" />
-                {saveSettingsMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกค่า Model'}
+                {saveSettingsMutation.isPending ? 'กำลังบันทึก...' : settingsAlreadySaved ? 'บันทึกแล้ว' : 'บันทึกค่า Model'}
               </Button>
               {canOverrideSave && (
                 <Button
