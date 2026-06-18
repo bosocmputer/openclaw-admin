@@ -68,10 +68,10 @@ const OPENROUTER_RECOMMENDED = {
 }
 
 const KILO_RECOMMENDED = {
-  primary: 'kilocode/google/gemini-3.1-flash-lite',
+  primary: 'kilocode/openai/gpt-4o-mini',
   fallbacks: [
-    'kilocode/kilo-auto/small',
-    'kilocode/openai/gpt-4o-mini',
+    'kilocode/google/gemini-3.1-flash-lite',
+    'kilocode/qwen/qwen3-vl-235b-a22b-instruct',
   ],
 }
 
