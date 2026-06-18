@@ -617,17 +617,19 @@ export default function ModelPage() {
     setApiKey('')
   }, [config, providerForKey])
 
+  const currentImageHash = imageModelHash(imagePrimary, imageFallbacks, imageTimeoutMs)
+  const imageReady = !imagePrimary || isRuntimeVerified(runtimeState(imagePrimary, 'image')) || lastImageTestHash === currentImageHash
+  const shouldSaveImageModel = Boolean(imagePrimary && imageReady)
   const payload = useMemo<ModelSettingsPayload>(() => ({
     defaults: {
       model: { primary, fallbacks },
-      imageModel: imagePrimary
+      imageModel: shouldSaveImageModel
         ? { primary: imagePrimary, fallbacks: imageFallbacks, timeoutMs: imageTimeoutMs }
         : null,
     },
-  }), [fallbacks, imageFallbacks, imagePrimary, imageTimeoutMs, primary])
+  }), [fallbacks, imageFallbacks, imagePrimary, imageTimeoutMs, primary, shouldSaveImageModel])
 
   const currentHash = settingsHash(payload)
-  const currentImageHash = imageModelHash(imagePrimary, imageFallbacks, imageTimeoutMs)
   const hasDraftChanges = Boolean(savedHash && currentHash !== savedHash)
   const currentKey = config?.env?.[providerForKey.envKey] || ''
   const keyChanged = !providerForKey.noApiKey && Boolean(apiKey.trim()) && apiKey.trim() !== currentKey
@@ -648,11 +650,10 @@ export default function ModelPage() {
     return found?.runtimeStatus || 'runtime_unverified'
   }
 
-  const imageReady = !imagePrimary || isRuntimeVerified(runtimeState(imagePrimary, 'image')) || lastImageTestHash === currentImageHash
+  const imageDraftExcluded = Boolean(imagePrimary && !imageReady)
   const canSave = Boolean(primary)
     && !missingTextProvider
     && textModelsReady
-    && imageReady
     && !keyChanged
     && hasDraftChanges
     && !messageTesting
@@ -672,11 +673,9 @@ export default function ModelPage() {
         ? 'บันทึก key ที่แก้ไขไว้ก่อน'
         : !textModelsReady
           ? `เลือกไว้ได้ แต่ยังไม่ผ่านการทดสอบ (${unverifiedTextModels.length} ตัว)`
-          : !imageReady
-            ? 'Model รูปภาพยังไม่ผ่านการทดสอบ'
-            : !hasDraftChanges
-              ? 'ยังไม่มีการเปลี่ยนแปลง'
-              : ''
+          : !hasDraftChanges
+            ? 'ยังไม่มีการเปลี่ยนแปลง'
+            : ''
 
   useEffect(() => {
     if (!hasDraftChanges && !keyChanged && !messageTesting && !imageTesting) return
@@ -990,7 +989,7 @@ export default function ModelPage() {
   const primaryPassed = Boolean(primary && textTestResults[primary]?.ok)
   const fallbackPassedCount = fallbacks.filter(model => textTestResults[model]?.ok).length
   const providerKeyCount = PROVIDERS.filter(provider => provider.noApiKey || config?.env?.[provider.envKey]).length
-  const imageStateLabel = imagePrimary ? (imageReady ? 'พร้อม' : 'ต้องทดสอบ') : 'ปิดอยู่'
+  const imageStateLabel = imagePrimary ? (imageReady ? 'พร้อม' : 'ยังไม่เปิด') : 'ปิดอยู่'
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-5">
@@ -1307,7 +1306,7 @@ export default function ModelPage() {
               <div className="space-y-3">
                 {!imageReady && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
-                    ต้องทดสอบ Model รูปภาพให้ผ่าน หรือกดปิด Model รูปภาพก่อน จึงจะบันทึกค่าได้
+                    Model รูปภาพยังไม่ผ่านการทดสอบ จึงจะไม่ถูกบันทึกในรอบนี้ แต่ยังบันทึก Model ข้อความได้ตามปกติ
                   </div>
                 )}
                 <ModelPicker
@@ -1486,6 +1485,12 @@ export default function ModelPage() {
           {showRestartHint && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
               บันทึกแล้ว กรุณา Restart Gateway เพื่อให้ Telegram ใช้ค่าใหม่
+            </div>
+          )}
+
+          {imageDraftExcluded && (
+            <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+              Model รูปภาพเป็นส่วนเสริมและยังไม่ผ่านการทดสอบ ระบบจะไม่บันทึกค่า Model รูปภาพในรอบนี้
             </div>
           )}
 
