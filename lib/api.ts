@@ -188,7 +188,41 @@ export type ModelReadinessStatus =
   | 'model_not_found'
   | 'not_image_capable'
   | 'capability_unknown'
+  | 'runtime_unverified'
+  | 'runtime_verified'
+  | 'runtime_unavailable'
   | string
+
+export type ModelRuntimeTestStatus =
+  | 'ok'
+  | 'model_not_found'
+  | 'missing_key'
+  | 'auth_error'
+  | 'timeout'
+  | 'provider_error'
+  | 'runtime_unavailable'
+  | string
+
+export interface ModelRuntimeTestResult {
+  ok: boolean
+  status: ModelRuntimeTestStatus
+  model: string
+  capability: 'text' | 'image' | string
+  mode: 'gateway' | string
+  runtimeVersion: string
+  durationMs: number
+  summary: string
+  safeMessage: string
+  testedAt?: string
+  detail?: string
+  cache?: { hit: boolean; ttlSeconds: number }
+  data?: {
+    provider?: string | null
+    model?: string | null
+    outputPreview?: string
+    attempts?: Array<Record<string, unknown>>
+  } | null
+}
 
 export interface ModelRefReadiness {
   ref: string
@@ -200,6 +234,12 @@ export interface ModelRefReadiness {
   source: string | null
   catalogStatus: string | null
   capability: string | null
+  keyStatus: string | null
+  runtimeStatus: string | null
+  runtimeSummary: string | null
+  runtimeTestedAt: string | null
+  runtimeDurationMs: number | null
+  runtimeVersion: string | null
   configured: boolean
 }
 
@@ -252,6 +292,7 @@ export interface ModelReadiness {
   }>
   warnings: ModelReadinessWarning[]
   blockingIssues: ModelReadinessIssue[]
+  runtimeVerificationIssues?: ModelReadinessIssue[]
 }
 
 export interface ModelSettingsChain {
@@ -269,11 +310,13 @@ export interface ModelSettingsPayload {
     model?: ModelSettingsChain | null
     imageModel?: ModelSettingsChain | null
   }>
+  allowRuntimeOverride?: boolean
 }
 
 export interface ModelSettingsResult {
   ok: boolean
   validateOnly?: boolean
+  runtimeOverride?: boolean
   write?: { ok: boolean; backupId: string; backupPath: string | null; bytes: number; reason: string }
   readiness: ModelReadiness
 }
@@ -516,8 +559,23 @@ export async function getModelReadiness(refresh = false): Promise<ModelReadiness
   return data
 }
 
-export async function putModelSettings(payload: ModelSettingsPayload, validateOnly = false): Promise<ModelSettingsResult> {
-  const { data } = await api.put('/api/models/settings', payload, { params: validateOnly ? { validateOnly: true } : {} })
+export async function testModelRuntime(params: {
+  model: string
+  capability?: 'text' | 'image'
+  mode?: 'gateway'
+  refresh?: boolean
+}): Promise<ModelRuntimeTestResult> {
+  const { data } = await api.post('/api/models/runtime-test', params)
+  return data
+}
+
+export async function putModelSettings(payload: ModelSettingsPayload, validateOnly = false, allowRuntimeOverride = false): Promise<ModelSettingsResult> {
+  const { data } = await api.put('/api/models/settings', payload, {
+    params: {
+      ...(validateOnly ? { validateOnly: true } : {}),
+      ...(allowRuntimeOverride ? { allowRuntimeOverride: true } : {}),
+    },
+  })
   return data
 }
 

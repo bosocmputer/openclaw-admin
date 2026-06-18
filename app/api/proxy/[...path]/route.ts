@@ -86,6 +86,8 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
   const headers: Record<string, string> = {
     Authorization: `Bearer ${API_TOKEN}`,
     'Content-Type': 'application/json',
+    'X-OpenClaw-Admin-Role': session.role,
+    'X-OpenClaw-Admin-User': session.username,
   }
 
   let body: string | undefined

@@ -11,9 +11,11 @@ import {
   restartGateway,
   startAnthropicOAuth,
   testProvider,
+  testModelRuntime,
   PROVIDERS,
   type AgentModelReadiness,
   type ModelCatalog,
+  type ModelRuntimeTestResult,
   type ModelSettingsPayload,
   type OpenRouterModel,
   type ProviderConfig,
@@ -36,10 +38,12 @@ import {
   Image as ImageIcon,
   KeyRound,
   Layers,
+  PlayCircle,
   RefreshCw,
   RotateCcw,
   Save,
   ShieldCheck,
+  Timer,
   Trash2,
   Zap,
 } from 'lucide-react'
@@ -75,8 +79,9 @@ function fullRef(provider: ProviderConfig, modelId: string) {
 }
 
 function statusVariant(status?: string): 'default' | 'destructive' | 'secondary' {
-  if (status === 'ready') return 'default'
+  if (status === 'ready' || status === 'runtime_verified' || status === 'ok') return 'default'
   if (status === 'not_configured') return 'secondary'
+  if (status === 'runtime_unverified') return 'secondary'
   if (!status) return 'secondary'
   return 'destructive'
 }
@@ -91,6 +96,9 @@ function statusLabel(status?: string) {
   if (status === 'model_not_found') return 'Not found'
   if (status === 'not_image_capable') return 'Not image-capable'
   if (status === 'capability_unknown') return 'Unknown capability'
+  if (status === 'runtime_verified' || status === 'ok') return 'Runtime verified'
+  if (status === 'runtime_unverified') return 'Not tested'
+  if (status === 'runtime_unavailable') return 'Runtime unavailable'
   return status || 'Unknown'
 }
 
@@ -131,6 +139,16 @@ function formatPrice(model?: OpenRouterModel) {
 
 function compactModel(ref: string) {
   return ref.replace(/^openrouter\//, '')
+}
+
+function runtimeKey(ref: string, capability: 'text' | 'image') {
+  return `${capability}:${ref}`
+}
+
+function runtimeStatusTone(status?: string) {
+  if (status === 'runtime_verified' || status === 'ok') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300'
+  if (status === 'runtime_unverified' || !status) return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
+  return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
 }
 
 function draftHash(payload: ModelSettingsPayload) {
@@ -214,7 +232,8 @@ function ModelPicker({
                 : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800'
             } disabled:cursor-not-allowed disabled:opacity-60`}
           >
-            {item.label}
+            <span className="block truncate">{item.label}</span>
+            {item.id === 'kilocode' && <span className="block truncate text-[10px] text-amber-600 dark:text-amber-300">runtime test required</span>}
           </button>
         ))}
       </div>
@@ -291,6 +310,91 @@ function ReadinessBadge({ status }: { status?: string }) {
   return <Badge variant={statusVariant(status)}>{statusLabel(status)}</Badge>
 }
 
+type RuntimeRef = {
+  role: string
+  ref: string
+  capability: 'text' | 'image'
+}
+
+type RuntimeView = {
+  status: string
+  summary: string
+  durationMs?: number | null
+  runtimeVersion?: string | null
+  testedAt?: string | null
+}
+
+function RuntimeBadge({ status }: { status?: string }) {
+  return <Badge variant={statusVariant(status)}>{statusLabel(status)}</Badge>
+}
+
+function RuntimeVerificationPanel({
+  refs,
+  stateFor,
+  onTestOne,
+  onTestAll,
+  testing,
+}: {
+  refs: RuntimeRef[]
+  stateFor: (ref: RuntimeRef) => RuntimeView
+  onTestOne: (ref: RuntimeRef) => void
+  onTestAll: () => void
+  testing: boolean
+}) {
+  const visibleRefs = refs.filter(item => item.ref)
+  return (
+    <div className="rounded-md border p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-medium">Runtime verification</p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Catalog และ key ยังไม่พอ ต้องทดสอบผ่าน OpenClaw runtime ก่อน Save เพื่อกัน model ที่ runtime ไม่รู้จัก
+          </p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onTestAll} disabled={testing || visibleRefs.length === 0}>
+          <PlayCircle className="size-4" />
+          Test all before save
+        </Button>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {visibleRefs.length === 0 ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+            เลือก primary model ก่อนเริ่มทดสอบ runtime
+          </div>
+        ) : visibleRefs.map(item => {
+          const state = stateFor(item)
+          return (
+            <div key={`${item.capability}:${item.role}:${item.ref}`} className={`rounded-md border px-3 py-2 text-xs ${runtimeStatusTone(state.status)}`}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <RuntimeBadge status={state.status} />
+                    <span className="font-medium">{item.role}</span>
+                    <span className="rounded bg-white/60 px-1.5 py-0.5 text-[11px] dark:bg-zinc-950/30">{item.capability}</span>
+                  </div>
+                  <p className="mt-1 break-all font-mono text-zinc-700 dark:text-zinc-200">{item.ref}</p>
+                  <p className="mt-1">{state.summary}</p>
+                  {(state.durationMs || state.runtimeVersion) && (
+                    <p className="mt-1 flex flex-wrap items-center gap-2 text-zinc-500 dark:text-zinc-300">
+                      {state.durationMs ? <span className="inline-flex items-center gap-1"><Timer className="size-3" />{state.durationMs}ms</span> : null}
+                      {state.runtimeVersion ? <span className="font-mono">{state.runtimeVersion}</span> : null}
+                    </p>
+                  )}
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => onTestOne(item)} disabled={testing}>
+                  <PlayCircle className="size-4" />
+                  Test
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ChainSummary({ title, primary, fallbackCount }: { title: string; primary?: string; fallbackCount?: number }) {
   return (
     <div className="rounded-md border px-3 py-2">
@@ -327,6 +431,7 @@ function AgentMatrix({ agents }: { agents: AgentModelReadiness[] }) {
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-2">
                       <ReadinessBadge status={agent.model.primary.status} />
+                      <RuntimeBadge status={agent.model.primary.runtimeStatus || 'runtime_unverified'} />
                       <span className="max-w-[260px] truncate font-mono text-xs">{agent.model.primary.ref || '-'}</span>
                     </div>
                   </td>
@@ -334,6 +439,7 @@ function AgentMatrix({ agents }: { agents: AgentModelReadiness[] }) {
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-2">
                       <ReadinessBadge status={agent.usesImageTool ? agent.imageModel.primary.status : 'ready'} />
+                      {agent.usesImageTool && <RuntimeBadge status={agent.imageModel.primary.runtimeStatus || 'runtime_unverified'} />}
                       <span className="max-w-[260px] truncate font-mono text-xs">
                         {agent.usesImageTool ? (agent.imageModel.primary.ref || 'not configured') : 'not used'}
                       </span>
@@ -371,6 +477,7 @@ export default function ModelPage() {
   const [imageTimeoutMs, setImageTimeoutMs] = useState(30000)
   const [validatedHash, setValidatedHash] = useState('')
   const [showRestartHint, setShowRestartHint] = useState(false)
+  const [runtimeResults, setRuntimeResults] = useState<Record<string, ModelRuntimeTestResult>>({})
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
   const { data: readiness, isFetching: readinessFetching } = useQuery({
@@ -412,6 +519,73 @@ export default function ModelPage() {
 
   const currentHash = draftHash(payload)
   const draftValidated = validatedHash === currentHash
+  const runtimeRefs = useMemo<RuntimeRef[]>(() => {
+    const refs: RuntimeRef[] = []
+    if (primary) refs.push({ role: 'Primary model', ref: primary, capability: 'text' })
+    fallbacks.forEach((ref, index) => {
+      if (ref) refs.push({ role: `Fallback ${index + 1}`, ref, capability: 'text' })
+    })
+    if (imagePrimary) refs.push({ role: 'Image primary', ref: imagePrimary, capability: 'image' })
+    imageFallbacks.forEach((ref, index) => {
+      if (ref) refs.push({ role: `Image fallback ${index + 1}`, ref, capability: 'image' })
+    })
+    const seen = new Set<string>()
+    return refs.filter(item => {
+      const key = runtimeKey(item.ref, item.capability)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, [fallbacks, imageFallbacks, imagePrimary, primary])
+
+  const readinessRuntimeByKey = useMemo(() => {
+    const map = new Map<string, RuntimeView>()
+    const add = (item?: {
+      ref?: string
+      capability?: string | null
+      runtimeStatus?: string | null
+      runtimeSummary?: string | null
+      runtimeDurationMs?: number | null
+      runtimeVersion?: string | null
+      runtimeTestedAt?: string | null
+    }) => {
+      if (!item?.ref) return
+      const capability = item.capability === 'image' ? 'image' : 'text'
+      map.set(runtimeKey(item.ref, capability), {
+        status: item.runtimeStatus || 'runtime_unverified',
+        summary: item.runtimeSummary || 'Runtime test has not been run for this model',
+        durationMs: item.runtimeDurationMs,
+        runtimeVersion: item.runtimeVersion,
+        testedAt: item.runtimeTestedAt,
+      })
+    }
+    add(readiness?.defaults.model.primary)
+    readiness?.defaults.model.fallbacks.forEach(add)
+    add(readiness?.defaults.imageModel.primary)
+    readiness?.defaults.imageModel.fallbacks.forEach(add)
+    return map
+  }, [readiness])
+
+  function runtimeStateFor(item: RuntimeRef): RuntimeView {
+    const key = runtimeKey(item.ref, item.capability)
+    const local = runtimeResults[key]
+    if (local) {
+      return {
+        status: local.ok ? 'runtime_verified' : local.status,
+        summary: local.safeMessage || local.summary,
+        durationMs: local.durationMs,
+        runtimeVersion: local.runtimeVersion,
+        testedAt: local.testedAt,
+      }
+    }
+    return readinessRuntimeByKey.get(key) || {
+      status: 'runtime_unverified',
+      summary: 'Runtime test has not been run for this model',
+      durationMs: null,
+      runtimeVersion: null,
+      testedAt: null,
+    }
+  }
 
   const saveKeyMutation = useMutation({
     mutationFn: async () => {
@@ -443,6 +617,25 @@ export default function ModelPage() {
     },
   })
 
+  const runtimeTestMutation = useMutation({
+    mutationFn: (item: RuntimeRef) => testModelRuntime({
+      model: item.ref,
+      capability: item.capability,
+      mode: 'gateway',
+      refresh: true,
+    }),
+    onSuccess: async (result, item) => {
+      setRuntimeResults(prev => ({ ...prev, [runtimeKey(item.ref, item.capability)]: result }))
+      await qc.invalidateQueries({ queryKey: ['model-readiness'] })
+      if (result.ok) {
+        toast.success(`Runtime test ผ่าน: ${compactModel(item.ref)}`)
+      } else {
+        toast.error(result.safeMessage || result.summary || 'Runtime test ไม่ผ่าน')
+      }
+    },
+    onError: () => toast.error('Runtime test ไม่สำเร็จ'),
+  })
+
   const validateMutation = useMutation({
     mutationFn: () => putModelSettings(payload, true),
     onSuccess: async data => {
@@ -452,7 +645,11 @@ export default function ModelPage() {
     },
     onError: (error: unknown) => {
       setValidatedHash('')
-      const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Validate ไม่ผ่าน'
+      const data = (error as { response?: { data?: { error?: string; blockingIssues?: Array<{ summary?: string; ref?: string }> } } })?.response?.data
+      const firstIssue = data?.blockingIssues?.[0]
+      const message = firstIssue
+        ? `${data?.error || 'Validate ไม่ผ่าน'}: ${firstIssue.ref ? `${firstIssue.ref} ` : ''}${firstIssue.summary || ''}`
+        : data?.error || 'Validate ไม่ผ่าน'
       toast.error(message)
     },
   })
@@ -467,7 +664,11 @@ export default function ModelPage() {
       toast.success(`บันทึก model settings แล้ว${data.write?.backupId ? ` · backup ${data.write.backupId}` : ''}`)
     },
     onError: (error: unknown) => {
-      const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Save ไม่สำเร็จ'
+      const data = (error as { response?: { data?: { error?: string; blockingIssues?: Array<{ summary?: string; ref?: string }> } } })?.response?.data
+      const firstIssue = data?.blockingIssues?.[0]
+      const message = firstIssue
+        ? `${data?.error || 'Save ไม่สำเร็จ'}: ${firstIssue.ref ? `${firstIssue.ref} ` : ''}${firstIssue.summary || ''}`
+        : data?.error || 'Save ไม่สำเร็จ'
       toast.error(message)
     },
   })
@@ -486,6 +687,26 @@ export default function ModelPage() {
     } catch {
       toast.error('Refresh readiness ไม่สำเร็จ')
     }
+  }
+
+  async function testRuntimeRefs(items: RuntimeRef[], validateAfter = false) {
+    const refs = items.filter(item => item.ref)
+    if (!refs.length) {
+      toast.warning('เลือก model ก่อนทดสอบ runtime')
+      return
+    }
+    let failed = 0
+    for (const item of refs) {
+      const result = await runtimeTestMutation.mutateAsync(item)
+      if (!result.ok) failed += 1
+    }
+    if (failed) {
+      toast.error(`Runtime test ไม่ผ่าน ${failed} รายการ`)
+      setValidatedHash('')
+      return
+    }
+    toast.success('Runtime test ผ่านทุก model ใน draft')
+    if (validateAfter) validateMutation.mutate()
   }
 
   async function startOAuth() {
@@ -768,7 +989,14 @@ export default function ModelPage() {
             <p className="text-sm text-zinc-500">Validate ต้องผ่านก่อน Save เพื่อกันค่า model ที่ไม่มีจริงหรือ image model ที่ไม่รองรับรูป</p>
           </CardHeader>
           <CardContent>
-            <Tabs value={section} onValueChange={value => setTab(value as Section)} className="space-y-5">
+            <RuntimeVerificationPanel
+              refs={runtimeRefs}
+              stateFor={runtimeStateFor}
+              onTestOne={item => runtimeTestMutation.mutate(item)}
+              onTestAll={() => testRuntimeRefs(runtimeRefs, true)}
+              testing={runtimeTestMutation.isPending || validateMutation.isPending}
+            />
+            <Tabs value={section} onValueChange={value => setTab(value as Section)} className="mt-5 space-y-5">
               <TabsList className="w-full flex-wrap justify-start">
                 <TabsTrigger value="primary"><Zap className="size-4" />Primary Model</TabsTrigger>
                 <TabsTrigger value="fallbacks"><Layers className="size-4" />Fallback Models</TabsTrigger>
@@ -784,12 +1012,20 @@ export default function ModelPage() {
                     setValidatedHash('')
                   }}
                 />
+                <Button type="button" variant="outline" onClick={() => primary && runtimeTestMutation.mutate({ role: 'Primary model', ref: primary, capability: 'text' })} disabled={!primary || runtimeTestMutation.isPending}>
+                  <PlayCircle className="size-4" />
+                  Test selected primary
+                </Button>
               </TabsContent>
 
               <TabsContent value="fallbacks" className="space-y-4">
                 <ModelPicker label="Add fallback model" value={fallbackDraft} onChange={setFallbackDraft} />
                 <Button type="button" variant="outline" onClick={() => addFallback(false)} disabled={!fallbackDraft}>
                   Add fallback
+                </Button>
+                <Button type="button" variant="outline" onClick={() => testRuntimeRefs(fallbacks.map((ref, index) => ({ role: `Fallback ${index + 1}`, ref, capability: 'text' as const })))} disabled={!fallbacks.length || runtimeTestMutation.isPending}>
+                  <PlayCircle className="size-4" />
+                  Test fallback chain
                 </Button>
                 <div className="space-y-2">
                   {fallbacks.length === 0 && (
@@ -825,6 +1061,10 @@ export default function ModelPage() {
                     setValidatedHash('')
                   }}
                 />
+                <Button type="button" variant="outline" onClick={() => testRuntimeRefs([{ role: 'Image primary', ref: imagePrimary, capability: 'image' }, ...imageFallbacks.map((ref, index) => ({ role: `Image fallback ${index + 1}`, ref, capability: 'image' as const }))])} disabled={!imagePrimary || runtimeTestMutation.isPending}>
+                  <PlayCircle className="size-4" />
+                  Test image chain
+                </Button>
                 <div className="max-w-xs space-y-1">
                   <label className="text-sm font-medium" htmlFor="image-timeout">Image timeout (ms)</label>
                   <Input
@@ -873,6 +1113,10 @@ export default function ModelPage() {
                   <Button type="button" variant="outline" onClick={() => validateMutation.mutate()} disabled={!primary || validateMutation.isPending}>
                     <ShieldCheck className="size-4" />
                     {validateMutation.isPending ? 'Validating...' : 'Validate'}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => testRuntimeRefs(runtimeRefs, true)} disabled={!primary || runtimeTestMutation.isPending || validateMutation.isPending}>
+                    <PlayCircle className="size-4" />
+                    Test all + Validate
                   </Button>
                   <Button type="button" onClick={() => saveSettingsMutation.mutate()} disabled={!draftValidated || saveSettingsMutation.isPending}>
                     <Save className="size-4" />
