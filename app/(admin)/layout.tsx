@@ -12,16 +12,20 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const isChat = session.role === 'chat'
 
   return (
-    <div className="h-screen flex overflow-hidden">
+    <div className="flex h-screen overflow-hidden">
       <QueryProvider>
-        {!isChat && <Sidebar role={session.role} username={session.username} displayName={session.displayName} />}
+        {!isChat && (
+          <div className="hidden lg:flex">
+            <Sidebar role={session.role} username={session.username} displayName={session.displayName} />
+          </div>
+        )}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {!isChat && (
-            <header className="shrink-0 border-b px-6 py-3 bg-white dark:bg-zinc-950">
+            <header className="shrink-0 border-b bg-white px-4 py-3 dark:bg-zinc-950 sm:px-6">
               <Breadcrumb />
             </header>
           )}
-          <div className={`flex-1 ${isChat ? 'overflow-hidden' : 'overflow-y-auto p-6'}`}>
+          <div className={`flex-1 ${isChat ? 'overflow-hidden' : 'overflow-y-auto p-4 sm:p-6'}`}>
             {children}
           </div>
         </main>

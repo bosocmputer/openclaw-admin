@@ -417,16 +417,20 @@ function AdvisorModelRow({
   state: RuntimeView
 }) {
   return (
-    <div className="grid gap-2 rounded-md border px-3 py-2 text-xs sm:grid-cols-[92px_1fr_auto] sm:items-center">
-      <div className="flex items-center gap-2">
-        <RuntimeBadge status={state.status} />
-        <span className="text-zinc-500">{item.capability}</span>
+    <div className="rounded-md border px-3 py-3 text-xs">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <RuntimeBadge status={state.status} />
+            <span className="font-medium">{item.role}</span>
+            <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300">
+              {item.capability}
+            </span>
+          </div>
+          <p className="break-all font-mono leading-relaxed text-zinc-600 dark:text-zinc-300">{item.ref}</p>
+        </div>
+        <p className="text-zinc-500 md:max-w-[260px] md:text-right">{state.summary}</p>
       </div>
-      <div className="min-w-0">
-        <p className="truncate font-medium">{item.role}</p>
-        <p className="break-all font-mono text-zinc-600 dark:text-zinc-300">{item.ref}</p>
-      </div>
-      <p className="text-zinc-500 sm:max-w-[220px] sm:text-right">{state.summary}</p>
     </div>
   )
 }
@@ -471,12 +475,12 @@ function ModelAdvisor({
               เลือก model จากผลทดสอบจริง ไม่ใช่จาก catalog อย่างเดียว: key ต้องพร้อม, model ต้องมีอยู่จริง, และ OpenClaw runtime ต้องเรียกได้สำเร็จ
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={onApplyText} disabled={testing}>
+          <div className="grid gap-2 sm:flex sm:flex-wrap">
+            <Button type="button" className="w-full sm:w-auto" onClick={onApplyText} disabled={testing}>
               <Zap className="size-4" />
               Apply recommended text
             </Button>
-            <Button type="button" variant="outline" onClick={onTestText} disabled={testing}>
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onTestText} disabled={testing}>
               <PlayCircle className="size-4" />
               Test text chain
             </Button>
@@ -486,7 +490,7 @@ function ModelAdvisor({
       <CardContent className="space-y-4">
         <div className="grid gap-3 lg:grid-cols-3">
           <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">Recommended text setup</p>
               <Badge variant={textReady ? 'default' : 'secondary'}>{textReady ? 'Ready' : 'Needs test'}</Badge>
             </div>
@@ -497,7 +501,7 @@ function ModelAdvisor({
           </div>
 
           <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">Image understanding</p>
               <Badge variant={imageReady ? 'default' : 'destructive'}>{imageReady ? 'Ready' : 'Not ready'}</Badge>
             </div>
@@ -506,19 +510,19 @@ function ModelAdvisor({
                 ? 'OpenClaw runtime ยังไม่รับ image input สำหรับชุด OpenRouter ที่ทดสอบ จึงไม่ควร save เป็น production image model'
                 : 'ต้องมี image model ที่ผ่าน runtime test ก่อนเปิดใช้กับลูกค้าที่ส่งรูปสินค้า'}
             </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={onTestImage} disabled={testing || imageRefs.length === 0}>
+            <div className="mt-2 grid gap-2 sm:flex sm:flex-wrap">
+              <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={onTestImage} disabled={testing || imageRefs.length === 0}>
                 <PlayCircle className="size-4" />
                 Test image chain
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={onClearImage} disabled={testing}>
+              <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={onClearImage} disabled={testing}>
                 Disable image config
               </Button>
             </div>
           </div>
 
           <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">Admin rule</p>
               <Badge variant="secondary">Safe default</Badge>
             </div>
@@ -971,16 +975,12 @@ export default function ModelPage() {
             ให้ระบบช่วยเลือก model ที่ใช้ได้จริงกับ OpenClaw runtime ก่อนค่อย save เข้า production
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={applyRecommendedOpenRouterText}>
-            <Zap className="size-4" />
-            Apply recommended text
-          </Button>
-          <Button variant="outline" onClick={refreshReadiness} disabled={readinessFetching}>
+        <div className="grid gap-2 sm:flex sm:flex-wrap">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={refreshReadiness} disabled={readinessFetching}>
             <RefreshCw className={`size-4 ${readinessFetching ? 'animate-spin' : ''}`} />
             Refresh readiness
           </Button>
-          <Button variant="outline" onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
             <RotateCcw className="size-4" />
             Restart Gateway
           </Button>
