@@ -17,6 +17,7 @@ import {
   type ModelImageUploadPayload,
   type ModelMessageTestResult,
   type ModelRuntimeTestResult,
+  type ModelSettingsResult,
   type ModelSettingsPayload,
   type OpenRouterModel,
   type ProviderConfig,
@@ -199,12 +200,18 @@ function ModelPicker({
   onChange,
   imageOnly = false,
   disabled = false,
+  recommendedRefs = [],
+  textTestResults,
+  runtimeStateForRef,
 }: {
   label: string
   value: string
   onChange: (next: string) => void
   imageOnly?: boolean
   disabled?: boolean
+  recommendedRefs?: string[]
+  textTestResults?: Record<string, ModelMessageTestResult>
+  runtimeStateForRef?: (ref: string) => string
 }) {
   const initialProvider = providerFromRef(value)
   const [fallbackProvider, setFallbackProvider] = useState<ProviderConfig>(initialProvider)
@@ -222,6 +229,8 @@ function ModelPicker({
   })
 
   const selected = catalog?.models?.find(model => model.id === modelId)
+  const selectedTest = value ? textTestResults?.[value] : undefined
+  const selectedRuntimeState = value && runtimeStateForRef ? runtimeStateForRef(value) : undefined
   const visibleModels = useMemo(() => {
     const models = catalog?.models || []
     return imageOnly ? models.filter(isImageCapable) : models
@@ -320,7 +329,11 @@ function ModelPicker({
                     <div className="flex min-w-0 items-center gap-2">
                       <Check className={`size-4 shrink-0 ${active ? 'opacity-100' : 'opacity-0'}`} />
                       <div className="min-w-0">
-                        <p className="truncate">{model.name || model.id}</p>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <p className="truncate">{model.name || model.id}</p>
+                          {recommendedRefs.includes(ref) && <Badge variant="secondary" className="h-5 text-[10px]">แนะนำ</Badge>}
+                          {textTestResults?.[ref]?.ok && <Badge className="h-5 text-[10px]">ทดสอบผ่าน</Badge>}
+                        </div>
                         <p className="truncate font-mono text-xs text-muted-foreground">{ref}</p>
                       </div>
                     </div>
@@ -340,7 +353,19 @@ function ModelPicker({
 
       {value && (
         <div className="rounded-md border px-3 py-2 text-xs">
-          <p className="break-all font-mono">{value}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {recommendedRefs.includes(value) && <Badge variant="secondary">แนะนำ</Badge>}
+            {selectedTest ? (
+              <Badge variant={selectedTest.ok ? 'default' : 'destructive'}>
+                {selectedTest.ok ? 'ทดสอบผ่าน' : statusLabel(selectedTest.status)}
+              </Badge>
+            ) : selectedRuntimeState ? (
+              <Badge variant={isRuntimeVerified(selectedRuntimeState) ? 'default' : 'secondary'}>
+                {isRuntimeVerified(selectedRuntimeState) ? 'เคยทดสอบผ่าน' : statusLabel(selectedRuntimeState)}
+              </Badge>
+            ) : null}
+          </div>
+          <p className="mt-2 break-all font-mono">{value}</p>
           {selected && formatPrice(selected) && <p className="mt-1 text-muted-foreground">{formatPrice(selected)}</p>}
         </div>
       )}
@@ -550,6 +575,7 @@ export default function ModelPage() {
   const [progressNowMs, setProgressNowMs] = useState(Date.now())
   const [deleteKeyDialogOpen, setDeleteKeyDialogOpen] = useState(false)
   const [restartDialogOpen, setRestartDialogOpen] = useState(false)
+  const [overrideSaveDialogOpen, setOverrideSaveDialogOpen] = useState(false)
   const messageAbortRef = useRef<AbortController | null>(null)
   const imageAbortRef = useRef<AbortController | null>(null)
 
@@ -631,6 +657,13 @@ export default function ModelPage() {
     && hasDraftChanges
     && !messageTesting
     && !imageTesting
+  const canOverrideSave = Boolean(primary)
+    && !missingTextProvider
+    && !keyChanged
+    && hasDraftChanges
+    && !messageTesting
+    && !imageTesting
+    && !canSave
   const saveReason = !primary
     ? 'เลือก Model หลักก่อน'
     : missingTextProvider
@@ -638,9 +671,9 @@ export default function ModelPage() {
       : keyChanged
         ? 'บันทึก key ที่แก้ไขไว้ก่อน'
         : !textModelsReady
-          ? `ทดสอบ Model ข้อความให้ผ่านก่อน (${unverifiedTextModels.length} ตัว)`
+          ? `เลือกไว้ได้ แต่ยังไม่ผ่านการทดสอบ (${unverifiedTextModels.length} ตัว)`
           : !imageReady
-            ? 'ทดสอบ Model รูปภาพ หรือปิดไว้ก่อน'
+            ? 'Model รูปภาพยังไม่ผ่านการทดสอบ'
             : !hasDraftChanges
               ? 'ยังไม่มีการเปลี่ยนแปลง'
               : ''
@@ -715,14 +748,15 @@ export default function ModelPage() {
     },
   })
 
-  const saveSettingsMutation = useMutation({
-    mutationFn: () => putModelSettings(payload, false),
+  const saveSettingsMutation = useMutation<ModelSettingsResult, unknown, boolean | undefined>({
+    mutationFn: (allowRuntimeOverride) => putModelSettings(payload, false, Boolean(allowRuntimeOverride)),
     onSuccess: async data => {
       qc.setQueryData(['model-readiness'], data.readiness)
       await qc.invalidateQueries({ queryKey: ['config'] })
       setSavedHash(currentHash)
       setShowRestartHint(true)
-      toast.success(`บันทึก model settings แล้ว${data.write?.backupId ? ` · backup ${data.write.backupId}` : ''}`)
+      setOverrideSaveDialogOpen(false)
+      toast.success(`${data.runtimeOverride ? 'บันทึกแบบยอมรับความเสี่ยงแล้ว' : 'บันทึก model settings แล้ว'}${data.write?.backupId ? ` · backup ${data.write.backupId}` : ''}`)
     },
     onError: (error: unknown) => {
       const data = (error as { response?: { data?: { error?: string; blockingIssues?: Array<{ summary?: string; ref?: string }> } } })?.response?.data
@@ -965,7 +999,7 @@ export default function ModelPage() {
           <div className="max-w-2xl">
             <h1 className="text-2xl font-semibold tracking-tight">ตั้งค่า Model และ Provider</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              ตั้ง key, เลือก model, ทดสอบจาก runtime จริง แล้วบันทึกให้ Gateway ใช้กับ chatbot
+              ใส่ key, เลือก model เองจาก provider ที่มี, ทดสอบจาก runtime จริง แล้วบันทึกให้ Gateway ใช้กับ chatbot
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1094,7 +1128,7 @@ export default function ModelPage() {
         <div className="flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h2 className="text-base font-semibold">Model ข้อความ</h2>
-            <p className="text-sm text-muted-foreground">เลือก model ที่ใช้ตอบแชท แล้วกดทดสอบ model แต่ละตัวก่อนบันทึก</p>
+            <p className="text-sm text-muted-foreground">เลือก model ได้เองทั้งหมด ชุดแนะนำเป็นเพียง shortcut สำหรับเริ่มต้น</p>
           </div>
           <div className="grid gap-2 sm:min-w-[360px]">
             <label htmlFor="model-test-prompt" className="text-xs font-medium text-muted-foreground">ข้อความทดสอบ</label>
@@ -1117,17 +1151,17 @@ export default function ModelPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h3 className="text-base font-medium">Model หลัก</h3>
-                <p className="text-sm text-muted-foreground">บังคับเลือก ใช้ตอบ chat ปกติ</p>
+                <p className="text-sm text-muted-foreground">บังคับเลือก ใช้ตอบ chat ปกติ เลือก provider แล้วค้นหา model ที่ต้องการได้เลย</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-muted-foreground">ชุดแนะนำ</span>
+                <span className="text-xs font-medium text-muted-foreground">shortcut</span>
                 <Button type="button" variant="outline" size="sm" onClick={applyOpenRouterRecommended}>
                   <CheckCircle2 className="size-4" />
-                  ใช้ OpenRouter
+                  ใส่ชุด OpenRouter แนะนำ
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={applyKiloRecommended}>
                   <CheckCircle2 className="size-4" />
-                  ใช้ Kilo AI
+                  ใส่ชุด Kilo แนะนำ
                 </Button>
               </div>
             </div>
@@ -1135,6 +1169,12 @@ export default function ModelPage() {
               label="เลือก Model หลัก"
               value={primary}
               onChange={setPrimary}
+              recommendedRefs={[
+                OPENROUTER_RECOMMENDED.primary,
+                KILO_RECOMMENDED.primary,
+              ]}
+              textTestResults={textTestResults}
+              runtimeStateForRef={ref => runtimeState(ref, 'text')}
             />
             {primary && (
               <TextModelTestPanel
@@ -1154,7 +1194,17 @@ export default function ModelPage() {
               <p className="text-sm text-muted-foreground">ไม่บังคับ ใช้เมื่อ model หลัก timeout หรือ error</p>
             </div>
             <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
-              <ModelPicker label="เพิ่ม Model สำรอง" value={fallbackDraft} onChange={setFallbackDraft} />
+              <ModelPicker
+                label="เพิ่ม Model สำรอง"
+                value={fallbackDraft}
+                onChange={setFallbackDraft}
+                recommendedRefs={[
+                  ...OPENROUTER_RECOMMENDED.fallbacks,
+                  ...KILO_RECOMMENDED.fallbacks,
+                ]}
+                textTestResults={textTestResults}
+                runtimeStateForRef={ref => runtimeState(ref, 'text')}
+              />
               <Button type="button" variant="outline" className="min-h-11" onClick={addFallback} disabled={!fallbackDraft}>
                 <Plus className="size-4" />
                 เพิ่ม
@@ -1268,6 +1318,8 @@ export default function ModelPage() {
                     setImagePrimary(value)
                     resetImageTest()
                   }}
+                  recommendedRefs={[OPENROUTER_RECOMMENDED.imagePrimary]}
+                  runtimeStateForRef={ref => runtimeState(ref, 'image')}
                 />
                 <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
                   <div className="space-y-2">
@@ -1381,7 +1433,7 @@ export default function ModelPage() {
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
               {saveReason ? (
                 <>
-                  <Badge variant="secondary">ยังบันทึกไม่ได้</Badge>
+                  <Badge variant="secondary">บันทึกปกติยังไม่พร้อม</Badge>
                   <span className="text-muted-foreground">{saveReason}</span>
                 </>
               ) : (
@@ -1392,10 +1444,22 @@ export default function ModelPage() {
               )}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={() => saveSettingsMutation.mutate()} disabled={!canSave || saveSettingsMutation.isPending}>
+              <Button type="button" onClick={() => saveSettingsMutation.mutate(false)} disabled={!canSave || saveSettingsMutation.isPending}>
                 <Save className="size-4" />
                 {saveSettingsMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกค่า Model'}
               </Button>
+              {canOverrideSave && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/25"
+                  onClick={() => setOverrideSaveDialogOpen(true)}
+                  disabled={saveSettingsMutation.isPending}
+                >
+                  <AlertTriangle className="size-4" />
+                  บันทึกแบบยอมรับความเสี่ยง
+                </Button>
+              )}
               <Button type="button" variant="outline" onClick={confirmRestartGateway} disabled={restartMutation.isPending}>
                 <RotateCcw className="size-4" />
                 Restart Gateway
@@ -1405,7 +1469,10 @@ export default function ModelPage() {
 
           {unverifiedTextModels.length ? (
             <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm">
-              <p className="font-medium">Model ข้อความที่ยังต้องทดสอบ</p>
+              <p className="font-medium">Model ที่เลือกไว้แล้วยังไม่ผ่านการทดสอบ</p>
+              <p className="mt-1 text-muted-foreground">
+                ยังเลือก model เหล่านี้ได้ แต่ควรกดทดสอบก่อนใช้จริง ถ้าตั้งใจใช้ทันทีให้ใช้ปุ่มบันทึกแบบยอมรับความเสี่ยง
+              </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {unverifiedTextModels.map(model => (
                   <Badge key={model} variant="secondary" className="max-w-full break-all font-mono text-[11px]">
@@ -1484,6 +1551,44 @@ export default function ModelPage() {
             >
               <RotateCcw className="size-4" />
               {restartMutation.isPending ? 'กำลัง restart...' : 'Restart Gateway'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={overrideSaveDialogOpen} onOpenChange={setOverrideSaveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>บันทึกโดยไม่รอผลทดสอบครบ?</DialogTitle>
+            <DialogDescription>
+              ใช้เมื่อคุณตั้งใจเลือก model เองและยอมรับว่าบางตัวอาจ timeout หรือ runtime เรียกไม่ได้จริง ระบบยังจะตรวจ key และ catalog ก่อนบันทึก
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
+              หลังบันทึกแล้วควรทดสอบ Telegram ทันที ถ้า bot ไม่ตอบให้กลับมาเลือก model ที่ทดสอบผ่าน หรือใช้ชุดแนะนำ
+            </div>
+            <div className="space-y-2 rounded-md border bg-muted/30 px-3 py-3 text-sm">
+              <p className="font-medium">Model ที่จะบันทึก</p>
+              <p className="break-all font-mono text-xs">Primary: {primary}</p>
+              {fallbacks.map((model, index) => (
+                <p key={model} className="break-all font-mono text-xs">Fallback {index + 1}: {model}</p>
+              ))}
+              {imagePrimary && <p className="break-all font-mono text-xs">Image: {imagePrimary}</p>}
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" disabled={saveSettingsMutation.isPending} />}>
+              ยกเลิก
+            </DialogClose>
+            <Button
+              type="button"
+              className="bg-amber-600 text-white hover:bg-amber-700"
+              onClick={() => saveSettingsMutation.mutate(true)}
+              disabled={saveSettingsMutation.isPending}
+            >
+              <AlertTriangle className="size-4" />
+              {saveSettingsMutation.isPending ? 'กำลังบันทึก...' : 'ยืนยันบันทึก'}
             </Button>
           </DialogFooter>
         </DialogContent>
