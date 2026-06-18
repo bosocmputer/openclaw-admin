@@ -442,16 +442,6 @@ function RuntimeVerificationPanel({
   )
 }
 
-function ChainSummary({ title, primary, fallbackCount }: { title: string; primary?: string; fallbackCount?: number }) {
-  return (
-    <div className="rounded-md border px-3 py-2">
-      <p className="text-xs text-zinc-500">{title}</p>
-      <p className="mt-1 truncate font-mono text-sm">{primary || '-'}</p>
-      <p className="mt-1 text-xs text-zinc-500">{fallbackCount || 0} fallback model(s)</p>
-    </div>
-  )
-}
-
 function AdvisorModelRow({
   item,
   state,
@@ -820,11 +810,11 @@ function AdminModelSetup({
   const kiloReady = kiloVerifiedCount > 0
 
   const nextActions = []
-  if (!primary) nextActions.push('เลือกหรือ apply ชุด model สำหรับข้อความ')
-  else if (!textReady) nextActions.push('กด Test current text models ให้ผ่านก่อน')
-  else if (!draftValidated) nextActions.push('กด Validate เพื่อตรวจ config ก่อนบันทึก')
-  else if (!readinessOk) nextActions.push('กด Save settings แล้ว restart gateway')
-  if (imageConfigured && !imageReady) nextActions.push('รูปสินค้ายังไม่พร้อม: ปิด image config หรือเลือก model ที่ผ่านจริง')
+  if (!primary) nextActions.push('เลือกหรือใช้ชุด model แนะนำสำหรับข้อความ')
+  else if (!textReady) nextActions.push('กดทดสอบแชทให้ผ่านก่อน')
+  else if (!draftValidated) nextActions.push('กดตรวจสอบก่อนบันทึก')
+  else if (!readinessOk) nextActions.push('กดบันทึกค่า แล้วรีสตาร์ท Gateway')
+  if (imageConfigured && !imageReady) nextActions.push('รูปสินค้ายังไม่พร้อม: ปิดการอ่านรูป หรือเลือก model ที่ทดสอบผ่าน')
   if (!kiloHasKey) nextActions.push('ถ้าจะใช้ Kilo ให้บันทึก Kilo key ใน Advanced')
   const visibleActions = nextActions.slice(0, 4)
 
@@ -838,19 +828,19 @@ function AdminModelSetup({
               Model Setup
             </CardTitle>
             <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-300">
-              สำหรับ admin ทั่วไป ให้ทำตามแถวนี้ก่อน: เลือกชุด model, ทดสอบ, validate, save แล้ว restart.
+              สำหรับ admin ทั่วไป ให้ทำตามแถวนี้ก่อน: เลือกชุด model, ทดสอบใช้งานจริง, ตรวจสอบ, บันทึก แล้วรีสตาร์ท.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={onApplyOpenRouter} disabled={testing || saving}>
+            <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onApplyOpenRouter} disabled={testing || saving}>
               <Zap className="size-4" />
               ใช้ OpenRouter แนะนำ
             </Button>
-            <Button type="button" variant="outline" onClick={onFindKilo} disabled={testing || !kiloHasKey || kiloCatalog?.status !== 'ready'}>
+            <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onFindKilo} disabled={testing || !kiloHasKey || kiloCatalog?.status !== 'ready'}>
               <PlayCircle className="size-4" />
               หา Kilo ที่ใช้ได้
             </Button>
-            <Button type="button" onClick={onApplyKilo} disabled={testing || !kiloReady}>
+            <Button type="button" className="min-h-11 sm:min-h-9" onClick={onApplyKilo} disabled={testing || !kiloReady}>
               <CheckCircle2 className="size-4" />
               ใช้ Kilo ที่ผ่านแล้ว
             </Button>
@@ -865,15 +855,15 @@ function AdminModelSetup({
             badge={textReady ? 'พร้อมใช้' : textFailed ? 'ต้องแก้' : 'ต้องทดสอบ'}
           >
             <p className="break-all font-mono text-xs">{primary || 'ยังไม่เลือก primary model'}</p>
-            <p className="mt-1">{fallbackCount} fallback model(s)</p>
+            <p className="mt-1">มี model สำรอง {fallbackCount} ตัว</p>
           </SetupStatusCard>
           <SetupStatusCard
             title="Kilo AI"
             status={kiloReady ? 'ready' : kiloHasKey ? 'warn' : 'idle'}
-            badge={kiloReady ? `${kiloVerifiedCount} ใช้ได้` : kiloHasKey ? 'รอ test' : 'ยังไม่มี key'}
+            badge={kiloReady ? `${kiloVerifiedCount} ใช้ได้` : kiloHasKey ? 'รอทดสอบ' : 'ยังไม่มี key'}
           >
             <p>{catalogSummary(kiloCatalog, PROVIDERS.find(provider => provider.id === 'kilocode'))}</p>
-            <p className="mt-1">ใช้กับ production หลัง runtime verified เท่านั้น</p>
+            <p className="mt-1">ใช้กับ production หลังทดสอบใช้งานจริงผ่านเท่านั้น</p>
           </SetupStatusCard>
           <SetupStatusCard
             title="รูปสินค้า"
@@ -881,7 +871,7 @@ function AdminModelSetup({
             badge={!imageConfigured ? 'ปิดอยู่' : imageReady ? 'พร้อมใช้' : imageFailed ? 'ยังใช้ไม่ได้' : 'ต้องทดสอบ'}
           >
             <p className="break-all font-mono text-xs">{imagePrimary || 'ไม่ได้ตั้ง image model'}</p>
-            <p className="mt-1">{imageFallbackCount} image fallback(s)</p>
+            <p className="mt-1">มี model อ่านรูปสำรอง {imageFallbackCount} ตัว</p>
           </SetupStatusCard>
         </div>
 
@@ -890,30 +880,30 @@ function AdminModelSetup({
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={readinessOk ? 'default' : 'secondary'}>{readinessOk ? 'พร้อมบันทึก' : 'ต้องตรวจเพิ่ม'}</Badge>
               <span className="text-sm text-zinc-600 dark:text-zinc-300">
-                {blockingCount} blocking issue(s), {warningCount} warning(s)
+                {blockingCount} ปัญหาที่บล็อก, {warningCount} คำเตือน
               </span>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={onTestText} disabled={!primary || testing}>
+              <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onTestText} disabled={!primary || testing}>
                 <PlayCircle className="size-4" />
-                Test current text models
+                ทดสอบแชท
               </Button>
-              <Button type="button" variant="outline" onClick={onValidate} disabled={!canValidate || validating}>
+              <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onValidate} disabled={!canValidate || validating}>
                 <ShieldCheck className="size-4" />
-                Validate
+                ตรวจสอบก่อนบันทึก
               </Button>
-              <Button type="button" onClick={onSave} disabled={!canSave || saving}>
+              <Button type="button" className="min-h-11 sm:min-h-9" onClick={onSave} disabled={!canSave || saving}>
                 <Save className="size-4" />
-                Save settings
+                บันทึกค่า
               </Button>
-              <Button type="button" variant="outline" onClick={onRestart} disabled={restarting}>
+              <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onRestart} disabled={restarting}>
                 <RotateCcw className="size-4" />
-                Restart gateway
+                รีสตาร์ท Gateway
               </Button>
               {imageConfigured && !imageReady && (
-                <Button type="button" variant="outline" onClick={onClearImage} disabled={testing || saving}>
+                <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={onClearImage} disabled={testing || saving}>
                   <ImageIcon className="size-4" />
-                  ปิด image config
+                  ปิดการอ่านรูป
                 </Button>
               )}
             </div>
@@ -1219,6 +1209,27 @@ export default function ModelPage() {
     onError: () => toast.error('บันทึก provider key ไม่สำเร็จ'),
   })
 
+  const deleteKeyMutation = useMutation({
+    mutationFn: async () => {
+      if (!config || providerForKey.noApiKey) return
+      const nextEnv = { ...(config.env || {}) }
+      delete nextEnv[providerForKey.envKey]
+      await putConfig({
+        ...config,
+        env: nextEnv,
+      })
+    },
+    onSuccess: async () => {
+      setApiKey('')
+      setTestResult('idle')
+      await qc.invalidateQueries({ queryKey: ['config'] })
+      await qc.invalidateQueries({ queryKey: ['model-readiness'] })
+      await qc.invalidateQueries({ queryKey: ['models-catalog'] })
+      toast.success(`ลบ ${providerForKey.label} key แล้ว`)
+    },
+    onError: () => toast.error('ลบ provider key ไม่สำเร็จ'),
+  })
+
   const testKeyMutation = useMutation({
     mutationFn: () => testProvider(providerForKey.id, apiKey.trim()),
     onSuccess: ok => {
@@ -1420,6 +1431,12 @@ export default function ModelPage() {
   const currentKey = config?.env?.[providerForKey.envKey] || ''
   const keyChanged = !providerForKey.noApiKey && apiKey.trim() !== currentKey
 
+  function confirmDeleteKey() {
+    if (!currentKey || providerForKey.noApiKey) return
+    const ok = window.confirm(`ลบ ${providerForKey.label} key ออกจากระบบใช่ไหม?`)
+    if (ok) deleteKeyMutation.mutate()
+  }
+
   function applyRecommendedOpenRouterText() {
     setPrimary(OPENROUTER_RECOMMENDED.primary)
     setFallbacks(OPENROUTER_RECOMMENDED.fallbacks)
@@ -1476,13 +1493,13 @@ export default function ModelPage() {
           </p>
         </div>
         <div className="grid gap-2 sm:flex sm:flex-wrap">
-          <Button variant="outline" className="w-full sm:w-auto" onClick={refreshReadiness} disabled={readinessFetching}>
+          <Button variant="outline" className="min-h-11 w-full sm:min-h-9 sm:w-auto" onClick={refreshReadiness} disabled={readinessFetching}>
             <RefreshCw className={`size-4 ${readinessFetching ? 'animate-spin' : ''}`} />
-            Refresh readiness
+            รีเฟรชสถานะ
           </Button>
-          <Button variant="outline" className="w-full sm:w-auto" onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
+          <Button variant="outline" className="min-h-11 w-full sm:min-h-9 sm:w-auto" onClick={() => restartMutation.mutate()} disabled={restartMutation.isPending}>
             <RotateCcw className="size-4" />
-            Restart Gateway
+            รีสตาร์ท Gateway
           </Button>
         </div>
       </div>
@@ -1523,9 +1540,9 @@ export default function ModelPage() {
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-sm font-medium">
               <Settings2 className="size-4" />
-              Advanced diagnostics
+              รายละเอียดการทดสอบ
             </p>
-            <p className="mt-1 text-xs text-zinc-500">เปิดเมื่ออยากดู runtime result, recommended chain และ Kilo shortlist แบบละเอียด</p>
+            <p className="mt-1 text-xs text-zinc-500">เปิดเมื่ออยากดูผลทดสอบจริง รายชื่อ model แนะนำ และรายการ Kilo แบบละเอียด</p>
           </div>
           <ChevronDown className="size-4 shrink-0 text-zinc-500 transition group-open:rotate-180" />
         </summary>
@@ -1552,23 +1569,6 @@ export default function ModelPage() {
           />
         </div>
       </details>
-
-      <div className="grid gap-3 md:grid-cols-3">
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm text-zinc-500">Readiness</p>
-                <p className="mt-1 text-2xl font-semibold">{readiness?.ok ? 'Ready' : 'Needs attention'}</p>
-              </div>
-              <ReadinessBadge status={readiness?.ok ? 'ready' : 'warn'} />
-            </div>
-            <p className="mt-2 text-xs text-zinc-500">{readiness?.blockingIssues.length || 0} blocking issue(s), {readiness?.warnings.length || 0} warning(s)</p>
-          </CardContent>
-        </Card>
-        <ChainSummary title="Default primary" primary={primary} fallbackCount={fallbacks.length} />
-        <ChainSummary title="Default image model" primary={imagePrimary || 'not configured'} fallbackCount={imageFallbacks.length} />
-      </div>
 
       {readiness?.blockingIssues.length ? (
         <Card className="border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20">
@@ -1612,7 +1612,7 @@ export default function ModelPage() {
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-sm font-medium">
               <KeyRound className="size-4" />
-              Advanced setup
+              ตั้งค่าขั้นสูง
             </p>
             <p className="mt-1 text-xs text-zinc-500">บันทึก provider key หรือเลือก model เองเมื่อชุดแนะนำยังไม่พอ</p>
           </div>
@@ -1624,9 +1624,9 @@ export default function ModelPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <KeyRound className="size-4" />
-                Provider Credentials
+                Provider Key
               </CardTitle>
-              <p className="text-sm text-zinc-500">บันทึก key ก่อน validate model catalog ถ้า provider ต้องใช้ key</p>
+              <p className="text-sm text-zinc-500">เพิ่ม ทดสอบ หรือลบ key ของ provider ที่เลือก</p>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid grid-cols-2 gap-1.5">
@@ -1670,14 +1670,25 @@ export default function ModelPage() {
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="outline" size="sm" onClick={() => testKeyMutation.mutate()} disabled={!apiKey.trim() || testKeyMutation.isPending}>
                       <ShieldCheck className="size-4" />
-                      Test key
+                      ทดสอบ key
                     </Button>
                     <Button type="button" size="sm" onClick={() => saveKeyMutation.mutate()} disabled={!keyChanged || saveKeyMutation.isPending}>
                       <Save className="size-4" />
-                      Save key
+                      บันทึก key
                     </Button>
-                    {testResult === 'ok' && <Badge>Key ok</Badge>}
-                    {testResult === 'fail' && <Badge variant="destructive">Key failed</Badge>}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30"
+                      onClick={confirmDeleteKey}
+                      disabled={!currentKey || deleteKeyMutation.isPending}
+                    >
+                      <Trash2 className="size-4" />
+                      ลบ key
+                    </Button>
+                    {testResult === 'ok' && <Badge>Key ใช้ได้</Badge>}
+                    {testResult === 'fail' && <Badge variant="destructive">Key ใช้ไม่ได้</Badge>}
                   </div>
                 </div>
               )}
