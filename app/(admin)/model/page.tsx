@@ -151,6 +151,10 @@ function runtimeStatusTone(status?: string) {
   return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
 }
 
+function isRuntimeVerified(status?: string) {
+  return status === 'runtime_verified' || status === 'ok'
+}
+
 function draftHash(payload: ModelSettingsPayload) {
   return JSON.stringify(payload)
 }
@@ -405,6 +409,144 @@ function ChainSummary({ title, primary, fallbackCount }: { title: string; primar
   )
 }
 
+function AdvisorModelRow({
+  item,
+  state,
+}: {
+  item: RuntimeRef
+  state: RuntimeView
+}) {
+  return (
+    <div className="grid gap-2 rounded-md border px-3 py-2 text-xs sm:grid-cols-[92px_1fr_auto] sm:items-center">
+      <div className="flex items-center gap-2">
+        <RuntimeBadge status={state.status} />
+        <span className="text-zinc-500">{item.capability}</span>
+      </div>
+      <div className="min-w-0">
+        <p className="truncate font-medium">{item.role}</p>
+        <p className="break-all font-mono text-zinc-600 dark:text-zinc-300">{item.ref}</p>
+      </div>
+      <p className="text-zinc-500 sm:max-w-[220px] sm:text-right">{state.summary}</p>
+    </div>
+  )
+}
+
+function ModelAdvisor({
+  textRefs,
+  imageRefs,
+  stateFor,
+  onApplyText,
+  onTestText,
+  onTestImage,
+  onClearImage,
+  testing,
+}: {
+  textRefs: RuntimeRef[]
+  imageRefs: RuntimeRef[]
+  stateFor: (ref: RuntimeRef) => RuntimeView
+  onApplyText: () => void
+  onTestText: () => void
+  onTestImage: () => void
+  onClearImage: () => void
+  testing: boolean
+}) {
+  const textStates = textRefs.map(item => ({ item, state: stateFor(item) }))
+  const imageStates = imageRefs.map(item => ({ item, state: stateFor(item) }))
+  const verifiedTextCount = textStates.filter(({ state }) => isRuntimeVerified(state.status)).length
+  const textReady = textRefs.length > 0 && verifiedTextCount === textRefs.length
+  const imageVerifiedCount = imageStates.filter(({ state }) => isRuntimeVerified(state.status)).length
+  const imageHasUnsupported = imageStates.some(({ state }) => state.status === 'not_image_capable')
+  const imageReady = imageRefs.length > 0 && imageVerifiedCount === imageRefs.length
+
+  return (
+    <Card className="border-sky-200 bg-sky-50/70 dark:border-sky-950 dark:bg-sky-950/20">
+      <CardHeader>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base text-sky-900 dark:text-sky-100">
+              <ShieldCheck className="size-4" />
+              Model Advisor
+            </CardTitle>
+            <p className="mt-1 max-w-3xl text-sm text-sky-800/80 dark:text-sky-200/80">
+              เลือก model จากผลทดสอบจริง ไม่ใช่จาก catalog อย่างเดียว: key ต้องพร้อม, model ต้องมีอยู่จริง, และ OpenClaw runtime ต้องเรียกได้สำเร็จ
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={onApplyText} disabled={testing}>
+              <Zap className="size-4" />
+              Apply recommended text
+            </Button>
+            <Button type="button" variant="outline" onClick={onTestText} disabled={testing}>
+              <PlayCircle className="size-4" />
+              Test text chain
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium">Recommended text setup</p>
+              <Badge variant={textReady ? 'default' : 'secondary'}>{textReady ? 'Ready' : 'Needs test'}</Badge>
+            </div>
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+              เหมาะกับ Telegram chat ทั่วไป: primary เร็ว, fallback สองชั้น, ค่าใช้จ่ายต่ำ และผ่าน runtime test ได้จริงเมื่อ verified ครบ
+            </p>
+            <p className="mt-2 text-xs text-zinc-500">{verifiedTextCount}/{textRefs.length} text model verified</p>
+          </div>
+
+          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium">Image understanding</p>
+              <Badge variant={imageReady ? 'default' : 'destructive'}>{imageReady ? 'Ready' : 'Not ready'}</Badge>
+            </div>
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+              {imageHasUnsupported
+                ? 'OpenClaw runtime ยังไม่รับ image input สำหรับชุด OpenRouter ที่ทดสอบ จึงไม่ควร save เป็น production image model'
+                : 'ต้องมี image model ที่ผ่าน runtime test ก่อนเปิดใช้กับลูกค้าที่ส่งรูปสินค้า'}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onTestImage} disabled={testing || imageRefs.length === 0}>
+                <PlayCircle className="size-4" />
+                Test image chain
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={onClearImage} disabled={testing}>
+                Disable image config
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-md border bg-white/80 px-3 py-3 dark:bg-zinc-950/40">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium">Admin rule</p>
+              <Badge variant="secondary">Safe default</Badge>
+            </div>
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+              แสดง model ที่ผ่านจริงก่อน ส่วน provider อื่นเช่น Kilo หรือ image model ให้ใช้ได้หลัง runtime test ผ่านเท่านั้น
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 xl:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-sky-900 dark:text-sky-100">Recommended text chain</p>
+            {textStates.map(({ item, state }) => (
+              <AdvisorModelRow key={`${item.capability}:${item.ref}`} item={item} state={state} />
+            ))}
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-sky-900 dark:text-sky-100">Image candidates</p>
+            {imageStates.map(({ item, state }) => (
+              <AdvisorModelRow key={`${item.capability}:${item.ref}`} item={item} state={state} />
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function AgentMatrix({ agents }: { agents: AgentModelReadiness[] }) {
   return (
     <Card>
@@ -537,6 +679,22 @@ export default function ModelPage() {
       return true
     })
   }, [fallbacks, imageFallbacks, imagePrimary, primary])
+  const recommendedTextRefs = useMemo<RuntimeRef[]>(() => ([
+    { role: 'Primary model', ref: OPENROUTER_RECOMMENDED.primary, capability: 'text' },
+    ...OPENROUTER_RECOMMENDED.fallbacks.map((ref, index) => ({
+      role: `Fallback ${index + 1}`,
+      ref,
+      capability: 'text' as const,
+    })),
+  ]), [])
+  const recommendedImageRefs = useMemo<RuntimeRef[]>(() => ([
+    { role: 'Image primary', ref: OPENROUTER_RECOMMENDED.imagePrimary, capability: 'image' },
+    ...OPENROUTER_RECOMMENDED.imageFallbacks.map((ref, index) => ({
+      role: `Image fallback ${index + 1}`,
+      ref,
+      capability: 'image' as const,
+    })),
+  ]), [])
 
   const readinessRuntimeByKey = useMemo(() => {
     const map = new Map<string, RuntimeView>()
@@ -780,18 +938,28 @@ export default function ModelPage() {
   const currentKey = config?.env?.[providerForKey.envKey] || ''
   const keyChanged = !providerForKey.noApiKey && apiKey.trim() !== currentKey
 
-  function applyRecommendedOpenRouter() {
+  function applyRecommendedOpenRouterText() {
     setPrimary(OPENROUTER_RECOMMENDED.primary)
     setFallbacks(OPENROUTER_RECOMMENDED.fallbacks)
-    setImagePrimary(OPENROUTER_RECOMMENDED.imagePrimary)
-    setImageFallbacks(OPENROUTER_RECOMMENDED.imageFallbacks)
-    setImageTimeoutMs(OPENROUTER_RECOMMENDED.imageTimeoutMs)
     setValidatedHash('')
     setSection('fallbacks')
     const url = new URL(window.location.href)
     url.searchParams.set('section', 'fallbacks')
     window.history.replaceState(null, '', url.toString())
-    toast.info('ใส่ชุด OpenRouter ที่แนะนำแล้ว กด Validate ก่อน Save')
+    toast.info('ใส่ชุด OpenRouter text ที่แนะนำแล้ว กด Test all + Validate ก่อน Save')
+  }
+
+  function clearImageConfig() {
+    setImagePrimary('')
+    setImageFallbacks([])
+    setImageFallbackDraft('')
+    setImageTimeoutMs(OPENROUTER_RECOMMENDED.imageTimeoutMs)
+    setValidatedHash('')
+    setSection('image')
+    const url = new URL(window.location.href)
+    url.searchParams.set('section', 'image')
+    window.history.replaceState(null, '', url.toString())
+    toast.info('ปิด image model draft แล้ว จนกว่าจะมี model ที่ runtime test ผ่าน')
   }
 
   return (
@@ -800,13 +968,13 @@ export default function ModelPage() {
         <div>
           <h1 className="text-2xl font-bold">Model Readiness</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            ตั้งค่า primary, fallback และ image understanding model ให้ตรงกับ OpenClaw 2026.6.8 พร้อม validate ก่อน save
+            ให้ระบบช่วยเลือก model ที่ใช้ได้จริงกับ OpenClaw runtime ก่อนค่อย save เข้า production
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={applyRecommendedOpenRouter}>
+          <Button variant="outline" onClick={applyRecommendedOpenRouterText}>
             <Zap className="size-4" />
-            Use OpenRouter recommended
+            Apply recommended text
           </Button>
           <Button variant="outline" onClick={refreshReadiness} disabled={readinessFetching}>
             <RefreshCw className={`size-4 ${readinessFetching ? 'animate-spin' : ''}`} />
@@ -818,6 +986,17 @@ export default function ModelPage() {
           </Button>
         </div>
       </div>
+
+      <ModelAdvisor
+        textRefs={recommendedTextRefs}
+        imageRefs={recommendedImageRefs}
+        stateFor={runtimeStateFor}
+        onApplyText={applyRecommendedOpenRouterText}
+        onTestText={() => testRuntimeRefs(recommendedTextRefs)}
+        onTestImage={() => testRuntimeRefs(recommendedImageRefs)}
+        onClearImage={clearImageConfig}
+        testing={runtimeTestMutation.isPending || validateMutation.isPending}
+      />
 
       <div className="grid gap-3 md:grid-cols-3">
         <Card>
