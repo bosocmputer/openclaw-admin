@@ -1583,13 +1583,9 @@ export default function ModelPage() {
             </div>
           )}
 
-          {readiness?.runtimeVerificationIssues?.length ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
-              <div className="flex items-center gap-2 font-medium">
-                <AlertTriangle className="size-4" />
-                ยังมี model ที่ runtime ไม่ได้ยืนยัน
-              </div>
-              <p className="mt-1">กดทดสอบที่กล่องของแต่ละ model หรือทดสอบอ่านรูปสินค้าถ้าเปิดใช้งาน</p>
+          {imageMode === 'chat_model' && imageTestResult && !imageTestResult.ok ? (
+            <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+              อ่านรูปสินค้าเป็นการทดสอบเพิ่มเติมด้วย Model หลักเท่านั้น ค่า Model ข้อความยังบันทึกและใช้งานได้ตามปกติ
             </div>
           ) : null}
       </section>
