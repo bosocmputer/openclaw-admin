@@ -113,11 +113,11 @@ function statusLabel(status?: string) {
   if (status === 'provider_error') return 'provider error'
   if (status === 'invalid_output') return 'ตอบผิดรูปแบบ'
   if (status === 'timeout') return 'timeout'
-  if (status === 'model_not_found') return 'runtime ใช้ไม่ได้'
+  if (status === 'model_not_found') return 'เรียกไม่ได้จริง'
   if (status === 'not_image_capable') return 'ไม่รองรับรูปภาพ'
   if (status === 'runtime_verified' || status === 'ok') return 'ทดสอบผ่าน'
   if (status === 'runtime_unverified') return 'ยังไม่ทดสอบ'
-  if (status === 'runtime_unavailable') return 'runtime ไม่พร้อม'
+  if (status === 'runtime_unavailable') return 'ระบบไม่พร้อม'
   return status || 'ไม่ทราบสถานะ'
 }
 
@@ -152,6 +152,18 @@ function runtimeKey(ref: string, capability: 'text' | 'image') {
 
 function isRuntimeVerified(status?: string) {
   return status === 'runtime_verified' || status === 'ok'
+}
+
+function imageResultModeLabel(result?: ModelRuntimeTestResult | null) {
+  if (!result?.targetMode) return ''
+  return result.targetMode === 'chat_model' ? 'ใช้ Model หลัก' : 'ใช้ Model อ่านรูปแยก'
+}
+
+function imageResultMessage(result: ModelRuntimeTestResult) {
+  if (result.ok) return 'Model นี้อ่านรูปได้'
+  if (result.status === 'not_image_capable') return 'Model นี้ยังอ่านรูปไม่ได้'
+  if (result.status === 'timeout') return 'ทดสอบช้าเกินเวลา'
+  return result.safeMessage || result.summary || 'ทดสอบอ่านรูปไม่ผ่าน'
 }
 
 function settingsHash(payload: ModelSettingsPayload) {
@@ -433,8 +445,8 @@ function TextModelTestPanel({
   const passed = Boolean(result?.ok)
 
   return (
-    <div className={`space-y-3 rounded-md border px-3 py-3 ${passed ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-950 dark:bg-emerald-950/20' : 'bg-muted/20'}`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className={`rounded-md border px-3 py-2.5 ${passed ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-950 dark:bg-emerald-950/15' : 'bg-background'}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={passed ? 'default' : result ? 'destructive' : 'secondary'}>
@@ -445,30 +457,30 @@ function TextModelTestPanel({
           <p className="break-all font-mono text-xs text-muted-foreground">{model}</p>
           {result?.safeMessage && (
             <p className={`text-sm ${passed ? 'text-emerald-700 dark:text-emerald-300' : 'text-destructive'}`}>
-              {result.safeMessage}
+              {passed ? 'Model นี้ตอบข้อความได้' : result.safeMessage}
             </p>
           )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           {testing ? (
-            <Button type="button" variant="outline" onClick={onCancel}>
+            <Button type="button" variant="outline" size="sm" onClick={onCancel}>
               <XCircle className="size-4" />
               ยกเลิก
             </Button>
           ) : null}
-          <Button type="button" variant={passed ? 'outline' : 'default'} onClick={onTest} disabled={testing}>
+          <Button type="button" variant="outline" size={passed ? 'sm' : 'default'} onClick={onTest} disabled={testing}>
             <PlayCircle className="size-4" />
             {testing ? `กำลังทดสอบ ${elapsedText}` : passed ? 'ทดสอบอีกครั้ง' : 'ทดสอบ model นี้'}
           </Button>
         </div>
       </div>
       {testing && (
-        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-950 dark:bg-sky-950/25 dark:text-sky-100">
-          กำลังเรียก OpenClaw runtime จริง โปรดรอผลทดสอบ
+        <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-950 dark:bg-sky-950/25 dark:text-sky-100">
+          กำลังทดสอบกับระบบจริง โปรดรอผลทดสอบ
         </div>
       )}
       {result?.outputPreview && (
-        <div className="rounded-md border bg-background/70 px-3 py-2 text-sm">
+        <div className="mt-3 border-t pt-3 text-sm">
           <p className="text-xs font-medium text-muted-foreground">ตัวอย่างคำตอบ</p>
           <p className="mt-1 break-words">{result.outputPreview}</p>
         </div>
@@ -657,7 +669,6 @@ export default function ModelPage() {
     return found?.runtimeStatus || 'runtime_unverified'
   }
 
-  const imageDraftExcluded = Boolean(imageMode === 'image_model' && imagePrimary && !imageReady)
   const canSave = Boolean(primary)
     && !missingTextProvider
     && textModelsReady
@@ -1008,22 +1019,23 @@ export default function ModelPage() {
   const primaryPassed = Boolean(primary && textModelReady(primary))
   const fallbackPassedCount = fallbacks.filter(model => textModelReady(model)).length
   const providerKeyCount = PROVIDERS.filter(provider => provider.noApiKey || config?.env?.[provider.envKey]).length
+  const imageTestPassed = Boolean(imageTestResult?.ok)
   const imageStateLabel = imageMode === 'off'
     ? 'ปิดอยู่'
     : imageMode === 'chat_model'
-      ? imageTestResult?.ok && imageTestResult.targetMode === 'chat_model' ? 'Model หลักผ่าน' : 'ใช้ Model หลัก'
+      ? imageTestPassed ? 'อ่านรูปผ่าน' : 'ใช้ Model หลัก'
       : imagePrimary
-        ? imageReady ? 'พร้อม' : 'รอทดสอบ'
+        ? imageTestPassed || imageReady ? 'อ่านรูปผ่าน' : 'รอทดสอบ'
         : 'ยังไม่เลือก'
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
+    <div className="mx-auto w-full max-w-7xl space-y-6">
       <div className="rounded-lg border bg-card">
         <div className="flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-2xl">
             <h1 className="text-2xl font-semibold tracking-tight">ตั้งค่า Model และ Provider</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              ใส่ key, เลือก model เองจาก provider ที่มี, ทดสอบจาก runtime จริง แล้วบันทึกให้ Gateway ใช้กับ chatbot
+              ใส่ key, เลือก model เองจาก provider ที่มี, ทดสอบใช้งานจริง แล้วบันทึกให้ Gateway ใช้กับ chatbot
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1127,7 +1139,7 @@ export default function ModelPage() {
                     <ShieldCheck className="size-4" />
                     ทดสอบ key
                   </Button>
-                  <Button type="button" onClick={() => saveKeyMutation.mutate()} disabled={!keyChanged || saveKeyMutation.isPending}>
+                  <Button type="button" variant="outline" onClick={() => saveKeyMutation.mutate()} disabled={!keyChanged || saveKeyMutation.isPending}>
                     <Save className="size-4" />
                     บันทึก key
                   </Button>
@@ -1149,109 +1161,125 @@ export default function ModelPage() {
       </section>
 
       <section className="overflow-hidden rounded-lg border bg-card">
-        <div className="flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h2 className="text-base font-semibold">Model ข้อความ</h2>
-            <p className="text-sm text-muted-foreground">เลือก model ได้เองทั้งหมด ชุดแนะนำเป็นเพียง shortcut สำหรับเริ่มต้น</p>
-          </div>
-          <div className="grid gap-2 sm:min-w-[360px]">
-            <label htmlFor="model-test-prompt" className="text-xs font-medium text-muted-foreground">ข้อความทดสอบ</label>
-            <Input
-              id="model-test-prompt"
-              value={testPrompt}
-              onChange={event => {
-                setTestPrompt(event.target.value)
-                resetTextTest()
-              }}
-              placeholder="เช่น สวัสดีครับ"
-              className="h-10"
-              disabled={messageTesting}
-            />
+        <div className="border-b px-5 py-4">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+            <div className="max-w-2xl">
+              <h2 className="text-base font-semibold">Model ข้อความ</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                เลือก model ที่ chatbot ใช้ตอบข้อความ แล้วกดทดสอบก่อนบันทึก
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-3 py-3">
+              <label htmlFor="model-test-prompt" className="text-xs font-medium text-muted-foreground">ข้อความที่ใช้ทดสอบทุก model</label>
+              <Input
+                id="model-test-prompt"
+                value={testPrompt}
+                onChange={event => {
+                  setTestPrompt(event.target.value)
+                  resetTextTest()
+                }}
+                placeholder="เช่น สวัสดีครับ"
+                className="mt-2 h-10 bg-background"
+                disabled={messageTesting}
+              />
+            </div>
           </div>
         </div>
 
-        <div className="grid gap-0 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-          <div className="space-y-4 border-b p-5 xl:border-b-0 xl:border-r">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="text-base font-medium">Model หลัก</h3>
-                <p className="text-sm text-muted-foreground">บังคับเลือก ใช้ตอบ chat ปกติ เลือก provider แล้วค้นหา model ที่ต้องการได้เลย</p>
-              </div>
+        <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.9fr)]">
+          <div className="space-y-5 border-b p-5 xl:border-b-0 xl:border-r">
+            <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-muted-foreground">shortcut</span>
-                <Button type="button" variant="outline" size="sm" onClick={applyOpenRouterRecommended}>
-                  <CheckCircle2 className="size-4" />
-                  ใส่ชุด OpenRouter แนะนำ
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={applyKiloRecommended}>
-                  <CheckCircle2 className="size-4" />
-                  ใส่ชุด Kilo แนะนำ
-                </Button>
+                <h3 className="text-base font-medium">Model หลัก</h3>
+                <Badge variant="secondary">บังคับ</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                ใช้ตอบ chat ปกติ เลือก provider แล้วค้นหา model ที่ต้องการได้เลย
+              </p>
+              <div className="flex flex-col gap-2 rounded-md bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-sm font-medium">ชุดแนะนำสำหรับเริ่มต้น</span>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={applyOpenRouterRecommended}>
+                    <CheckCircle2 className="size-4" />
+                    OpenRouter
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={applyKiloRecommended}>
+                    <CheckCircle2 className="size-4" />
+                    Kilo AI
+                  </Button>
+                </div>
               </div>
             </div>
-            <ModelPicker
-              label="เลือก Model หลัก"
-              value={primary}
-              onChange={value => {
-                setPrimary(value)
-                resetImageTest()
-              }}
-              recommendedRefs={[
-                OPENROUTER_RECOMMENDED.primary,
-                KILO_RECOMMENDED.primary,
-              ]}
-              textTestResults={textTestResults}
-              runtimeStateForRef={ref => runtimeState(ref, 'text')}
-            />
-            {primary && (
-              <TextModelTestPanel
-                model={primary}
-                result={textTestResults[primary]}
-                testing={textTestingModel === primary}
-                elapsedText={elapsedText}
-                onTest={() => void runTextModelTest(primary)}
-                onCancel={() => messageAbortRef.current?.abort()}
-              />
-            )}
-          </div>
-
-          <div className="space-y-4 bg-muted/10 p-5">
-            <div>
-              <h3 className="text-base font-medium">Model สำรอง</h3>
-              <p className="text-sm text-muted-foreground">ไม่บังคับ ใช้เมื่อ model หลัก timeout หรือ error</p>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div className="space-y-3">
               <ModelPicker
-                label="เพิ่ม Model สำรอง"
-                value={fallbackDraft}
-                onChange={setFallbackDraft}
+                label="เลือก Model หลัก"
+                value={primary}
+                onChange={value => {
+                  setPrimary(value)
+                  resetImageTest()
+                }}
                 recommendedRefs={[
-                  ...OPENROUTER_RECOMMENDED.fallbacks,
-                  ...KILO_RECOMMENDED.fallbacks,
+                  OPENROUTER_RECOMMENDED.primary,
+                  KILO_RECOMMENDED.primary,
                 ]}
                 textTestResults={textTestResults}
                 runtimeStateForRef={ref => runtimeState(ref, 'text')}
               />
-              <Button type="button" variant="outline" className="min-h-11" onClick={addFallback} disabled={!fallbackDraft}>
-                <Plus className="size-4" />
-                เพิ่ม
-              </Button>
+              {primary && (
+                <TextModelTestPanel
+                  model={primary}
+                  result={textTestResults[primary]}
+                  testing={textTestingModel === primary}
+                  elapsedText={elapsedText}
+                  onTest={() => void runTextModelTest(primary)}
+                  onCancel={() => messageAbortRef.current?.abort()}
+                />
+              )}
             </div>
-            <div className="space-y-2">
+          </div>
+
+          <div className="space-y-5 bg-muted/10 p-5">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-medium">Model สำรอง</h3>
+                <Badge variant="secondary">ไม่บังคับ</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                ใช้เมื่อ model หลัก timeout หรือ error เรียงจากตัวที่อยากให้ลองก่อน
+              </p>
+              <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+                <ModelPicker
+                  label="เพิ่ม Model สำรอง"
+                  value={fallbackDraft}
+                  onChange={setFallbackDraft}
+                  recommendedRefs={[
+                    ...OPENROUTER_RECOMMENDED.fallbacks,
+                    ...KILO_RECOMMENDED.fallbacks,
+                  ]}
+                  textTestResults={textTestResults}
+                  runtimeStateForRef={ref => runtimeState(ref, 'text')}
+                />
+                <Button type="button" variant="outline" className="min-h-11" onClick={addFallback} disabled={!fallbackDraft}>
+                  <Plus className="size-4" />
+                  เพิ่ม
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-3">
               {fallbacks.length === 0 ? (
-                <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                <div className="rounded-md border bg-background px-3 py-3 text-sm text-muted-foreground">
                   ยังไม่มี Model สำรอง ถ้าไม่ต้องการ fallback สามารถปล่อยว่างได้
                 </div>
               ) : fallbacks.map((item, index) => (
-                <div key={item} className="space-y-2 rounded-md border px-3 py-2">
-                  <div className="grid gap-2 sm:grid-cols-[32px_1fr_auto] sm:items-center">
-                    <span className="text-sm text-muted-foreground">{index + 1}</span>
+                <div key={item} className="space-y-3 rounded-md border bg-background px-3 py-3">
+                  <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+                    <Badge variant="secondary" className="justify-self-start">{index + 1}</Badge>
                     <span className="min-w-0 break-all font-mono text-sm">{item}</span>
                     <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
                         variant="outline"
-                        size="icon"
+                        size="icon-sm"
                         onClick={() => moveFallback(index, -1)}
                         disabled={index === 0}
                         aria-label="เลื่อน Model สำรองขึ้น"
@@ -1262,7 +1290,7 @@ export default function ModelPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        size="icon"
+                        size="icon-sm"
                         onClick={() => moveFallback(index, 1)}
                         disabled={index === fallbacks.length - 1}
                         aria-label="เลื่อน Model สำรองลง"
@@ -1273,7 +1301,7 @@ export default function ModelPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        size="icon"
+                        size="icon-sm"
                         onClick={() => removeFallback(index)}
                         aria-label="ลบ Model สำรอง"
                         title="ลบ Model สำรอง"
@@ -1298,11 +1326,11 @@ export default function ModelPage() {
       </section>
 
       <section className="overflow-hidden rounded-lg border bg-card">
-        <div className="flex flex-col gap-3 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold">อ่านรูปสินค้า</h2>
-              <Badge variant={imageMode === 'image_model' && imageReady ? 'default' : 'secondary'}>
+              <Badge variant={imageTestPassed || (imageMode === 'image_model' && imageReady) ? 'default' : 'secondary'}>
                 {imageStateLabel}
               </Badge>
             </div>
@@ -1310,16 +1338,18 @@ export default function ModelPage() {
               ไม่บังคับ ใช้ตรวจว่า chatbot อ่านรูปที่ลูกค้าส่งได้จริงหรือไม่
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="inline-flex w-full flex-col gap-1 rounded-lg border bg-muted/40 p-1 sm:w-auto sm:flex-row">
             {([
               ['off', 'ปิด'] as const,
               ['chat_model', 'ใช้ Model หลัก'] as const,
-              ['image_model', 'เลือก Model อ่านรูปแยก'] as const,
+              ['image_model', 'เลือก Model แยก'] as const,
             ]).map(([mode, label]) => (
               <Button
                 key={mode}
                 type="button"
-                variant={imageMode === mode ? 'default' : 'outline'}
+                variant="ghost"
+                size="sm"
+                className={imageMode === mode ? 'bg-background text-foreground shadow-sm hover:bg-background' : 'text-muted-foreground'}
                 onClick={() => {
                   setImageMode(mode)
                   if (mode === 'image_model' && !imagePrimary) setImagePrimary(KILO_RECOMMENDED.imagePrimary)
@@ -1334,7 +1364,7 @@ export default function ModelPage() {
           </div>
         </div>
 
-        <div className="grid gap-0 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
+        <div className="grid gap-0 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
           <div className="space-y-4 border-b p-5 lg:border-b-0 lg:border-r">
             {imageMode === 'off' ? (
               <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
@@ -1343,12 +1373,12 @@ export default function ModelPage() {
             ) : imageMode === 'chat_model' ? (
               <div className="space-y-3">
                 <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm">
-                  <p className="font-medium">จะทดสอบด้วย Model หลัก</p>
+                  <p className="font-medium">ทดสอบเหมือน Telegram ใช้งานจริง</p>
                   <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                     {primary || 'ยังไม่ได้เลือก Model หลัก'}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    โหมดนี้ไม่บันทึกค่า Model อ่านรูปแยก ใช้เพื่อเช็ค path ที่ Telegram ใช้งานจริง
+                    ถ้า Model หลักอ่านรูปไม่ผ่าน ระบบจะลอง Model สำรองตามลำดับ
                   </p>
                 </div>
               </div>
@@ -1390,11 +1420,11 @@ export default function ModelPage() {
                 <label htmlFor="image-model-test-file" className="text-sm font-medium">รูปทดสอบ</label>
                 <label
                   htmlFor="image-model-test-file"
-                  className="flex min-h-52 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed bg-muted/30 text-center text-sm text-muted-foreground transition hover:bg-muted/50"
+                  className="flex h-[260px] cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed bg-muted/30 text-center text-sm text-muted-foreground transition hover:bg-muted/50"
                 >
                   {imageUpload ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={imageUpload.previewUrl} alt="รูปที่ใช้ทดสอบ model" className="h-full max-h-72 w-full object-contain" />
+                    <img src={imageUpload.previewUrl} alt="รูปที่ใช้ทดสอบ model" className="h-full w-full object-contain" />
                   ) : (
                     <span className="px-4">คลิกเพื่ออัปโหลดรูป PNG, JPG, WEBP หรือ GIF</span>
                   )}
@@ -1433,7 +1463,7 @@ export default function ModelPage() {
           <div className="space-y-4 p-5">
             {imageMode === 'off' ? (
               <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-                เปิด `ใช้ Model หลัก` ถ้าต้องการทดสอบรูปเหมือนที่ Telegram ใช้งานจริง
+                เปิด “ใช้ Model หลัก” ถ้าต้องการทดสอบรูปเหมือนที่ Telegram ใช้งานจริง
               </div>
             ) : (
               <>
@@ -1447,14 +1477,14 @@ export default function ModelPage() {
                       resetImageTest()
                     }}
                     placeholder="เช่น รูปนี้เป็นสินค้าอะไร ตอบสั้น ๆ"
-                    className="min-h-28"
+                    className="min-h-32"
                     disabled={imageTesting}
                   />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   {imageTesting ? (
-                    <Button type="button" variant="outline" onClick={() => imageAbortRef.current?.abort()}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => imageAbortRef.current?.abort()}>
                       <XCircle className="size-4" />
                       ยกเลิก
                     </Button>
@@ -1462,41 +1492,42 @@ export default function ModelPage() {
                   <Button
                     type="button"
                     variant="outline"
+                    size={imageTestResult?.ok ? 'sm' : 'default'}
                     onClick={runImageTest}
                     disabled={!imageTargetModel || !imageUpload || !imagePrompt.trim() || imageTesting}
                   >
                     <PlayCircle className="size-4" />
                     {imageTesting ? `กำลังทดสอบ ${imageElapsedText}` : 'ทดสอบอ่านรูป'}
                   </Button>
-                  <span className="break-all text-xs text-muted-foreground">
-                    model: {imageTargetModel || 'ยังไม่พร้อม'}
+                  <span className="min-w-0 break-all text-xs text-muted-foreground">
+                    {imageTargetModel || 'ยังไม่พร้อม'}
                   </span>
                 </div>
 
                 {imageTesting && (
                   <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-950 dark:bg-sky-950/25 dark:text-sky-100">
-                    กำลังส่งรูปเข้า OpenClaw runtime จริง โปรดรอคำตอบจาก AI
+                    กำลังส่งรูปให้ระบบจริง โปรดรอคำตอบจาก AI
                   </div>
                 )}
 
                 {imageTestResult && (
-                  <div className={`space-y-3 rounded-md border px-3 py-3 ${imageTestResult.ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-950 dark:bg-emerald-950/25' : 'border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/25'}`}>
+                  <div className={`rounded-md border px-3 py-3 ${imageTestResult.ok ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-950 dark:bg-emerald-950/15' : 'border-red-200 bg-red-50/70 dark:border-red-950 dark:bg-red-950/20'}`}>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={imageTestResult.ok ? 'default' : 'destructive'}>
-                        {imageTestResult.ok ? 'ทดสอบผ่าน' : statusLabel(imageTestResult.status)}
+                        {imageTestResult.ok ? 'อ่านรูปผ่าน' : statusLabel(imageTestResult.status)}
                       </Badge>
                       <span className="text-sm text-muted-foreground">{imageTestResult.durationMs}ms</span>
                       {imageTestResult.targetMode && (
                         <Badge variant="secondary">
-                          {imageTestResult.targetMode === 'chat_model' ? 'ใช้ Model หลัก' : 'Model อ่านรูปแยก'}
+                          {imageResultModeLabel(imageTestResult)}
                         </Badge>
                       )}
                     </div>
-                    <p className="break-all font-mono text-xs text-muted-foreground">
+                    <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
                       {imageTestResult.selectedModel || imageTestResult.model}
                     </p>
                     {imageTestResult.attempts && imageTestResult.attempts.length > 1 ? (
-                      <div className="space-y-2 rounded-md border bg-background/70 px-3 py-2 text-xs">
+                      <div className="mt-3 space-y-2 border-t pt-3 text-xs">
                         <p className="font-medium text-muted-foreground">ลำดับการทดสอบ</p>
                         <div className="space-y-1">
                           {imageTestResult.attempts.slice(0, 4).map((attempt, index) => (
@@ -1510,16 +1541,11 @@ export default function ModelPage() {
                         </div>
                       </div>
                     ) : null}
-                    <p className="text-sm">
-                      {imageTestResult.safeMessage || (imageTestResult.ok ? 'Runtime อ่านรูปด้วย model นี้ได้สำเร็จ' : 'Runtime อ่านรูปด้วย model นี้ไม่ได้')}
+                    <p className="mt-3 text-sm font-medium">
+                      {imageResultMessage(imageTestResult)}
                     </p>
-                    {imageTestResult.catalogSupportsImage === false && imageTestResult.ok && (
-                      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                        Runtime ทดสอบผ่าน แต่ catalog ไม่ประกาศ image capability ชัดเจน ให้ทีมเทคนิคตรวจ metadata ภายหลัง
-                      </div>
-                    )}
                     {imageTestResult.outputPreview && (
-                      <div className="rounded-md border bg-background/70 px-3 py-2 text-sm">
+                      <div className="mt-3 border-t pt-3 text-sm">
                         <p className="text-xs font-medium text-muted-foreground">คำตอบจาก AI</p>
                         <p className="mt-1 break-words">{imageTestResult.outputPreview}</p>
                       </div>
@@ -1533,82 +1559,54 @@ export default function ModelPage() {
       </section>
 
       <section className="rounded-lg border bg-card px-5 py-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-              {saveReason ? (
-                <>
-                  <Badge variant="secondary">บันทึกปกติยังไม่พร้อม</Badge>
-                  <span className="text-muted-foreground">{saveReason}</span>
-                </>
-              ) : settingsAlreadySaved ? (
-                <>
-                  <Badge>บันทึกแล้ว</Badge>
-                  <span className="text-muted-foreground">ค่าปัจจุบันอยู่ใน config แล้ว กด Restart Gateway เพื่อให้ chatbot ใช้ค่าใหม่</span>
-                </>
-              ) : (
-                <>
-                  <Badge>พร้อมบันทึก</Badge>
-                  <span className="text-muted-foreground">หลังบันทึกแล้วให้ Restart Gateway</span>
-                </>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={() => saveSettingsMutation.mutate(false)} disabled={!canSave || saveSettingsMutation.isPending}>
-                <Save className="size-4" />
-                {saveSettingsMutation.isPending ? 'กำลังบันทึก...' : settingsAlreadySaved ? 'บันทึกแล้ว' : 'บันทึกค่า Model'}
-              </Button>
-              {canOverrideSave && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/25"
-                  onClick={() => setOverrideSaveDialogOpen(true)}
-                  disabled={saveSettingsMutation.isPending}
-                >
-                  <AlertTriangle className="size-4" />
-                  บันทึกแบบยอมรับความเสี่ยง
-                </Button>
-              )}
-              <Button type="button" variant="outline" onClick={confirmRestartGateway} disabled={restartMutation.isPending}>
-                <RotateCcw className="size-4" />
-                Restart Gateway
-              </Button>
-            </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+            {saveReason ? (
+              <>
+                <Badge variant="secondary">ยังไม่พร้อม</Badge>
+                <span className="text-muted-foreground">{saveReason}</span>
+              </>
+            ) : showRestartHint ? (
+              <>
+                <Badge>บันทึกแล้ว</Badge>
+                <span className="text-muted-foreground">ต้อง Restart Gateway เพื่อให้ chatbot ใช้ค่าใหม่</span>
+              </>
+            ) : settingsAlreadySaved ? (
+              <>
+                <Badge>บันทึกแล้ว</Badge>
+                <span className="text-muted-foreground">ค่าปัจจุบันอยู่ใน config แล้ว</span>
+              </>
+            ) : (
+              <>
+                <Badge>พร้อมบันทึก</Badge>
+                <span className="text-muted-foreground">หลังบันทึกแล้วให้ Restart Gateway</span>
+              </>
+            )}
           </div>
-
-          {unverifiedTextModels.length ? (
-            <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm">
-              <p className="font-medium">Model ที่เลือกไว้แล้วยังไม่ผ่านการทดสอบ</p>
-              <p className="mt-1 text-muted-foreground">
-                ยังเลือก model เหล่านี้ได้ แต่ควรกดทดสอบก่อนใช้จริง ถ้าตั้งใจใช้ทันทีให้ใช้ปุ่มบันทึกแบบยอมรับความเสี่ยง
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {unverifiedTextModels.map(model => (
-                  <Badge key={model} variant="secondary" className="max-w-full break-all font-mono text-[11px]">
-                    {compactModel(model)}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {showRestartHint && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
-              บันทึกแล้ว กรุณา Restart Gateway เพื่อให้ Telegram ใช้ค่าใหม่
-            </div>
-          )}
-
-          {imageDraftExcluded && (
-            <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-              อ่านรูปสินค้าแบบแยกเป็นส่วนเสริมและยังไม่ผ่านการทดสอบ ระบบจะไม่บันทึกค่า Model อ่านรูปแยกในรอบนี้
-            </div>
-          )}
-
-          {imageMode === 'chat_model' && imageTestResult && !imageTestResult.ok ? (
-            <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-              อ่านรูปสินค้าเป็นการทดสอบเพิ่มเติมด้วย Model หลักเท่านั้น ค่า Model ข้อความยังบันทึกและใช้งานได้ตามปกติ
-            </div>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {canOverrideSave && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/25"
+                onClick={() => setOverrideSaveDialogOpen(true)}
+                disabled={saveSettingsMutation.isPending}
+              >
+                <AlertTriangle className="size-4" />
+                บันทึกแบบยอมรับความเสี่ยง
+              </Button>
+            )}
+            <Button type="button" onClick={() => saveSettingsMutation.mutate(false)} disabled={!canSave || saveSettingsMutation.isPending}>
+              <Save className="size-4" />
+              {saveSettingsMutation.isPending ? 'กำลังบันทึก...' : settingsAlreadySaved ? 'บันทึกแล้ว' : 'บันทึกค่า Model'}
+            </Button>
+            <Button type="button" variant="outline" onClick={confirmRestartGateway} disabled={restartMutation.isPending}>
+              <RotateCcw className="size-4" />
+              Restart Gateway
+            </Button>
+          </div>
+        </div>
       </section>
 
       <Dialog open={deleteKeyDialogOpen} onOpenChange={setDeleteKeyDialogOpen}>
