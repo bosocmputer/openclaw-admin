@@ -74,9 +74,11 @@ const KILO_RECOMMENDED = {
     'kilocode/google/gemini-3.1-flash-lite',
     'kilocode/qwen/qwen3-vl-235b-a22b-instruct',
   ],
+  imagePrimary: 'kilocode/kilo/auto',
 }
 
 type KeyTestState = 'idle' | 'ok' | 'fail'
+type ImageMode = 'off' | 'chat_model' | 'image_model'
 type ImageUploadDraft = ModelImageUploadPayload & {
   previewUrl: string
   size: number
@@ -156,8 +158,8 @@ function settingsHash(payload: ModelSettingsPayload) {
   return JSON.stringify(payload)
 }
 
-function imageModelHash(primary: string, fallbacks: string[], timeoutMs: number) {
-  return JSON.stringify({ primary, fallbacks, timeoutMs })
+function imageModelHash(mode: ImageMode, targetModel: string, primary: string, fallbacks: string[], timeoutMs: number) {
+  return JSON.stringify({ mode, targetModel, primary, fallbacks, timeoutMs })
 }
 
 function readImageUpload(file: File): Promise<ImageUploadDraft> {
@@ -556,6 +558,7 @@ export default function ModelPage() {
   const [primary, setPrimary] = useState('')
   const [fallbackDraft, setFallbackDraft] = useState('')
   const [fallbacks, setFallbacks] = useState<string[]>([])
+  const [imageMode, setImageMode] = useState<ImageMode>('chat_model')
   const [imagePrimary, setImagePrimary] = useState('')
   const [imageFallbacks, setImageFallbacks] = useState<string[]>([])
   const [imageTimeoutMs, setImageTimeoutMs] = useState(30000)
@@ -605,6 +608,7 @@ export default function ModelPage() {
 
     setPrimary(nextPrimary)
     setFallbacks(nextFallbacks)
+    setImageMode(nextImagePrimary ? 'image_model' : 'chat_model')
     setImagePrimary(nextImagePrimary)
     setImageFallbacks(nextImageFallbacks)
     setImageTimeoutMs(nextImageTimeout)
@@ -617,9 +621,10 @@ export default function ModelPage() {
     setApiKey('')
   }, [config, providerForKey])
 
-  const currentImageHash = imageModelHash(imagePrimary, imageFallbacks, imageTimeoutMs)
-  const imageReady = !imagePrimary || isRuntimeVerified(runtimeState(imagePrimary, 'image')) || lastImageTestHash === currentImageHash
-  const shouldSaveImageModel = Boolean(imagePrimary && imageReady)
+  const imageTargetModel = imageMode === 'chat_model' ? primary : imagePrimary
+  const currentImageHash = imageModelHash(imageMode, imageTargetModel, imagePrimary, imageFallbacks, imageTimeoutMs)
+  const imageReady = imageMode !== 'image_model' || !imagePrimary || isRuntimeVerified(runtimeState(imagePrimary, 'image')) || lastImageTestHash === currentImageHash
+  const shouldSaveImageModel = Boolean(imageMode === 'image_model' && imagePrimary && imageReady)
   const payload = useMemo<ModelSettingsPayload>(() => ({
     defaults: {
       model: { primary, fallbacks },
@@ -651,7 +656,7 @@ export default function ModelPage() {
     return found?.runtimeStatus || 'runtime_unverified'
   }
 
-  const imageDraftExcluded = Boolean(imagePrimary && !imageReady)
+  const imageDraftExcluded = Boolean(imageMode === 'image_model' && imagePrimary && !imageReady)
   const canSave = Boolean(primary)
     && !missingTextProvider
     && textModelsReady
@@ -805,6 +810,7 @@ export default function ModelPage() {
     setPrimary(OPENROUTER_RECOMMENDED.primary)
     setFallbacks(OPENROUTER_RECOMMENDED.fallbacks)
     resetTextTest()
+    resetImageTest()
     toast.info('ใส่ชุด OpenRouter ที่แนะนำแล้ว กดทดสอบก่อนบันทึก')
   }
 
@@ -812,6 +818,7 @@ export default function ModelPage() {
     setPrimary(KILO_RECOMMENDED.primary)
     setFallbacks(KILO_RECOMMENDED.fallbacks)
     resetTextTest()
+    resetImageTest()
     toast.info('ใส่ชุด Kilo AI แนะนำแล้ว กดทดสอบแต่ละ model ก่อนบันทึก')
   }
 
@@ -837,12 +844,6 @@ export default function ModelPage() {
       ;[next[index], next[target]] = [next[target], next[index]]
       return next
     })
-  }
-
-  function clearImageModel() {
-    setImagePrimary('')
-    setImageFallbacks([])
-    resetImageTest()
   }
 
   async function handleImageFileChange(file: File | null) {
@@ -918,8 +919,13 @@ export default function ModelPage() {
   }
 
   async function runImageTest() {
-    if (!imagePrimary) {
-      toast.warning('เลือก Model รูปภาพก่อน')
+    if (imageMode === 'off') {
+      toast.warning('เปิดการทดสอบอ่านรูปสินค้าก่อน')
+      return
+    }
+    const targetModel = imageMode === 'chat_model' ? primary : imagePrimary
+    if (!targetModel) {
+      toast.warning(imageMode === 'chat_model' ? 'เลือก Model หลักก่อนทดสอบรูปภาพ' : 'เลือก Model อ่านรูปแยกก่อน')
       return
     }
     if (!imageUpload) {
@@ -930,7 +936,7 @@ export default function ModelPage() {
       toast.warning('พิมพ์ข้อความทดสอบรูปภาพก่อน')
       return
     }
-    const imageProvider = providerFromRef(imagePrimary)
+    const imageProvider = providerFromRef(targetModel)
     if (!imageProvider.noApiKey && !config?.env?.[imageProvider.envKey]) {
       toast.warning(`ตั้งค่า ${imageProvider.label} key ก่อน`)
       return
@@ -944,7 +950,8 @@ export default function ModelPage() {
 
     try {
       const result = await testModelImageMessage({
-        model: imagePrimary,
+        model: targetModel,
+        targetMode: imageMode === 'chat_model' ? 'chat_model' : 'image_model',
         prompt: imagePrompt.trim(),
         image: {
           base64: imageUpload.base64,
@@ -953,21 +960,21 @@ export default function ModelPage() {
         },
       }, controller.signal)
       setImageTestResult(result)
-      setRuntimeResults(prev => ({ ...prev, [runtimeKey(imagePrimary, 'image')]: result }))
+      setRuntimeResults(prev => ({ ...prev, [runtimeKey(targetModel, 'image')]: result }))
       if (result.ok) {
         setLastImageTestHash(currentImageHash)
         await qc.invalidateQueries({ queryKey: ['model-readiness'] })
-        toast.success('ทดสอบ Model รูปภาพผ่าน')
+        toast.success('ทดสอบอ่านรูปสินค้าผ่าน')
       } else {
         setLastImageTestHash('')
-        toast.error(result.safeMessage || result.summary || 'ทดสอบ Model รูปภาพไม่ผ่าน')
+        toast.error(result.safeMessage || result.summary || 'ทดสอบอ่านรูปสินค้าไม่ผ่าน')
       }
     } catch (error) {
       const err = error as { code?: string; name?: string; message?: string }
       if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError') {
         toast.info('ยกเลิกการทดสอบรูปภาพแล้ว')
       } else {
-        toast.error('ทดสอบ Model รูปภาพไม่สำเร็จ')
+        toast.error('ทดสอบอ่านรูปสินค้าไม่สำเร็จ')
       }
       resetImageTest()
     } finally {
@@ -995,7 +1002,13 @@ export default function ModelPage() {
   const primaryPassed = Boolean(primary && textModelReady(primary))
   const fallbackPassedCount = fallbacks.filter(model => textModelReady(model)).length
   const providerKeyCount = PROVIDERS.filter(provider => provider.noApiKey || config?.env?.[provider.envKey]).length
-  const imageStateLabel = imagePrimary ? (imageReady ? 'พร้อม' : 'ยังไม่เปิด') : 'ปิดอยู่'
+  const imageStateLabel = imageMode === 'off'
+    ? 'ปิดอยู่'
+    : imageMode === 'chat_model'
+      ? imageTestResult?.ok && imageTestResult.targetMode === 'chat_model' ? 'Model หลักผ่าน' : 'ใช้ Model หลัก'
+      : imagePrimary
+        ? imageReady ? 'พร้อม' : 'รอทดสอบ'
+        : 'ยังไม่เลือก'
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-5">
@@ -1032,7 +1045,7 @@ export default function ModelPage() {
             <p className="mt-1 text-lg font-semibold">{fallbackPassedCount}/{fallbacks.length}</p>
           </div>
           <div className="bg-card px-5 py-3">
-            <p className="text-xs font-medium text-muted-foreground">Model รูปภาพ</p>
+            <p className="text-xs font-medium text-muted-foreground">อ่านรูปสินค้า</p>
             <p className="mt-1 text-lg font-semibold">{imageStateLabel}</p>
           </div>
         </div>
@@ -1173,7 +1186,10 @@ export default function ModelPage() {
             <ModelPicker
               label="เลือก Model หลัก"
               value={primary}
-              onChange={setPrimary}
+              onChange={value => {
+                setPrimary(value)
+                resetImageTest()
+              }}
               recommendedRefs={[
                 OPENROUTER_RECOMMENDED.primary,
                 KILO_RECOMMENDED.primary,
@@ -1275,161 +1291,223 @@ export default function ModelPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border bg-card">
-        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
+      <section className="overflow-hidden rounded-lg border bg-card">
+        <div className="flex flex-col gap-3 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold">Model รูปภาพ</h2>
-              <Badge variant={imagePrimary ? imageReady ? 'default' : 'secondary' : 'secondary'}>{imageStateLabel}</Badge>
+              <h2 className="text-base font-semibold">อ่านรูปสินค้า</h2>
+              <Badge variant={imageMode === 'image_model' && imageReady ? 'default' : 'secondary'}>
+                {imageStateLabel}
+              </Badge>
             </div>
-                <p className="text-sm text-muted-foreground">ไม่บังคับ เปิดเฉพาะเมื่อลูกค้าส่งรูปสินค้าให้ chatbot</p>
+            <p className="text-sm text-muted-foreground">
+              ไม่บังคับ ใช้ตรวจว่า chatbot อ่านรูปที่ลูกค้าส่งได้จริงหรือไม่
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {([
+              ['off', 'ปิด'] as const,
+              ['chat_model', 'ใช้ Model หลัก'] as const,
+              ['image_model', 'เลือก Model อ่านรูปแยก'] as const,
+            ]).map(([mode, label]) => (
+              <Button
+                key={mode}
+                type="button"
+                variant={imageMode === mode ? 'default' : 'outline'}
+                onClick={() => {
+                  setImageMode(mode)
+                  if (mode === 'image_model' && !imagePrimary) setImagePrimary(KILO_RECOMMENDED.imagePrimary)
+                  resetImageTest()
+                }}
+                disabled={imageTesting}
+              >
+                {mode === 'off' ? <XCircle className="size-4" /> : <ImageIcon className="size-4" />}
+                {label}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-0 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
+          <div className="space-y-4 border-b p-5 lg:border-b-0 lg:border-r">
+            {imageMode === 'off' ? (
+              <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                ปิดการตั้งค่าอ่านรูปสินค้าไว้ ส่วน chat ข้อความยังใช้งานได้ตามปกติ
               </div>
-              <div className="flex flex-wrap gap-2">
+            ) : imageMode === 'chat_model' ? (
+              <div className="space-y-3">
+                <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm">
+                  <p className="font-medium">จะทดสอบด้วย Model หลัก</p>
+                  <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                    {primary || 'ยังไม่ได้เลือก Model หลัก'}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    โหมดนี้ไม่บันทึกค่า Model อ่านรูปแยก ใช้เพื่อเช็ค path ที่ Telegram ใช้งานจริง
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {!imageReady && imagePrimary ? (
+                  <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                    Model อ่านรูปแยกยังไม่ผ่านการทดสอบ ระบบจะไม่บันทึกส่วนนี้ แต่ยังบันทึก Model ข้อความได้ตามปกติ
+                  </div>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    setImagePrimary(OPENROUTER_RECOMMENDED.imagePrimary)
-                    setLastImageTestHash('')
+                    setImagePrimary(KILO_RECOMMENDED.imagePrimary)
+                    resetImageTest()
                   }}
+                  disabled={imageTesting}
                 >
                   <ImageIcon className="size-4" />
-                  ใช้รูปภาพแนะนำ
+                  ใช้ Kilo Auto สำหรับรูป
                 </Button>
-                <Button type="button" variant="outline" onClick={clearImageModel} disabled={!imagePrimary}>
-                  <XCircle className="size-4" />
-                  ปิด Model รูปภาพ
-                </Button>
-              </div>
-            </div>
-
-        <div className="border-t px-5 py-4">
-            {!imagePrimary ? (
-              <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-                ยังไม่เปิด Model รูปภาพ ส่วน chat ข้อความยังใช้งานได้ตามปกติ
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {!imageReady && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
-                    Model รูปภาพยังไม่ผ่านการทดสอบ จึงจะไม่ถูกบันทึกในรอบนี้ แต่ยังบันทึก Model ข้อความได้ตามปกติ
-                  </div>
-                )}
                 <ModelPicker
-                  label="เลือก Model รูปภาพ"
+                  label="เลือก Model อ่านรูปแยก"
                   value={imagePrimary}
                   imageOnly
                   onChange={value => {
                     setImagePrimary(value)
                     resetImageTest()
                   }}
-                  recommendedRefs={[OPENROUTER_RECOMMENDED.imagePrimary]}
+                  recommendedRefs={[KILO_RECOMMENDED.imagePrimary]}
                   runtimeStateForRef={ref => runtimeState(ref, 'image')}
                 />
-                <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
-                  <div className="space-y-2">
-                    <label htmlFor="image-model-test-file" className="text-sm font-medium">รูปทดสอบ</label>
-                    <label
-                      htmlFor="image-model-test-file"
-                      className="flex min-h-40 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed bg-muted/30 text-center text-sm text-muted-foreground transition hover:bg-muted/50"
-                    >
-                      {imageUpload ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={imageUpload.previewUrl} alt="รูปที่ใช้ทดสอบ model" className="h-full max-h-56 w-full object-contain" />
-                      ) : (
-                        <span className="px-4">คลิกเพื่ออัปโหลดรูป PNG, JPG, WEBP หรือ GIF</span>
-                      )}
-                    </label>
-                    <Input
-                      id="image-model-test-file"
-                      type="file"
-                      accept={SUPPORTED_IMAGE_UPLOAD_TYPES.join(',')}
-                      className="hidden"
-                      disabled={imageTesting}
-                      onChange={event => {
-                        void handleImageFileChange(event.target.files?.[0] || null)
-                        event.currentTarget.value = ''
-                      }}
-                    />
-                    {imageUpload && (
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span className="min-w-0 truncate">{imageUpload.fileName}</span>
-                        <span>{Math.ceil(imageUpload.size / 1024)}KB</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => void handleImageFileChange(null)}
-                          disabled={imageTesting}
-                        >
-                          ลบรูป
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <label htmlFor="image-model-test-prompt" className="text-sm font-medium">ข้อความทดสอบรูปภาพ</label>
-                      <Textarea
-                        id="image-model-test-prompt"
-                        value={imagePrompt}
-                        onChange={event => {
-                          setImagePrompt(event.target.value)
-                          resetImageTest()
-                        }}
-                        placeholder="เช่น รูปนี้เป็นสินค้าอะไร ตอบสั้น ๆ"
-                        className="min-h-24"
-                        disabled={imageTesting}
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {imageTesting ? (
-                        <Button type="button" variant="outline" onClick={() => imageAbortRef.current?.abort()}>
-                          <XCircle className="size-4" />
-                          ยกเลิก
-                        </Button>
-                      ) : null}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={runImageTest}
-                        disabled={!imagePrimary || !imageUpload || !imagePrompt.trim() || imageTesting}
-                      >
-                        <PlayCircle className="size-4" />
-                        {imageTesting ? `กำลังทดสอบ ${imageElapsedText}` : 'ทดสอบรูปภาพ'}
-                      </Button>
-                    </div>
-
-                    {imageTesting && (
-                      <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-950 dark:bg-sky-950/25 dark:text-sky-100">
-                        กำลังส่งรูปเข้า OpenClaw runtime จริง โปรดรอคำตอบจาก AI
-                      </div>
-                    )}
-
-                    {imageTestResult && (
-                      <div className={`space-y-3 rounded-md border px-3 py-3 ${imageTestResult.ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-950 dark:bg-emerald-950/25' : 'border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/25'}`}>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={imageTestResult.ok ? 'default' : 'destructive'}>
-                            {imageTestResult.ok ? 'ทดสอบผ่าน' : statusLabel(imageTestResult.status)}
-                          </Badge>
-                          <span className="text-sm text-muted-foreground">{imageTestResult.durationMs}ms</span>
-                        </div>
-                        <p className="text-sm">{imageTestResult.safeMessage || (imageTestResult.ok ? 'Model รูปภาพใช้งานได้จริง' : 'Model รูปภาพใช้งานไม่ได้')}</p>
-                        {imageTestResult.outputPreview && (
-                          <div className="rounded-md border bg-background/70 px-3 py-2 text-sm">
-                            <p className="text-xs font-medium text-muted-foreground">คำตอบจาก AI</p>
-                            <p className="mt-1 break-words">{imageTestResult.outputPreview}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
               </div>
             )}
+
+            {imageMode !== 'off' && (
+              <div className="space-y-2">
+                <label htmlFor="image-model-test-file" className="text-sm font-medium">รูปทดสอบ</label>
+                <label
+                  htmlFor="image-model-test-file"
+                  className="flex min-h-52 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed bg-muted/30 text-center text-sm text-muted-foreground transition hover:bg-muted/50"
+                >
+                  {imageUpload ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={imageUpload.previewUrl} alt="รูปที่ใช้ทดสอบ model" className="h-full max-h-72 w-full object-contain" />
+                  ) : (
+                    <span className="px-4">คลิกเพื่ออัปโหลดรูป PNG, JPG, WEBP หรือ GIF</span>
+                  )}
+                </label>
+                <Input
+                  id="image-model-test-file"
+                  type="file"
+                  accept={SUPPORTED_IMAGE_UPLOAD_TYPES.join(',')}
+                  className="hidden"
+                  disabled={imageTesting}
+                  onChange={event => {
+                    void handleImageFileChange(event.target.files?.[0] || null)
+                    event.currentTarget.value = ''
+                  }}
+                />
+                {imageUpload && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="min-w-0 truncate">{imageUpload.fileName}</span>
+                    <span>{Math.ceil(imageUpload.size / 1024)}KB</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => void handleImageFileChange(null)}
+                      disabled={imageTesting}
+                    >
+                      ลบรูป
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4 p-5">
+            {imageMode === 'off' ? (
+              <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                เปิด `ใช้ Model หลัก` ถ้าต้องการทดสอบรูปเหมือนที่ Telegram ใช้งานจริง
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <label htmlFor="image-model-test-prompt" className="text-sm font-medium">ข้อความทดสอบรูปภาพ</label>
+                  <Textarea
+                    id="image-model-test-prompt"
+                    value={imagePrompt}
+                    onChange={event => {
+                      setImagePrompt(event.target.value)
+                      resetImageTest()
+                    }}
+                    placeholder="เช่น รูปนี้เป็นสินค้าอะไร ตอบสั้น ๆ"
+                    className="min-h-28"
+                    disabled={imageTesting}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {imageTesting ? (
+                    <Button type="button" variant="outline" onClick={() => imageAbortRef.current?.abort()}>
+                      <XCircle className="size-4" />
+                      ยกเลิก
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={runImageTest}
+                    disabled={!imageTargetModel || !imageUpload || !imagePrompt.trim() || imageTesting}
+                  >
+                    <PlayCircle className="size-4" />
+                    {imageTesting ? `กำลังทดสอบ ${imageElapsedText}` : 'ทดสอบอ่านรูป'}
+                  </Button>
+                  <span className="break-all text-xs text-muted-foreground">
+                    model: {imageTargetModel || 'ยังไม่พร้อม'}
+                  </span>
+                </div>
+
+                {imageTesting && (
+                  <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-950 dark:bg-sky-950/25 dark:text-sky-100">
+                    กำลังส่งรูปเข้า OpenClaw runtime จริง โปรดรอคำตอบจาก AI
+                  </div>
+                )}
+
+                {imageTestResult && (
+                  <div className={`space-y-3 rounded-md border px-3 py-3 ${imageTestResult.ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-950 dark:bg-emerald-950/25' : 'border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/25'}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={imageTestResult.ok ? 'default' : 'destructive'}>
+                        {imageTestResult.ok ? 'ทดสอบผ่าน' : statusLabel(imageTestResult.status)}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">{imageTestResult.durationMs}ms</span>
+                      {imageTestResult.targetMode && (
+                        <Badge variant="secondary">
+                          {imageTestResult.targetMode === 'chat_model' ? 'ใช้ Model หลัก' : 'Model อ่านรูปแยก'}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="break-all font-mono text-xs text-muted-foreground">
+                      {imageTestResult.selectedModel || imageTestResult.model}
+                    </p>
+                    <p className="text-sm">
+                      {imageTestResult.safeMessage || (imageTestResult.ok ? 'Runtime อ่านรูปด้วย model นี้ได้สำเร็จ' : 'Runtime อ่านรูปด้วย model นี้ไม่ได้')}
+                    </p>
+                    {imageTestResult.catalogSupportsImage === false && imageTestResult.ok && (
+                      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                        Runtime ทดสอบผ่าน แต่ catalog ไม่ประกาศ image capability ชัดเจน ให้ทีมเทคนิคตรวจ metadata ภายหลัง
+                      </div>
+                    )}
+                    {imageTestResult.outputPreview && (
+                      <div className="rounded-md border bg-background/70 px-3 py-2 text-sm">
+                        <p className="text-xs font-medium text-muted-foreground">คำตอบจาก AI</p>
+                        <p className="mt-1 break-words">{imageTestResult.outputPreview}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </section>
 
@@ -1501,7 +1579,7 @@ export default function ModelPage() {
 
           {imageDraftExcluded && (
             <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-              Model รูปภาพเป็นส่วนเสริมและยังไม่ผ่านการทดสอบ ระบบจะไม่บันทึกค่า Model รูปภาพในรอบนี้
+              อ่านรูปสินค้าแบบแยกเป็นส่วนเสริมและยังไม่ผ่านการทดสอบ ระบบจะไม่บันทึกค่า Model อ่านรูปแยกในรอบนี้
             </div>
           )}
 
@@ -1511,7 +1589,7 @@ export default function ModelPage() {
                 <AlertTriangle className="size-4" />
                 ยังมี model ที่ runtime ไม่ได้ยืนยัน
               </div>
-              <p className="mt-1">กดทดสอบที่กล่องของแต่ละ model หรือทดสอบ Model รูปภาพถ้าเปิดใช้งาน</p>
+              <p className="mt-1">กดทดสอบที่กล่องของแต่ละ model หรือทดสอบอ่านรูปสินค้าถ้าเปิดใช้งาน</p>
             </div>
           ) : null}
       </section>
@@ -1590,7 +1668,7 @@ export default function ModelPage() {
               {fallbacks.map((model, index) => (
                 <p key={model} className="break-all font-mono text-xs">Fallback {index + 1}: {model}</p>
               ))}
-              {imagePrimary && <p className="break-all font-mono text-xs">Image: {imagePrimary}</p>}
+              {imageMode === 'image_model' && imagePrimary && <p className="break-all font-mono text-xs">Image: {imagePrimary}</p>}
             </div>
           </div>
           <DialogFooter>

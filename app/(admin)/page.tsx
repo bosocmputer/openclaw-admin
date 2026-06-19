@@ -264,12 +264,12 @@ function buildRecommendations(data: DashboardOverview): Recommendation[] {
     })
   }
 
-  if (healthWarnings.some(text => text.includes('image model'))) {
+  if (healthWarnings.some(text => text.includes('image model') || text.includes('imageModel') || text.includes('image understanding'))) {
     addRecommendation(items, {
       id: 'image-model',
       severity: 'warn',
-      title: 'กำหนด image model ให้ชัดเจน',
-      detail: 'ถ้าลูกค้าส่งรูปสินค้า ระบบควรมี image model ที่ตรวจสอบได้ ไม่พึ่งค่า auto ที่เปลี่ยนตาม runtime.',
+      title: 'ทดสอบการอ่านรูปสินค้า',
+      detail: 'ถ้าลูกค้าส่งรูปสินค้า ให้เปิดหน้า Model แล้วทดสอบรูปกับ Model หลักก่อน หรือเลือก Model อ่านรูปแยกเฉพาะเมื่อจำเป็น.',
       actionLabel: 'Open Models',
       href: '/model?section=image',
     })

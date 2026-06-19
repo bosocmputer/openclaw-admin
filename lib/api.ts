@@ -210,6 +210,11 @@ export interface ModelRuntimeTestResult {
   ok: boolean
   status: ModelRuntimeTestStatus
   model: string
+  selectedModel?: string | null
+  targetMode?: 'chat_model' | 'image_model' | string
+  catalogSupportsImage?: boolean | null
+  catalogStatus?: string | null
+  runtimeStatus?: string | null
   capability: 'text' | 'image' | string
   mode: 'gateway' | string
   runtimeVersion: string
@@ -613,7 +618,8 @@ export async function testModelMessage(params: {
 }
 
 export async function testModelImageMessage(params: {
-  model: string
+  model?: string
+  targetMode?: 'chat_model' | 'image_model'
   prompt: string
   image: ModelImageUploadPayload
 }, signal?: AbortSignal): Promise<ModelRuntimeTestResult> {

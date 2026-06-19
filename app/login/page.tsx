@@ -15,8 +15,18 @@ export default function LoginPage() {
     setError('')
     const formData = new FormData(e.currentTarget)
     startTransition(async () => {
-      const result = await login(formData)
-      if (result?.error) setError(result.error)
+      try {
+        const result = await login(formData)
+        if ('error' in result && result.error) {
+          setError(result.error)
+          return
+        }
+        if ('ok' in result && result.ok && result.redirectTo) {
+          window.location.assign(result.redirectTo)
+        }
+      } catch {
+        setError('เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง')
+      }
     })
   }
 
@@ -51,7 +61,7 @@ export default function LoginPage() {
               />
             </div>
             {error && (
-              <p className="text-sm text-red-500">{error}</p>
+              <p role="alert" className="text-sm text-red-500">{error}</p>
             )}
             <Button type="submit" className="w-full" disabled={isPending}>
               {isPending ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}

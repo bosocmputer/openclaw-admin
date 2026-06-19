@@ -68,7 +68,7 @@ export async function login(formData: FormData) {
       displayName: user.display_name ?? user.username,
     })
 
-    redirect('/')
+    return { ok: true, redirectTo: '/' }
   })
 }
 
