@@ -227,6 +227,17 @@ export interface ModelRuntimeTestResult {
   testedAt?: string
   detail?: string
   cache?: { hit: boolean; ttlSeconds: number }
+  attempts?: Array<{
+    model: string
+    ok: boolean
+    status: ModelRuntimeTestStatus
+    durationMs?: number
+    safeMessage?: string
+    outputPreview?: string | null
+    runtimeVersion?: string | null
+    catalogSupportsImage?: boolean | null
+    catalogStatus?: string | null
+  }>
   data?: {
     provider?: string | null
     model?: string | null
@@ -619,6 +630,7 @@ export async function testModelMessage(params: {
 
 export async function testModelImageMessage(params: {
   model?: string
+  fallbacks?: string[]
   targetMode?: 'chat_model' | 'image_model'
   prompt: string
   image: ModelImageUploadPayload

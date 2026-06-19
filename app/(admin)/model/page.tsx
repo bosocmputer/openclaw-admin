@@ -622,7 +622,8 @@ export default function ModelPage() {
   }, [config, providerForKey])
 
   const imageTargetModel = imageMode === 'chat_model' ? primary : imagePrimary
-  const currentImageHash = imageModelHash(imageMode, imageTargetModel, imagePrimary, imageFallbacks, imageTimeoutMs)
+  const imageTargetFallbacks = imageMode === 'chat_model' ? fallbacks : imageFallbacks
+  const currentImageHash = imageModelHash(imageMode, imageTargetModel, imagePrimary, imageTargetFallbacks, imageTimeoutMs)
   const imageReady = imageMode !== 'image_model' || !imagePrimary || isRuntimeVerified(runtimeState(imagePrimary, 'image')) || lastImageTestHash === currentImageHash
   const shouldSaveImageModel = Boolean(imageMode === 'image_model' && imagePrimary && imageReady)
   const payload = useMemo<ModelSettingsPayload>(() => ({
@@ -951,6 +952,7 @@ export default function ModelPage() {
     try {
       const result = await testModelImageMessage({
         model: targetModel,
+        fallbacks: imageMode === 'chat_model' ? fallbacks : imageFallbacks,
         targetMode: imageMode === 'chat_model' ? 'chat_model' : 'image_model',
         prompt: imagePrompt.trim(),
         image: {
@@ -960,7 +962,11 @@ export default function ModelPage() {
         },
       }, controller.signal)
       setImageTestResult(result)
-      setRuntimeResults(prev => ({ ...prev, [runtimeKey(targetModel, 'image')]: result }))
+      setRuntimeResults(prev => ({
+        ...prev,
+        [runtimeKey(targetModel, 'image')]: result,
+        ...(result.selectedModel ? { [runtimeKey(result.selectedModel, 'image')]: result } : {}),
+      }))
       if (result.ok) {
         setLastImageTestHash(currentImageHash)
         await qc.invalidateQueries({ queryKey: ['model-readiness'] })
@@ -1489,6 +1495,21 @@ export default function ModelPage() {
                     <p className="break-all font-mono text-xs text-muted-foreground">
                       {imageTestResult.selectedModel || imageTestResult.model}
                     </p>
+                    {imageTestResult.attempts && imageTestResult.attempts.length > 1 ? (
+                      <div className="space-y-2 rounded-md border bg-background/70 px-3 py-2 text-xs">
+                        <p className="font-medium text-muted-foreground">ลำดับการทดสอบ</p>
+                        <div className="space-y-1">
+                          {imageTestResult.attempts.slice(0, 4).map((attempt, index) => (
+                            <div key={`${attempt.model}-${index}`} className="flex flex-wrap items-center gap-2">
+                              <Badge variant={attempt.ok ? 'default' : 'secondary'} className="text-[10px]">
+                                {attempt.ok ? 'ผ่าน' : statusLabel(attempt.status)}
+                              </Badge>
+                              <span className="break-all font-mono text-muted-foreground">{attempt.model}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     <p className="text-sm">
                       {imageTestResult.safeMessage || (imageTestResult.ok ? 'Runtime อ่านรูปด้วย model นี้ได้สำเร็จ' : 'Runtime อ่านรูปด้วย model นี้ไม่ได้')}
                     </p>
