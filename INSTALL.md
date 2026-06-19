@@ -1,6 +1,8 @@
-# คู่มือติดตั้ง OpenClaw Admin System
+# คู่มือติดตั้ง OpenClaw ERP Chatbot Admin System
 
 > สำหรับทีมติดตั้งระบบที่ร้านใหม่ — ใช้เวลาประมาณ 30–60 นาที
+>
+> อัปเดตล่าสุด: ใช้ **OpenClaw ERP Runtime Artifact** เป็น runtime หลักของ gateway เพื่อให้ behavior เหมือน dev server ทุกเครื่อง
 
 ---
 
@@ -11,7 +13,9 @@
 | IP address ของ server | `192.168.1.100` | ถามผู้ดูแลระบบร้าน |
 | Telegram Bot Token | `123456:ABC-DEF...` | ขอจาก @BotFather |
 | OpenRouter API Key | `sk-or-v1-...` | จาก openrouter.ai |
+| Kilo AI API Key (ถ้าใช้) | `kg_...` หรือ key จาก Kilo | ต้องทดสอบ runtime จริงก่อน save model |
 | MCP Server URL | `http://192.168.1.50:3001/sse` | ถามทีมที่ติดตั้ง MCP |
+| OpenClaw ERP Runtime Artifact | `https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.8-erp-20260618/openclaw-runtime-2026.6.8-erp-latest.tar.gz` | ใช้แทน `npm install -g openclaw` สำหรับ gateway |
 | รหัสผ่าน Admin | ตั้งเองได้ | สำหรับ login หน้าเว็บ |
 
 ---
@@ -28,12 +32,14 @@ openclaw-admin (Docker, port 3000)   ← Next.js frontend + proxy
 openclaw-api (pm2, port 4000)        ← Express API บน host
     │  POST /hooks/agent → http://127.0.0.1:18789
     ▼
-openclaw-gateway (port 18789)        ← agent runtime, LINE, Telegram
+openclaw-gateway (port 18789)        ← ERP runtime artifact, LINE, Telegram
     │
     └── PostgreSQL (Docker, port 5432)   ← admin_users, webchat_*
 ```
 
-> **หมายเหตุ**: openclaw-api รันบน host โดยตรง (ไม่ใช่ Docker) เพราะต้องการ openclaw CLI
+> **หมายเหตุ**: openclaw-api รันบน host โดยตรง (ไม่ใช่ Docker) เพราะต้องอ่าน/เขียน config และคุยกับ gateway ได้ง่าย
+>
+> **สำคัญ**: gateway production ต้องรันจาก `/root/openclaw-runtime-2026.6.8-erp/dist/index.js` หรือ path runtime artifact ที่ติดตั้งไว้ ห้ามใช้ global `openclaw` เป็น runtime หลัก เพราะ official package อาจมี behavior ไม่ตรงกับ dev/custom ERP runtime
 
 ---
 
@@ -98,18 +104,20 @@ source ~/.bashrc
 แล้วติดตั้ง:
 
 ```bash
-npm install -g openclaw@2026.4.15 mcporter pm2
+npm install -g pm2 openclaw@2026.6.8
 ```
 
 ตรวจสอบ:
 
 ```bash
-openclaw --version
-mcporter --version
 pm2 --version
+openclaw --version
 ```
 
-> **สำคัญ**: ถ้าเปิด terminal ใหม่แล้ว `pm2` หรือ `openclaw` ไม่เจอ ให้รัน `source ~/.bashrc` อีกครั้ง
+> **สำคัญ**:
+> - `openclaw` global ใช้เป็น CLI ช่วยสร้าง/ตรวจ config เท่านั้น
+> - gateway production ในคู่มือนี้ **ไม่ได้รันจาก global openclaw** แต่รันจาก ERP runtime artifact ในขั้นตอนที่ 6
+> - ถ้าเปิด terminal ใหม่แล้ว `pm2` หรือ `openclaw` ไม่เจอ ให้รัน `source ~/.bashrc` อีกครั้ง
 
 ---
 
@@ -134,9 +142,9 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 
 ---
 
-## ขั้นตอนที่ 6 — ติดตั้ง openclaw-gateway
+## ขั้นตอนที่ 6 — ติดตั้ง OpenClaw ERP Gateway Runtime
 
-### 6.1 รัน onboard wizard
+### 6.1 สร้าง config พื้นฐานด้วย openclaw CLI
 
 ```bash
 openclaw onboard
@@ -147,47 +155,87 @@ wizard จะถามเรื่อง model/provider — **เลือกอ
 คำสั่งนี้สร้าง `~/.openclaw/openclaw.json` และ config พื้นฐาน
 
 > ค่าที่เลือกใน wizard แก้ได้ทั้งหมดผ่าน Web Admin ในขั้นตอนถัดไป
+> หลังจากนี้ CLI เป็นแค่ตัวช่วย config ไม่ใช่ runtime production
 
-### 6.2 ตรวจสอบและ start gateway
+### 6.2 ดาวน์โหลด ERP runtime artifact
 
 ```bash
-openclaw gateway status
+cd /root
+
+curl -fL -o openclaw-runtime-2026.6.8-erp-latest.tar.gz \
+  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.8-erp-20260618/openclaw-runtime-2026.6.8-erp-latest.tar.gz
+
+sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ```
 
-ถ้าเห็น `RPC probe: ok` — gateway รันอยู่แล้ว ไปขั้นตอน 6.3
+ต้องได้ค่า:
 
-ถ้า gateway ไม่รัน ให้รันผ่าน **pm2** (แนะนำ — auto-restart เมื่อ reboot):
+```text
+d812b5e3b6b0005ab10b7420e0f0310a94773d7e1f940d9e00dab295f030bea9  openclaw-runtime-2026.6.8-erp-latest.tar.gz
+```
+
+ถ้า checksum ไม่ตรง ให้ลบไฟล์แล้ว download ใหม่ ห้ามติดตั้งต่อ
+
+### 6.3 แตกไฟล์ runtime และสร้าง start script
 
 ```bash
-pm2 start $(npm root -g)/openclaw/dist/index.js \
-  --interpreter node \
-  --name openclaw-gateway \
-  -- gateway run --bind loopback --port 18789
+cd /root
+
+BACKUP_ID=$(date +%Y%m%d%H%M%S)
+mkdir -p /root/openclaw-backups/$BACKUP_ID
+
+cp -a /root/openclaw-runtime-2026.6.8-erp /root/openclaw-backups/$BACKUP_ID/openclaw-runtime-2026.6.8-erp 2>/dev/null || true
+cp -a /root/start-openclaw-gateway.sh /root/openclaw-backups/$BACKUP_ID/start-openclaw-gateway.sh 2>/dev/null || true
+
+rm -rf /root/openclaw-runtime-2026.6.8-erp
+tar -xzf /root/openclaw-runtime-2026.6.8-erp-latest.tar.gz -C /root --no-same-owner
+
+cat > /root/start-openclaw-gateway.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+export HOME=/root
+export PATH=/root/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+exec /usr/bin/node /root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789
+SH
+
+chmod +x /root/start-openclaw-gateway.sh
+
+echo "BACKUP_ID=$BACKUP_ID"
+```
+
+### 6.4 Start gateway ผ่าน pm2
+
+```bash
+pm2 delete openclaw-gateway || true
+fuser -k 18789/tcp || true
+pm2 start /root/start-openclaw-gateway.sh --name openclaw-gateway --cwd /root
+sleep 8
+
+pm2 list
+ss -ltnp | grep 18789 || true
 pm2 save
 ```
 
-> **หมายเหตุ**: ใช้ `node` รัน gateway โดยตรง — อย่าใช้ `openclaw gateway run` ผ่าน pm2 เพราะ CLI จะ exit หลัง spawn daemon ทำให้ pm2 restart วนไม่หยุด
-
-หรือรันแบบ background ชั่วคราว (ไม่ auto-restart):
+ตรวจสอบว่ารัน runtime ถูกตัว:
 
 ```bash
-nohup openclaw gateway run --bind loopback --port 18789 > /tmp/openclaw-gateway.log 2>&1 &
+ps -ef | grep -E "openclaw-runtime-2026.6.8-erp|openclaw.*gateway" | grep -v grep
 ```
 
-ตรวจสอบ:
+ต้องเห็นประมาณนี้:
 
-```bash
-ss -tlnp | grep 18789
+```text
+node /root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789
 ```
 
-> **หมายเหตุ**: ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` แทน `openclaw gateway restart` ทุกครั้ง
+> **สำคัญ**: ห้าม start gateway ด้วย `openclaw gateway run` ใน production เพราะจะกลับไปใช้ official runtime ที่อาจไม่เหมือน dev
 
-### 6.3 ตั้งค่า Hooks สำหรับ Webchat
+### 6.5 ตั้งค่า Hooks สำหรับ Webchat
 
 เปิดไฟล์ config:
 
 ```bash
-nano ~/.openclaw/openclaw.json
+nano /root/.openclaw/openclaw.json
 ```
 
 เพิ่ม section `hooks` ที่ระดับ root (ข้างนอก `gateway` object):
@@ -210,11 +258,7 @@ nano ~/.openclaw/openclaw.json
 Restart gateway:
 
 ```bash
-# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
 pm2 restart openclaw-gateway
-
-# ถ้ารัน gateway แบบอื่น
-openclaw gateway restart
 ```
 
 ---
@@ -320,7 +364,7 @@ docker compose down -v && docker compose up -d --build
 ```bash
 git clone https://github.com/bosocmputer/openclaw-api.git ~/openclaw-api
 cd ~/openclaw-api
-npm install
+npm ci --omit=dev
 ```
 
 ### 8.2 สร้างไฟล์ .env
@@ -336,12 +380,14 @@ API_TOKEN=ค่า API_TOKEN เดียวกับใน ~/openclaw-admin/.e
 PORT=4000
 DATABASE_URL=postgresql://openclaw:POSTGRES_PASSWORD_HERE@localhost:5432/openclaw_admin
 HOOKS_TOKEN=ค่า HOOKS_TOKEN จากขั้นตอน 5 (ค่าเดิม อย่า generate ใหม่)
+OPENCLAW_BIN=/root/openclaw-runtime-2026.6.8-erp/dist/index.js
 ```
 
 > - `API_TOKEN` ต้องตรงกับ `API_TOKEN` ใน `~/openclaw-admin/.env`
 > - `POSTGRES_PASSWORD_HERE` ต้องเป็นรหัสผ่านเดียวกับ `POSTGRES_PASSWORD` ใน `~/openclaw-admin/.env`
 > - `HOOKS_TOKEN` ต้องตรงกับ `hooks.token` ใน `~/.openclaw/openclaw.json`
 > - DATABASE_URL ใช้ `localhost` เสมอ — PostgreSQL expose port 5432 ออกมาที่ host
+> - `OPENCLAW_BIN` สำคัญมาก — ทำให้หน้า Model ทดสอบด้วย ERP runtime artifact ตัวเดียวกับ gateway จริง ไม่ใช่ global `openclaw`
 
 ### 8.3 รันด้วย pm2
 
@@ -399,12 +445,29 @@ password: superadmin
 
 ## ขั้นตอนที่ 10 — ตั้งค่าระบบผ่านหน้าเว็บ
 
-### 10.1 ตั้ง Model (API Key)
+### 10.1 ตั้ง Model และทดสอบ Runtime จริง
 
 1. เมนู **Model**
-2. เลือก Provider (แนะนำ **OpenRouter**)
-3. วาง API Key → กด **Test** → ต้องได้ ✓
-4. เลือก Model → กด **Save**
+2. ส่วน **Provider Keys**:
+   - ใส่ API key ของ provider ที่ใช้ เช่น OpenRouter หรือ Kilo AI
+   - กด **ทดสอบ key** — ต้องผ่านก่อนเลือก model
+3. ส่วน **Model ข้อความ**:
+   - เลือก **Model หลัก** (บังคับ)
+   - เลือก **Model สำรอง** ได้หลายตัว (ไม่บังคับ แต่แนะนำอย่างน้อย 1 ตัว)
+   - พิมพ์ข้อความทดสอบ เช่น `สวัสดีครับ`
+   - กด **ทดสอบ model นี้** กับ Model หลักและ Model สำรองที่เลือก
+   - ต้องเห็นสถานะ **ทดสอบผ่าน** ก่อนบันทึก
+4. ส่วน **Model รูปภาพ**:
+   - ไม่บังคับ เปิดเฉพาะเมื่อลูกค้าจะส่งรูปสินค้าให้ chatbot
+   - ถ้าเปิด ต้องอัปโหลดรูปทดสอบและกดทดสอบให้ผ่านก่อน
+5. กด **บันทึกค่า Model**
+6. กด **Restart Gateway**
+7. ทดสอบ Telegram ใหม่ด้วย `/reset` และ `สวัสดี`
+
+> **สำคัญสำหรับ Kilo AI**:
+> - การเห็น model ใน catalog ยังไม่พอ ต้องผ่าน **runtime test** จริงก่อน
+> - ถ้าไม่ผ่านและขึ้นว่า “Model นี้อยู่ใน catalog แต่ OpenClaw runtime ใช้งานจริงไม่ได้” ห้าม save model นั้น ให้เลือกตัวอื่นหรืออัปเดต `openclaw-api`/runtime ก่อน
+> - ถ้าเคยใช้ Kilo ก่อนอัปเดต อาจมี catalog เก่าค้าง ต้องทำตามหัวข้อแก้ปัญหา “Kilo model เป็น Unknown model”
 
 ### 10.2 เพิ่ม Agent
 
@@ -556,11 +619,7 @@ nano ~/.openclaw/openclaw.json
 Restart gateway:
 
 ```bash
-# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
 pm2 restart openclaw-gateway
-
-# ถ้ารัน gateway แบบอื่น
-openclaw gateway restart
 ```
 
 **เพิ่ม Webhook Route ผ่าน Web Admin:**
@@ -614,10 +673,35 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
 
 ## ขั้นตอนที่ 11 — ทดสอบระบบ
 
+**ทดสอบ Model Runtime ก่อนทดสอบแชท:**
+
+1. เมนู **Model**
+2. เลือก model ที่ใช้งานจริง
+3. พิมพ์ข้อความทดสอบ เช่น `สวัสดีครับ`
+4. กด **ทดสอบ model นี้**
+5. ต้องได้คำตอบจาก AI และสถานะ **ทดสอบผ่าน**
+
+ทดสอบผ่าน command line ได้ด้วย:
+
+```bash
+cd ~/openclaw-api
+TOKEN=$(grep -E '^API_TOKEN=' .env | cut -d= -f2-)
+
+curl -sS -X POST "http://127.0.0.1:4000/api/models/message-test" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"primary":"kilocode/openai/gpt-4o-mini","fallbacks":[],"prompt":"สวัสดีครับ","capability":"text","refresh":true}' \
+  | python3 -m json.tool
+```
+
+> ถ้าไม่ได้ใช้ Kilo ให้เปลี่ยน `primary` เป็น model provider ที่เลือก เช่น `openrouter/google/gemini-2.5-flash-lite`
+
 **ทดสอบ Telegram:**
 
 1. เปิด Telegram → ค้นหา Bot → กด **Start**
-2. ลองถามคำถามเกี่ยวกับสินค้าหรือลูกค้า
+2. ส่ง `/reset`
+3. ส่ง `สวัสดี`
+4. ลองถามคำถามเกี่ยวกับสินค้าหรือลูกค้า
 
 **ทดสอบ Webchat:**
 
@@ -625,26 +709,223 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
 2. เลือกห้องแชท → พิมพ์ข้อความ
 3. Bot ต้องตอบกลับใน Webchat เท่านั้น — ไม่ตอบใน LINE หรือ Telegram
 
+### 11.1 Post-deploy Health Gate (ต้องทำทุกครั้งหลังติดตั้ง/อัปเดต)
+
+หลังติดตั้งหรืออัปเดต runtime/API/Admin ให้ทำ health gate นี้ทุกครั้งก่อนส่งมอบงาน ลูกค้าควรเห็น Dashboard เป็น `Overall Health = OK` หรืออย่างน้อยไม่มี warning ที่ต้อง action จริง
+
+#### 1) ยืนยันว่า Telegram regression ผ่านแล้ว
+
+ทดสอบใน Telegram จริงก่อน:
+
+```text
+/reset
+สวัสดี
+ขอเช็คราคา โช๊ค jazz
+ขอเช็คยอดคงเหลือ โช๊ค jazz
+```
+
+ถ้าตอบถูกต้อง ให้บันทึกผล regression ใน openclaw-api:
+
+```bash
+cd ~/openclaw-api
+TOKEN=$(grep -E '^API_TOKEN=' .env | cut -d= -f2-)
+
+curl -sS -X POST "http://127.0.0.1:4000/api/dashboard/telegram-regression/pass" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"note":"post-deploy-telegram-regression-passed"}' \
+  | python3 -m json.tool
+```
+
+> ถ้าไม่บันทึกขั้นตอนนี้ Dashboard อาจขึ้น `ทดสอบ Telegram หลังเปลี่ยน runtime` แม้ bot ใช้งานได้แล้ว
+
+#### 2) ทดสอบ model ที่ config ใช้อยู่จริง
+
+คำสั่งนี้จะอ่าน model ที่ยังไม่ผ่าน runtime verification แล้วทดสอบทีละตัว ผลทดสอบจะถูกเก็บไว้ใน `~/.openclaw/model-runtime-test-cache.json` เพื่อให้ Health ไม่กลับไปเป็น `runtime_unverified` หลัง restart API
+
+```bash
+cd ~/openclaw-api
+TOKEN=$(grep -E '^API_TOKEN=' .env | cut -d= -f2-)
+
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:4000/api/models/readiness?refresh=true" \
+  -o /tmp/model-readiness.json
+
+python3 - <<'PY' > /tmp/models-to-test.txt
+import json
+d=json.load(open('/tmp/model-readiness.json'))
+seen=set()
+for issue in d.get('runtimeVerificationIssues', []):
+    ref=issue.get('ref')
+    cap=issue.get('capability') or 'text'
+    if ref and (ref,cap) not in seen:
+        seen.add((ref,cap))
+        print(ref, cap)
+PY
+
+cat /tmp/models-to-test.txt
+
+while read MODEL CAPABILITY; do
+  [ -n "$MODEL" ] || continue
+  echo "== test $MODEL ($CAPABILITY) =="
+  curl -sS -X POST "http://127.0.0.1:4000/api/models/runtime-test" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"$MODEL\",\"capability\":\"$CAPABILITY\",\"mode\":\"gateway\",\"refresh\":true}" \
+    -o /tmp/model-runtime-test.json
+  python3 - <<'PY'
+import json
+d=json.load(open('/tmp/model-runtime-test.json'))
+print(d.get('model'), d.get('status'), d.get('durationMs'), d.get('safeMessage'))
+PY
+done < /tmp/models-to-test.txt
+```
+
+> ถ้า `/tmp/models-to-test.txt` ว่าง แปลว่าไม่มี model runtime issue เหลืออยู่
+
+#### 3) ตรวจ Dashboard health ต้องไม่มี warning
+
+```bash
+cd ~/openclaw-api
+TOKEN=$(grep -E '^API_TOKEN=' .env | cut -d= -f2-)
+
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:4000/api/dashboard/overview?refresh=true" \
+  -o /tmp/dashboard-overview.json
+
+python3 - <<'PY'
+import json
+d=json.load(open('/tmp/dashboard-overview.json'))
+print("health =", d.get("health",{}).get("status"))
+print("warnings =", [(w.get("id"), w.get("summary")) for w in d.get("health",{}).get("warnings",[])])
+PY
+```
+
+ผลที่ต้องการ:
+
+```text
+health = ok
+warnings = []
+```
+
 ---
 
 ## การอัปเดตระบบ
+
+> Production policy: gateway ต้องอัปเดตด้วย **OpenClaw ERP Runtime Artifact** เท่านั้น เพื่อให้ behavior เหมือน dev server ห้ามใช้ `npm install -g openclaw@latest` แล้วรันเป็น gateway runtime โดยตรง
+
+### อัปเดต OpenClaw ERP Runtime
+
+```bash
+cd /root
+
+curl -fL -o openclaw-runtime-2026.6.8-erp-latest.tar.gz \
+  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.8-erp-20260618/openclaw-runtime-2026.6.8-erp-latest.tar.gz
+
+sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
+```
+
+ต้องได้:
+
+```text
+d812b5e3b6b0005ab10b7420e0f0310a94773d7e1f940d9e00dab295f030bea9  openclaw-runtime-2026.6.8-erp-latest.tar.gz
+```
+
+ถ้า checksum ตรง ให้ติดตั้ง:
+
+```bash
+cd /root
+
+BACKUP_ID=$(date +%Y%m%d%H%M%S)
+mkdir -p /root/openclaw-backups/$BACKUP_ID
+
+cp -a /root/openclaw-runtime-2026.6.8-erp /root/openclaw-backups/$BACKUP_ID/openclaw-runtime-2026.6.8-erp 2>/dev/null || true
+cp -a /root/start-openclaw-gateway.sh /root/openclaw-backups/$BACKUP_ID/start-openclaw-gateway.sh 2>/dev/null || true
+
+rm -rf /root/openclaw-runtime-2026.6.8-erp
+tar -xzf /root/openclaw-runtime-2026.6.8-erp-latest.tar.gz -C /root --no-same-owner
+
+cat > /root/start-openclaw-gateway.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+export HOME=/root
+export PATH=/root/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+exec /usr/bin/node /root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789
+SH
+
+chmod +x /root/start-openclaw-gateway.sh
+
+pm2 delete openclaw-gateway || true
+fuser -k 18789/tcp || true
+pm2 start /root/start-openclaw-gateway.sh --name openclaw-gateway --cwd /root
+sleep 8
+
+pm2 list
+ss -ltnp | grep 18789 || true
+pm2 save
+
+echo "BACKUP_ID=$BACKUP_ID"
+```
+
+ตรวจสอบว่ารัน runtime ถูกตัว:
+
+```bash
+ps -ef | grep -E "openclaw-runtime-2026.6.8-erp|openclaw.*gateway" | grep -v grep
+```
+
+ต้องเห็น:
+
+```text
+node /root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789
+```
+
+Rollback:
+
+```bash
+BACKUP_ID=<backup-id>
+pm2 delete openclaw-gateway || true
+rm -rf /root/openclaw-runtime-2026.6.8-erp
+cp -a /root/openclaw-backups/$BACKUP_ID/openclaw-runtime-2026.6.8-erp /root/openclaw-runtime-2026.6.8-erp
+cp -a /root/openclaw-backups/$BACKUP_ID/start-openclaw-gateway.sh /root/start-openclaw-gateway.sh
+pm2 start /root/start-openclaw-gateway.sh --name openclaw-gateway --cwd /root
+pm2 save
+```
 
 ### อัปเดต openclaw-api
 
 ```bash
 cd ~/openclaw-api
-git pull origin main
-npm install
-pm2 restart openclaw-api
+git pull --ff-only origin main
+npm ci --omit=dev
+pm2 restart openclaw-api --update-env
+pm2 save
 ```
 
 ### อัปเดต openclaw-admin
 
 ```bash
 cd ~/openclaw-admin
-git pull origin main
+git pull --ff-only origin main
 docker compose up -d --build
 ```
+
+### อัปเดตทั้งระบบ
+
+ทำตามลำดับนี้:
+
+1. อัปเดต OpenClaw ERP Runtime
+2. อัปเดต openclaw-api
+3. อัปเดต openclaw-admin
+4. Smoke test Telegram:
+
+```text
+/reset
+สวัสดี
+ขอเช็คราคา โช๊ค jazz
+ขอเช็คยอดคงเหลือ โช๊ค jazz
+```
+
+5. ทำหัวข้อ **11.1 Post-deploy Health Gate** เพื่อบันทึก regression, runtime-test model และยืนยันว่า Dashboard เป็น `health = ok`
 
 ---
 
@@ -659,21 +940,25 @@ docker logs openclaw-admin-openclaw-admin-1 --tail 20
 
 ### Gateway ไม่ออนไลน์ (Dashboard แสดง offline)
 
-ถ้ารัน gateway ผ่าน pm2 (แนะนำ):
+เช็คก่อนว่า process ใช้ runtime artifact:
+
+```bash
+ps -ef | grep -E "openclaw-runtime-2026.6.8-erp|openclaw.*gateway" | grep -v grep
+```
+
+ถ้าไม่เห็น `/root/openclaw-runtime-2026.6.8-erp/dist/index.js` ให้ติดตั้ง runtime artifact ใหม่ตามหัวข้อ "อัปเดต OpenClaw ERP Runtime"
+
+ถ้าเห็นแล้ว ให้ restart และดู log:
 
 ```bash
 pm2 restart openclaw-gateway
-pm2 logs openclaw-gateway --lines 30
+pm2 logs openclaw-gateway --lines 120
+tail -n 160 /tmp/openclaw/openclaw-$(date +%F).log
 ```
 
-ถ้ารัน gateway แบบอื่น:
-
-```bash
-openclaw gateway restart
-openclaw gateway status
-```
-
-> **หมายเหตุ**: อย่าใช้ `kill` + `nohup` ถ้า gateway อยู่ใน pm2 เพราะ pm2 จะ restart ขึ้นมาใหม่อัตโนมัติอยู่แล้ว — การรัน `nohup` ซ้อนจะทำให้มี 2 process
+> **หมายเหตุ**:
+> - อย่าใช้ `openclaw gateway restart` ใน production flow นี้ เพราะอาจกลับไปใช้ official/global runtime
+> - อย่าใช้ `kill` + `nohup` ถ้า gateway อยู่ใน pm2 เพราะอาจเกิด 2 process หรือชน port 18789
 
 ### openclaw-api ไม่ตอบสนอง
 
@@ -705,7 +990,155 @@ pm2 status
 2. **Dashboard → Config Health** — ถ้าไม่ Valid กด **Auto Fix**
 3. เช็คว่า Bot ผูก Agent ไว้ใน **Telegram**
 4. เช็คว่า User ID ถูก add ใน **Agents → Users**
-5. กด **Restart Gateway** จาก Dashboard
+5. เช็คว่า gateway ใช้ runtime artifact:
+
+```bash
+ps -ef | grep -E "openclaw-runtime-2026.6.8-erp|openclaw.*gateway" | grep -v grep
+```
+
+6. เช็ค log:
+
+```bash
+tail -n 160 /tmp/openclaw/openclaw-$(date +%F).log
+```
+
+7. Restart gateway:
+
+```bash
+pm2 restart openclaw-gateway
+```
+
+ถ้า Telegram Web ขึ้น `This message is not supported on the web version of Telegram` แปลว่า gateway ไม่ได้ใช้ custom ERP runtime หรือ runtime artifact ไม่ตรงกับ dev ให้ติดตั้ง runtime artifact ใหม่ตามหัวข้อ "อัปเดต OpenClaw ERP Runtime"
+
+### Kilo model เป็น Unknown model / Telegram ขึ้น Something went wrong
+
+อาการ:
+
+- หน้า Telegram ตอบ `⚠️ Something went wrong while processing your request`
+- log มี `Unknown model: kilocode/...` หรือ `All models failed`
+- บางครั้งหน้า Model ทดสอบ key/catalog ได้ แต่ gateway ยังใช้ model ไม่ได้
+
+สาเหตุหลัก:
+
+1. `openclaw-api` ไม่ได้ใช้ `OPENCLAW_BIN=/root/openclaw-runtime-2026.6.8-erp/dist/index.js`
+2. gateway ยังไม่ได้ restart หลัง save model
+3. Kilo catalog เก่าค้างและ schema ไม่ตรงกับ runtime
+4. `openclaw-api` ยังไม่ใช่ version ล่าสุดที่ sanitize Kilo catalog
+
+แก้ตามลำดับนี้:
+
+```bash
+cd ~/openclaw-api
+grep -E '^OPENCLAW_BIN=' .env || echo 'OPENCLAW_BIN missing'
+```
+
+ถ้าไม่มี ให้เพิ่ม:
+
+```bash
+cat >> ~/openclaw-api/.env <<'EOF'
+OPENCLAW_BIN=/root/openclaw-runtime-2026.6.8-erp/dist/index.js
+EOF
+```
+
+อัปเดต API และ restart:
+
+```bash
+cd ~/openclaw-api
+git pull --ff-only origin main
+npm ci --omit=dev
+pm2 restart openclaw-api --update-env
+pm2 save
+```
+
+ทดสอบให้ API materialize Kilo catalog ใหม่:
+
+```bash
+cd ~/openclaw-api
+TOKEN=$(grep -E '^API_TOKEN=' .env | cut -d= -f2-)
+
+curl -sS -X POST "http://127.0.0.1:4000/api/models/message-test" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"primary":"kilocode/openai/gpt-4o-mini","fallbacks":["kilocode/google/gemini-3.1-flash-lite"],"prompt":"สวัสดีครับ","capability":"text","refresh":true}' \
+  | python3 -m json.tool
+```
+
+ถ้ายังเห็น `Invalid models.json schema` ใน gateway log ให้ซ่อม catalog เก่าที่ค้าง:
+
+```bash
+BACKUP_ID=$(date +%Y%m%d%H%M%S)
+mkdir -p /root/openclaw-backups/$BACKUP_ID
+cp -a /root/.openclaw /root/openclaw-backups/$BACKUP_ID/openclaw-state
+
+python3 - <<'PY'
+import json, glob, os, shutil, time
+
+allowed = {'text', 'image'}
+ts = str(int(time.time()))
+paths = ['/root/.openclaw/openclaw.json']
+paths += glob.glob('/root/.openclaw/agents/*/agent/plugins/kilocode/catalog.json')
+
+def normalize(values):
+    if not isinstance(values, list):
+        values = ['text']
+    out = []
+    for v in values:
+        s = str(v or '').strip().lower()
+        if s in ('vision', 'images'):
+            s = 'image'
+        if s in ('messages', 'prompt'):
+            s = 'text'
+        if s in allowed and s not in out:
+            out.append(s)
+    return out or ['text']
+
+for p in paths:
+    if not os.path.exists(p):
+        continue
+    with open(p) as f:
+        d = json.load(f)
+
+    providers = []
+    if isinstance(d.get('models', {}).get('providers', {}).get('kilocode'), dict):
+        providers.append(d['models']['providers']['kilocode'])
+    if isinstance(d.get('providers', {}).get('kilocode'), dict):
+        providers.append(d['providers']['kilocode'])
+
+    changed = 0
+    for provider in providers:
+        models = provider.get('models')
+        if not isinstance(models, list):
+            continue
+        for m in models:
+            if not isinstance(m, dict):
+                continue
+            next_input = normalize(m.get('input'))
+            if m.get('input') != next_input:
+                m['input'] = next_input
+                changed += 1
+
+    if changed:
+        shutil.copy2(p, f'{p}.bak-input-{ts}')
+        with open(p, 'w') as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+            f.write('\n')
+        print('repaired', p, changed)
+PY
+```
+
+Restart gateway และ reset session:
+
+```bash
+pm2 restart openclaw-gateway --update-env
+pm2 save
+
+cd ~/openclaw-api
+TOKEN=$(grep -E '^API_TOKEN=' .env | cut -d= -f2-)
+curl -sS -X POST "http://127.0.0.1:4000/api/agents/stock/sessions/reset-active" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"post-kilo-catalog-repair"}'
+```
 
 ### Webchat ไม่ตอบ (timeout / 502)
 
@@ -721,12 +1154,7 @@ grep -A5 '"hooks"' ~/.openclaw/openclaw.json
 3. Restart:
 
 ```bash
-# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
 pm2 restart openclaw-gateway
-
-# ถ้ารัน gateway แบบอื่น
-openclaw gateway restart
-
 pm2 restart openclaw-api --update-env
 ```
 
@@ -785,11 +1213,7 @@ EOF
 แล้ว restart gateway:
 
 ```bash
-# ถ้ารัน gateway ผ่าน pm2 (แนะนำ)
 pm2 restart openclaw-gateway
-
-# ถ้ารัน gateway แบบอื่น
-openclaw gateway restart
 ```
 
 ### Webchat สร้างห้องไม่ได้ (error: role "openclaw" does not exist)
@@ -815,28 +1239,50 @@ docker exec -it openclaw-admin-postgres-1 psql -U openclaw -d openclaw_admin -c 
 
 ---
 
-## ทางเลือก — รัน Gateway เป็น Persistent Service
+## Persistent Service Policy
 
-### ผ่าน pm2
+### ผ่าน pm2 (แนะนำ)
 
 ```bash
-pm2 start $(npm root -g)/openclaw/dist/index.js \
-  --interpreter node \
-  --name openclaw-gateway \
-  -- gateway run --bind loopback --port 18789
+pm2 start /root/start-openclaw-gateway.sh --name openclaw-gateway --cwd /root
 pm2 save
 pm2 startup
 ```
 
-> ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` แทน `openclaw gateway restart` ทุกครั้ง
+> ถ้ารัน gateway ผ่าน pm2 ให้ใช้ `pm2 restart openclaw-gateway` ทุกครั้ง
 
-### ผ่าน systemd (openclaw CLI)
+### ผ่าน systemd user service (runtime artifact)
+
+สร้างไฟล์ `~/.config/systemd/user/openclaw-gateway.service`:
+
+```ini
+[Unit]
+Description=OpenClaw Gateway ERP Runtime
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root
+Environment=HOME=/root
+Environment=PATH=/root/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/node /root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+เปิดใช้งาน:
 
 ```bash
-openclaw gateway install
+systemctl --user daemon-reload
 systemctl --user enable openclaw-gateway.service
-systemctl --user start openclaw-gateway.service
+systemctl --user restart openclaw-gateway.service
+systemctl --user status openclaw-gateway.service --no-pager
 ```
+
+> อย่าใช้ `openclaw gateway install` ใน production flow นี้ เพราะจะสร้าง service ที่ชี้ไป official/global runtime แทน custom ERP runtime
 
 ---
 
@@ -854,63 +1300,24 @@ systemctl --user start openclaw-gateway.service
 | Telegram Bot Token(s) | |
 | OpenRouter API Key | |
 | MCP Server URL | |
+| Runtime Artifact URL | `https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.8-erp-20260618/openclaw-runtime-2026.6.8-erp-latest.tar.gz` |
+| Runtime SHA256 | `d812b5e3b6b0005ab10b7420e0f0310a94773d7e1f940d9e00dab295f030bea9` |
 | LINE Tunnel URL | (เปลี่ยนทุก restart) |
 
 ---
 
-## อัปเดตระบบ (สำหรับเครื่องที่ติดตั้งไว้แล้ว)
-
-> ใช้เมื่อมี version ใหม่ของ openclaw-admin, openclaw-api หรือ openclaw CLI
-
-### ขั้นตอนการ update ทั้งระบบ
+## ตรวจสอบสถานะหลังติดตั้งหรือ update
 
 ```bash
-# 1. อัปเดต OpenClaw CLI + migrate config
-npm install -g openclaw@2026.6.1
-openclaw doctor --fix          # ← ต้องใส่ --fix ด้วย ไม่งั้นแค่ report ไม่ migrate
-
-# 2. เช็คชื่อ gateway process แล้ว restart
-pm2 list                            # ดูชื่อ process ที่รัน gateway อยู่
-pm2 restart <ชื่อ-gateway-process>  # restart ตามชื่อที่เห็น
-
-# 3. อัปเดต openclaw-api
-cd ~/openclaw-api
-git pull
-pm2 restart openclaw-api
-
-# 4. อัปเดต openclaw-admin (rebuild Docker)
-cd ~/openclaw-admin
-git pull
-docker compose up -d --build
-```
-
-> **หมายเหตุ**: `docker compose up -d --build` ใช้เวลาประมาณ 3–5 นาที รอจนขึ้น `Started` ก่อนใช้งาน
-
-### อัปเดตเฉพาะ openclaw-admin (ไม่ต้อง update CLI)
-
-```bash
-cd ~/openclaw-admin
-git pull
-docker compose up -d --build
-```
-
-### อัปเดตเฉพาะ openclaw-api
-
-```bash
-cd ~/openclaw-api
-git pull
-pm2 restart openclaw-api
-```
-
-### ตรวจสอบสถานะหลัง update
-
-```bash
-# เช็ค Docker container
+# Docker container
 docker ps | grep openclaw
 
-# เช็ค pm2
+# pm2
 pm2 list
 
-# เช็ค openclaw version
-openclaw --version
+# Runtime ที่ gateway ใช้จริง
+ps -ef | grep -E "openclaw-runtime-2026.6.8-erp|openclaw.*gateway" | grep -v grep
+
+# Gateway log
+tail -n 120 /tmp/openclaw/openclaw-$(date +%F).log
 ```
