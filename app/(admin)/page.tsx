@@ -26,6 +26,7 @@ import {
   cleanSessions,
   getDashboardOverview,
   getDoctorStatus,
+  markTelegramRegressionPassed,
   restartGateway,
   runDoctorFix,
   type DashboardAgentRow,
@@ -210,6 +211,8 @@ interface Recommendation {
   detail: string
   actionLabel: string
   href: string
+  confirmAction?: 'telegram-regression-pass'
+  confirmLabel?: string
 }
 
 function addRecommendation(items: Recommendation[], next: Recommendation) {
@@ -243,13 +246,19 @@ function buildRecommendations(data: DashboardOverview): Recommendation[] {
   }
 
   if (healthWarnings.some(text => text.includes('runtime.guardrails'))) {
+    const missing = data.runtimeGuardrails?.markerMissing || []
+    const source = data.runtimeGuardrails?.source ? ` (${data.runtimeGuardrails.source})` : ''
     addRecommendation(items, {
       id: 'runtime-guardrails',
       severity: 'warn',
       title: 'ทดสอบ Telegram หลังเปลี่ยน runtime',
-      detail: 'Runtime ปัจจุบันอาจเป็น official package ที่ไม่มี ERP guardrail marker บางตัว. ให้รัน regression Telegram ก่อน rollout ลูกค้า และใช้ custom runtime เฉพาะเมื่อพบ regression จริง.',
+      detail: missing.length
+        ? `ยังไม่ได้ยืนยัน regression Telegram หลัง runtime update${source}. Marker ที่ยังไม่ครบ: ${missing.join(', ')}. ทดสอบ /reset, สวัสดี, ค้นสินค้า และเลือกเลขรายการก่อนกดยืนยัน.`
+        : 'ยังไม่ได้ยืนยัน regression Telegram หลัง runtime update. ทดสอบ bot จริงก่อน rollout ลูกค้า แล้วกดยืนยันเพื่อบันทึกผล.',
       actionLabel: 'Open Monitor',
       href: '/monitor',
+      confirmAction: 'telegram-regression-pass',
+      confirmLabel: 'ทดสอบผ่านแล้ว',
     })
   }
 
@@ -366,7 +375,15 @@ function recommendationTone(severity: RecommendationSeverity) {
   }
 }
 
-function RecommendedActions({ recommendations }: { recommendations: Recommendation[] }) {
+function RecommendedActions({
+  recommendations,
+  onConfirmAction,
+  confirmingAction,
+}: {
+  recommendations: Recommendation[]
+  onConfirmAction?: (action: NonNullable<Recommendation['confirmAction']>) => void
+  confirmingAction?: boolean
+}) {
   const hasCritical = recommendations.some(item => item.severity === 'critical')
   const hasWarn = recommendations.some(item => item.severity === 'warn')
   const statusLabel = hasCritical ? 'critical action' : hasWarn ? 'needs attention' : 'ready'
@@ -400,10 +417,24 @@ function RecommendedActions({ recommendations }: { recommendations: Recommendati
                   <Badge variant={tone.badge} className="shrink-0">{item.severity}</Badge>
                 </div>
                 <p className="min-h-12 text-xs leading-relaxed opacity-90">{item.detail}</p>
-                <a href={item.href} className="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-current/20 bg-background/50 px-2 text-xs font-medium hover:bg-background/80">
-                  {item.actionLabel}
-                  <ExternalLink className="size-3" />
-                </a>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <a href={item.href} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-current/20 bg-background/50 px-2 text-xs font-medium hover:bg-background/80">
+                    {item.actionLabel}
+                    <ExternalLink className="size-3" />
+                  </a>
+                  {item.confirmAction && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 border-current/20 bg-background/50 px-2 text-xs hover:bg-background/80"
+                      disabled={confirmingAction}
+                      onClick={() => onConfirmAction?.(item.confirmAction!)}
+                    >
+                      {confirmingAction ? 'กำลังบันทึก...' : item.confirmLabel}
+                    </Button>
+                  )}
+                </div>
               </div>
             )
           })}
@@ -555,6 +586,16 @@ export default function DashboardPage() {
       setTimeout(() => qc.invalidateQueries({ queryKey: ['dashboard-overview'] }), 3000)
     },
     onError: () => toast.error('Doctor fix failed'),
+  })
+
+  const telegramRegressionPass = useMutation({
+    mutationFn: () => markTelegramRegressionPassed('dashboard-confirmed-after-manual-telegram-test'),
+    onSuccess: () => {
+      toast.success('บันทึกผลทดสอบ Telegram แล้ว')
+      qc.invalidateQueries({ queryKey: ['dashboard-overview'] })
+      qc.invalidateQueries({ queryKey: ['doctor-status'] })
+    },
+    onError: () => toast.error('บันทึกผลทดสอบ Telegram ไม่สำเร็จ'),
   })
 
   function dismissNews() {
@@ -729,7 +770,13 @@ export default function DashboardPage() {
             />
           </div>
 
-          <RecommendedActions recommendations={recommendations} />
+          <RecommendedActions
+            recommendations={recommendations}
+            confirmingAction={telegramRegressionPass.isPending}
+            onConfirmAction={action => {
+              if (action === 'telegram-regression-pass') telegramRegressionPass.mutate()
+            }}
+          />
 
           <div className="grid gap-4 xl:grid-cols-3">
             <Card className="xl:col-span-2">

@@ -1112,11 +1112,29 @@ export interface DashboardOverview {
   cost: DashboardCostSummary
   agents: DashboardAgentRow[]
   recentTurns: DashboardRecentTurn[]
+  runtimeGuardrails?: {
+    root?: string | null
+    source?: string | null
+    markers?: Record<string, boolean>
+    markerMissing?: string[]
+    telegramRegression?: {
+      passedAt?: string | null
+      fresh?: boolean
+      note?: string
+      runtimeRoot?: string | null
+      markerMissing?: string[]
+    }
+  }
   whatsNew: { version: string; items: DashboardWhatsNewItem[] }
 }
 
 export async function getDashboardOverview(refresh = false): Promise<DashboardOverview> {
   const { data } = await api.get('/api/dashboard/overview', { params: refresh ? { refresh: true } : {} })
+  return data
+}
+
+export async function markTelegramRegressionPassed(note = 'dashboard-confirmed'): Promise<{ ok: boolean; state?: unknown }> {
+  const { data } = await api.post('/api/dashboard/telegram-regression/pass', { note })
   return data
 }
 
