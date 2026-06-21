@@ -8,6 +8,7 @@ export type AuditAction =
   | 'telegram.account.add' | 'telegram.account.delete' | 'telegram.binding.update'
   | 'webchat.room.create' | 'webchat.room.update' | 'webchat.room.delete'
   | 'gateway.restart'
+  | 'conversation.backfill' | 'conversation.export'
 
 export async function audit(params: {
   actor: string       // username

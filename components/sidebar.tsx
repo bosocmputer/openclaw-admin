@@ -45,6 +45,7 @@ const adminGroups: NavGroup[] = [
     label: 'Conversations',
     items: [
       { href: '/monitor', label: 'Live Sessions' },
+      { href: '/analysis/conversations', label: 'Conversation Analysis' },
       { href: '/sessions', label: 'Checkpoints' },
     ],
   },
@@ -90,7 +91,8 @@ interface SidebarProps {
 }
 
 function NavLink({ href, label, pathname }: { href: string; label: string; pathname: string }) {
-  const active = href === '/' ? pathname === '/' : pathname.startsWith(href)
+  const exactOnly = href === '/' || href === '/analysis'
+  const active = exactOnly ? pathname === href : pathname.startsWith(href)
   return (
     <Link
       href={href}

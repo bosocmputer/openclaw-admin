@@ -1004,6 +1004,134 @@ export async function getMonitorCost(days = 30): Promise<CostData> {
   return data
 }
 
+// ─── Conversation Analysis ────────────────────────────────────────────────────
+
+export interface ConversationAnalysisSummary {
+  count: number
+  uniqueUsers: number
+  issueCount: number
+  modelTurns: number
+  toolOnlyTurns: number
+  totalCost: number
+  inputTokens: number
+  outputTokens: number
+  avgDurationMs: number | null
+  p50DurationMs: number | null
+  p95DurationMs: number | null
+  byStatus: Record<string, number>
+  byRoute: Record<string, number>
+  byIntent: Record<string, number>
+}
+
+export interface ConversationAnalysisTurn {
+  id: string
+  source: string
+  sessionKey?: string | null
+  startedAt: string
+  agentId: string | null
+  channel: string
+  user: string
+  userText: string
+  finalText: string
+  route: string
+  intent: string
+  status: string
+  rootCause?: string | null
+  durationMs?: number | null
+  ackMs?: number | null
+  modelMs?: number | null
+  model?: string | null
+  provider?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cost?: number | null
+  toolCount: number
+  warningCount: number
+}
+
+export interface ConversationAnalysisEvent {
+  type: string
+  occurredAt: string
+  title: string
+  body: string
+  payload: Record<string, unknown>
+}
+
+export interface ConversationAnalysisData {
+  generatedAt: string
+  filters: Record<string, unknown>
+  summary: ConversationAnalysisSummary
+  turns: ConversationAnalysisTurn[]
+  hasMore: boolean
+  nextCursor: string | null
+  warnings: { type: string; summary: string }[]
+}
+
+export interface ConversationAnalysisDetail {
+  turn: ConversationAnalysisTurn
+  events: ConversationAnalysisEvent[]
+}
+
+export interface ConversationIngestStatus {
+  enabled: boolean
+  retentionDays: number
+  workerRunning: boolean
+  turns: { count: number; from: string | null; to: string | null }
+  checkpoints: Array<Record<string, unknown>>
+  recentExports: Array<Record<string, unknown>>
+}
+
+export interface ConversationBackfillResult {
+  ok: boolean
+  dryRun?: boolean
+  disabled?: boolean
+  imported: number
+  skipped: number
+  discovered?: number
+  days?: number
+  reason?: string
+}
+
+export interface ConversationAnalysisParams {
+  from?: string
+  to?: string
+  agent?: string
+  channel?: string
+  user?: string
+  intent?: string
+  route?: string
+  status?: string
+  model?: string
+  q?: string
+  limit?: number
+  cursor?: string | null
+}
+
+export async function getConversationAnalysis(params: ConversationAnalysisParams = {}): Promise<ConversationAnalysisData> {
+  const { data } = await api.get('/api/analysis/conversations', { params })
+  return data
+}
+
+export async function getConversationAnalysisDetail(turnId: string): Promise<ConversationAnalysisDetail> {
+  const { data } = await api.get(`/api/analysis/conversations/${encodeURIComponent(turnId)}`)
+  return data
+}
+
+export async function getConversationIngestStatus(): Promise<ConversationIngestStatus> {
+  const { data } = await api.get('/api/analysis/conversations/ingest-status')
+  return data
+}
+
+export async function backfillConversations(body: { days?: number; from?: string; to?: string; agent?: string; channel?: string; dryRun?: boolean } = {}): Promise<ConversationBackfillResult> {
+  const { data } = await api.post('/api/analysis/conversations/backfill', body)
+  return data
+}
+
+export async function exportConversationAnalysis(params: ConversationAnalysisParams & { format: 'csv' | 'jsonl' | 'markdown' }): Promise<Blob> {
+  const { data } = await api.get('/api/analysis/conversations/export', { params, responseType: 'blob' })
+  return data
+}
+
 // ─── Dashboard Overview ───────────────────────────────────────────────────────
 
 export interface DashboardRelease {

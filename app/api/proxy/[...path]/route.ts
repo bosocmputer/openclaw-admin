@@ -36,6 +36,10 @@ function auditFor(method: string, path: string[]): { action: AuditAction; target
     return { action: 'config.update', detail: 'model settings updated' }
   }
   if (method === 'POST' && group === 'gateway' && id === 'restart') return { action: 'gateway.restart' }
+  if (group === 'analysis' && id === 'conversations') {
+    if (method === 'POST' && child === 'backfill') return { action: 'conversation.backfill', detail: 'conversation history backfill requested' }
+    if (method === 'GET' && child === 'export') return { action: 'conversation.export', detail: 'conversation history exported' }
+  }
   if (group === 'members') {
     if (method === 'POST') return { action: 'member.create' }
     if (method === 'PUT' || method === 'PATCH') return { action: 'member.update', target: id }
@@ -102,12 +106,10 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
   })
 
   const text = await res.text()
-  if (res.ok && req.method !== 'GET' && req.method !== 'HEAD') {
-    const entry = auditFor(req.method, path)
-    if (entry) {
-      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || undefined
-      await audit({ actor: session.username, ip, ...entry })
-    }
+  const auditEntry = auditFor(req.method, path)
+  if (res.ok && auditEntry && req.method !== 'HEAD') {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || undefined
+    await audit({ actor: session.username, ip, ...auditEntry })
   }
   return new NextResponse(text, {
     status: res.status,

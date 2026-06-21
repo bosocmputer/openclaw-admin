@@ -76,6 +76,76 @@ CREATE INDEX IF NOT EXISTS idx_sale_orders_created    ON sale_orders(created_at 
 CREATE INDEX IF NOT EXISTS idx_sale_orders_agent      ON sale_orders(agent_id);
 CREATE INDEX IF NOT EXISTS idx_sale_orders_source     ON sale_orders(source);
 
+CREATE TABLE IF NOT EXISTS conversation_turns (
+  turn_id       TEXT PRIMARY KEY,
+  source        TEXT NOT NULL DEFAULT 'unknown',
+  session_key   TEXT,
+  started_at    TIMESTAMPTZ NOT NULL,
+  agent_id      TEXT,
+  channel       TEXT NOT NULL DEFAULT 'unknown',
+  chat_user     TEXT NOT NULL DEFAULT 'unknown',
+  user_text     TEXT NOT NULL DEFAULT '',
+  final_text    TEXT NOT NULL DEFAULT '',
+  route         TEXT NOT NULL DEFAULT 'unknown',
+  intent        TEXT NOT NULL DEFAULT 'unknown',
+  status        TEXT NOT NULL DEFAULT 'unknown',
+  root_cause    TEXT,
+  duration_ms   INTEGER,
+  ack_ms        INTEGER,
+  model_ms      INTEGER,
+  model         TEXT,
+  provider      TEXT,
+  input_tokens  INTEGER,
+  output_tokens INTEGER,
+  cost          NUMERIC(14,8),
+  tool_count    INTEGER NOT NULL DEFAULT 0,
+  warning_count INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conversation_events (
+  id            BIGSERIAL PRIMARY KEY,
+  turn_id       TEXT NOT NULL REFERENCES conversation_turns(turn_id) ON DELETE CASCADE,
+  event_hash    TEXT NOT NULL,
+  event_index   INTEGER NOT NULL DEFAULT 0,
+  event_type    TEXT NOT NULL,
+  occurred_at   TIMESTAMPTZ,
+  title         TEXT,
+  body          TEXT,
+  payload       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(turn_id, event_hash)
+);
+
+CREATE TABLE IF NOT EXISTS conversation_ingest_checkpoints (
+  source_key       TEXT PRIMARY KEY,
+  source_path      TEXT,
+  source_kind      TEXT,
+  inode            TEXT,
+  mtime_ms         NUMERIC,
+  offset_bytes     NUMERIC,
+  last_imported_at TIMESTAMPTZ,
+  metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conversation_exports (
+  id         BIGSERIAL PRIMARY KEY,
+  actor      TEXT,
+  format     TEXT NOT NULL,
+  filters    JSONB NOT NULL DEFAULT '{}'::jsonb,
+  row_count  INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_turns_started_at      ON conversation_turns(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversation_turns_agent_started   ON conversation_turns(agent_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversation_turns_channel_started ON conversation_turns(channel, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversation_turns_status_started  ON conversation_turns(status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversation_turns_chat_started    ON conversation_turns(chat_user, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversation_events_turn           ON conversation_events(turn_id, event_index ASC);
+
 INSERT INTO admin_users (username, password, role, display_name)
 VALUES (
   'superadmin',
