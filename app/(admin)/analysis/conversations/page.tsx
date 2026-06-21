@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Archive, CalendarClock, ChevronRight, Download, Filter, RefreshCw, Search, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, BarChart3, CalendarClock, ChevronRight, Download, FileText, Filter, RefreshCw, Search, Tags, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -11,8 +11,10 @@ import {
   getAgents,
   getConversationAnalysis,
   getConversationAnalysisDetail,
+  getConversationInsights,
   getConversationIngestStatus,
   type ConversationAnalysisParams,
+  type ConversationIssue,
   type ConversationAnalysisTurn,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -23,6 +25,30 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const timeZone = 'Asia/Bangkok'
+
+const issueOptions = [
+  'search_no_result',
+  'low_confidence_search',
+  'wrong_product_candidates',
+  'selection_not_resolved',
+  'tool_error',
+  'model_timeout',
+  'fallback_used',
+  'slow_turn',
+  'price_denied',
+  'unsupported_capability',
+  'language_quality',
+  'duplicate_reply',
+  'needs_user_refine',
+]
+
+const reviewTargetOptions = [
+  'SOUL',
+  'MCP/search',
+  'model/runtime',
+  'user ambiguity',
+  'business capability',
+]
 
 function pad(value: number) {
   return String(value).padStart(2, '0')
@@ -61,6 +87,11 @@ function formatMoney(value?: number | null) {
   return `$${value.toFixed(4)}`
 }
 
+function formatPercent(value?: number | null) {
+  if (!value) return '0%'
+  return `${Math.round(value * 100)}%`
+}
+
 function shortText(value: string, max = 180) {
   if (!value) return ''
   return value.length > max ? `${value.slice(0, max)}…` : value
@@ -82,6 +113,24 @@ function statusVariant(status: string) {
   if (status === 'error') return 'destructive'
   if (status === 'warn') return 'secondary'
   return 'outline'
+}
+
+function issueVariant(tag: string) {
+  if (['tool_error', 'model_timeout', 'unsupported_capability'].includes(tag)) return 'destructive'
+  if (['slow_turn', 'needs_user_refine', 'fallback_used'].includes(tag)) return 'secondary'
+  return 'outline'
+}
+
+function evidencePreview(issue: ConversationIssue) {
+  try {
+    const keyword = issue.evidence?.keyword ? `keyword: ${String(issue.evidence.keyword)} · ` : ''
+    const reason = issue.evidence?.reason ? `${String(issue.evidence.reason)} · ` : ''
+    const tool = issue.evidence?.tool ? `tool: ${String(issue.evidence.tool)} · ` : ''
+    const text = `${keyword}${tool}${reason}${JSON.stringify(issue.evidence)}`
+    return shortText(text, 360)
+  } catch {
+    return shortText(String(issue.tag), 360)
+  }
 }
 
 function daysBetween(from: string, to: string) {
@@ -117,10 +166,16 @@ function TurnRow({ turn, selected, onSelect }: { turn: ConversationAnalysisTurn;
             <span className="text-xs tabular-nums opacity-70">{formatDateTime(turn.startedAt)}</span>
             <Badge variant={selected ? 'secondary' : statusVariant(turn.status)}>{turn.status}</Badge>
             <Badge variant="outline" className={selected ? 'border-white/30 text-white' : ''}>{turn.route}</Badge>
+            {(turn.issueTags ?? []).slice(0, 2).map(tag => (
+              <Badge key={tag} variant={selected ? 'secondary' : issueVariant(tag)} className={selected ? '' : 'max-w-[160px] truncate'}>
+                {tag}
+              </Badge>
+            ))}
           </div>
           <p className="mt-2 line-clamp-2 text-sm font-medium">{turn.userText || '(empty user message)'}</p>
           <p className={cn('mt-1 line-clamp-1 text-xs', selected ? 'text-white/70' : 'text-muted-foreground')}>
             {turn.agentId || 'unknown'} · {turn.channel} · {turn.intent}
+            {(turn.reviewTargets ?? []).length ? ` · ${(turn.reviewTargets ?? []).join(', ')}` : ''}
           </p>
         </div>
         <ChevronRight className="mt-1 size-4 shrink-0 opacity-50" />
@@ -138,6 +193,10 @@ export default function ConversationAnalysisPage() {
   const [channel, setChannel] = useState('all')
   const [status, setStatus] = useState('all')
   const [route, setRoute] = useState('all')
+  const [issueTag, setIssueTag] = useState('all')
+  const [reviewTarget, setReviewTarget] = useState('all')
+  const [hasToolError, setHasToolError] = useState(false)
+  const [slowOnly, setSlowOnly] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [cursor, setCursor] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -149,6 +208,10 @@ export default function ConversationAnalysisPage() {
     channel: channel === 'all' ? undefined : channel,
     status: status === 'all' ? undefined : status,
     route: route === 'all' ? undefined : route,
+    issueTag: issueTag === 'all' ? undefined : issueTag,
+    reviewTarget: reviewTarget === 'all' ? undefined : reviewTarget,
+    hasToolError: hasToolError || undefined,
+    slowOnly: slowOnly || undefined,
     q: keyword.trim() || undefined,
     limit: 100,
     cursor,
@@ -161,6 +224,11 @@ export default function ConversationAnalysisPage() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['conversation-analysis', params],
     queryFn: () => getConversationAnalysis(params),
+    retry: false,
+  })
+  const { data: insights } = useQuery({
+    queryKey: ['conversation-insights', baseParams],
+    queryFn: () => getConversationInsights(baseParams),
     retry: false,
   })
   const selectedTurn = useMemo(() => {
@@ -179,31 +247,36 @@ export default function ConversationAnalysisPage() {
     onSuccess: result => {
       toast.success(`Backfill เสร็จแล้ว: imported ${result.imported}, discovered ${result.discovered ?? 0}`)
       queryClient.invalidateQueries({ queryKey: ['conversation-analysis'] })
+      queryClient.invalidateQueries({ queryKey: ['conversation-insights'] })
       queryClient.invalidateQueries({ queryKey: ['conversation-ingest-status'] })
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'Backfill failed'),
   })
 
   const exportMutation = useMutation({
-    mutationFn: async (format: 'csv' | 'jsonl' | 'markdown') => {
-      const blob = await exportConversationAnalysis({ ...baseParams, format })
-      return { blob, format }
+    mutationFn: async (request: { format?: 'csv' | 'jsonl' | 'markdown'; mode?: 'raw' | 'codex_review_pack' | 'issues_csv' | 'events_jsonl'; filename: string }) => {
+      const blob = await exportConversationAnalysis({ ...baseParams, format: request.format, mode: request.mode })
+      return { blob, filename: request.filename }
     },
-    onSuccess: ({ blob, format }) => {
-      downloadBlob(blob, `conversation-history.${format === 'markdown' ? 'md' : format}`)
+    onSuccess: ({ blob, filename }) => {
+      downloadBlob(blob, filename)
       toast.success('Export complete')
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'Export failed'),
   })
 
   const summary = data?.summary
+  const insightSummary = insights?.summary
+  const exportDisabled = exportTooWide || exportMutation.isPending || (summary?.count ?? 0) === 0
   const events = detail?.events ?? []
   const hasTrace = events.some(event => event.type === 'trace')
+  const selectedIssues = detail?.turn?.issues ?? selectedTurn?.issues ?? []
 
   function resetCursorAndRefetch() {
     setCursor(null)
     setSelectedId(null)
     void queryClient.invalidateQueries({ queryKey: ['conversation-analysis'] })
+    void queryClient.invalidateQueries({ queryKey: ['conversation-insights'] })
   }
 
   return (
@@ -234,12 +307,12 @@ export default function ConversationAnalysisPage() {
             ตัวกรอง
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 pt-4 lg:grid-cols-[repeat(6,minmax(0,1fr))]">
-          <label className="space-y-1.5 lg:col-span-2">
+        <CardContent className="grid gap-3 pt-4 xl:grid-cols-[repeat(8,minmax(0,1fr))]">
+          <label className="space-y-1.5 xl:col-span-2">
             <span className="text-xs font-medium text-muted-foreground">เริ่ม</span>
             <Input type="datetime-local" value={from} onChange={e => { setFrom(e.target.value); setCursor(null) }} />
           </label>
-          <label className="space-y-1.5 lg:col-span-2">
+          <label className="space-y-1.5 xl:col-span-2">
             <span className="text-xs font-medium text-muted-foreground">สิ้นสุด</span>
             <Input type="datetime-local" value={to} onChange={e => { setTo(e.target.value); setCursor(null) }} />
           </label>
@@ -291,26 +364,56 @@ export default function ConversationAnalysisPage() {
               </SelectContent>
             </Select>
           </label>
-          <label className="space-y-1.5 lg:col-span-3">
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Issue tag</span>
+            <Select value={issueTag} onValueChange={v => { setIssueTag(v || 'all'); setCursor(null) }}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">ทั้งหมด</SelectItem>
+                {issueOptions.map(tag => <SelectItem key={tag} value={tag}>{tag}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Review target</span>
+            <Select value={reviewTarget} onValueChange={v => { setReviewTarget(v || 'all'); setCursor(null) }}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">ทั้งหมด</SelectItem>
+                {reviewTargetOptions.map(target => <SelectItem key={target} value={target}>{target}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="space-y-1.5 xl:col-span-3">
             <span className="text-xs font-medium text-muted-foreground">ค้นหา</span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
               <Input className="pl-8" value={keyword} onChange={e => { setKeyword(e.target.value); setCursor(null) }} placeholder="ค้นจากคำถาม, คำตอบ, tool หรือ turn id" />
             </div>
           </label>
-          <div className="flex items-end gap-2 lg:col-span-3">
+          <div className="flex flex-wrap items-end gap-2 xl:col-span-5">
+            <Button type="button" variant={hasToolError ? 'default' : 'outline'} onClick={() => { setHasToolError(v => !v); setCursor(null) }}>
+              Tool error
+            </Button>
+            <Button type="button" variant={slowOnly ? 'default' : 'outline'} onClick={() => { setSlowOnly(v => !v); setCursor(null) }}>
+              Slow only
+            </Button>
             <Button variant="secondary" onClick={resetCursorAndRefetch}>ใช้ตัวกรอง</Button>
             <Button
               variant="outline"
-              disabled={exportTooWide || exportMutation.isPending}
-              onClick={() => exportMutation.mutate('csv')}
+              disabled={exportDisabled}
+              onClick={() => exportMutation.mutate({ mode: 'codex_review_pack', filename: 'conversation-codex-review-pack.md' })}
               title={exportTooWide ? 'Export จำกัดสูงสุด 31 วันต่อครั้ง' : undefined}
             >
-              <Download className="size-4" />
-              CSV
+              <FileText className="size-4" />
+              Export for Codex
             </Button>
-            <Button variant="outline" disabled={exportTooWide || exportMutation.isPending} onClick={() => exportMutation.mutate('jsonl')}>JSONL</Button>
-            <Button variant="outline" disabled={exportTooWide || exportMutation.isPending} onClick={() => exportMutation.mutate('markdown')}>Markdown</Button>
+            <Button variant="outline" disabled={exportDisabled} onClick={() => exportMutation.mutate({ mode: 'issues_csv', filename: 'conversation-issues.csv' })}>Issues CSV</Button>
+            <Button variant="outline" disabled={exportDisabled} onClick={() => exportMutation.mutate({ mode: 'events_jsonl', filename: 'conversation-events.jsonl' })}>Events JSONL</Button>
+            <Button variant="ghost" disabled={exportDisabled} onClick={() => exportMutation.mutate({ mode: 'raw', format: 'csv', filename: 'conversation-history.csv' })}>
+              <Download className="size-4" />
+              Raw CSV
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -329,12 +432,47 @@ export default function ConversationAnalysisPage() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <StatCard label="Turns" value={String(summary?.count ?? 0)} hint={`${summary?.uniqueUsers ?? 0} users`} />
-        <StatCard label="Issues" value={String(summary?.issueCount ?? 0)} hint="warn + error" />
-        <StatCard label="p95" value={formatMs(summary?.p95DurationMs)} hint={`avg ${formatMs(summary?.avgDurationMs)}`} />
-        <StatCard label="Cost" value={formatMoney(summary?.totalCost)} hint={`${summary?.inputTokens ?? 0}/${summary?.outputTokens ?? 0} tokens`} />
-        <StatCard label="Model turns" value={String(summary?.modelTurns ?? 0)} hint="model_path" />
-        <StatCard label="Tool-only" value={String(summary?.toolOnlyTurns ?? 0)} hint="deterministic/native" />
+        <StatCard label="Flagged" value={String(insightSummary?.issueTurns ?? 0)} hint={`${formatPercent(insightSummary?.issueRate)} issue rate`} />
+        <StatCard label="No result" value={String(insightSummary?.noResultTurns ?? 0)} hint="search no result" />
+        <StatCard label="Slow p95" value={formatMs(insightSummary?.slowP95Ms ?? summary?.p95DurationMs)} hint={`${insightSummary?.slowTurns ?? 0} slow turns`} />
+        <StatCard label="Tool errors" value={String(insightSummary?.toolErrorTurns ?? 0)} hint="MCP/runtime evidence" />
+        <StatCard label="Agents review" value={String(insightSummary?.agentsNeedingReview ?? 0)} hint={`cost ${formatMoney(summary?.totalCost)}`} />
       </div>
+
+      <Card>
+        <CardHeader className="border-b pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <BarChart3 className="size-4" />
+            Insight สำหรับปรับ SOUL/MCP
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 pt-4 lg:grid-cols-3">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Top issue tags</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {insights?.topIssueTags.length ? insights.topIssueTags.slice(0, 8).map(item => (
+                <Badge key={item.key} variant={issueVariant(item.key)}>{item.key} · {item.count}</Badge>
+              )) : <span className="text-sm text-muted-foreground">ยังไม่มี issue ที่ถูก flag</span>}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Top failed keywords</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {insights?.topFailedKeywords.length ? insights.topFailedKeywords.slice(0, 8).map(item => (
+                <Badge key={item.key} variant="outline" className="max-w-full truncate">{item.key} · {item.count}</Badge>
+              )) : <span className="text-sm text-muted-foreground">ยังไม่พบ keyword ที่ล้มเหลวซ้ำ</span>}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Review target</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {insights?.reviewTargets.length ? insights.reviewTargets.slice(0, 8).map(item => (
+                <Badge key={item.key} variant="secondary">{item.key} · {item.count}</Badge>
+              )) : <span className="text-sm text-muted-foreground">ยังไม่มี target ที่ต้อง review</span>}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid min-h-[620px] overflow-hidden rounded-xl border bg-card xl:grid-cols-[420px_1fr]">
         <section className="border-b xl:border-b-0 xl:border-r">
@@ -385,6 +523,7 @@ export default function ConversationAnalysisPage() {
                     <Badge variant={statusVariant(selectedTurn.status)}>{selectedTurn.status}</Badge>
                     <Badge variant="outline">{selectedTurn.agentId || 'unknown'}</Badge>
                     <Badge variant="outline">{selectedTurn.channel}</Badge>
+                    {(selectedTurn.reviewTargets ?? []).map(target => <Badge key={target} variant="secondary">{target}</Badge>)}
                     <span className="text-sm text-muted-foreground">{formatDateTime(selectedTurn.startedAt)}</span>
                   </div>
                   <h2 className="mt-2 text-base font-semibold">Turn detail</h2>
@@ -396,6 +535,26 @@ export default function ConversationAnalysisPage() {
                   <div><p className="text-muted-foreground">Tools</p><p className="font-medium">{selectedTurn.toolCount}</p></div>
                 </div>
               </div>
+
+              {selectedIssues.length ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+                  <div className="flex items-center gap-2">
+                    <Tags className="size-4 text-amber-700 dark:text-amber-300" />
+                    <p className="text-sm font-medium text-amber-950 dark:text-amber-100">Why flagged</p>
+                  </div>
+                  <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                    {selectedIssues.map(issue => (
+                      <div key={issue.tag} className="rounded-md border bg-background p-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant={issueVariant(issue.tag)}>{issue.tag}</Badge>
+                          <Badge variant="outline">{issue.reviewTarget}</Badge>
+                        </div>
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{evidencePreview(issue)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid gap-3 lg:grid-cols-2">
                 <div className="rounded-lg border p-3">

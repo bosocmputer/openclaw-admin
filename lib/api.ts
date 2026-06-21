@@ -1047,6 +1047,19 @@ export interface ConversationAnalysisTurn {
   cost?: number | null
   toolCount: number
   warningCount: number
+  issues: ConversationIssue[]
+  issueTags: string[]
+  reviewTargets: string[]
+  primaryIssueTag?: string | null
+  primaryReviewTarget?: string | null
+}
+
+export interface ConversationIssue {
+  tag: string
+  label: string
+  reviewTarget: string
+  severity: string
+  evidence: Record<string, unknown>
 }
 
 export interface ConversationAnalysisEvent {
@@ -1070,6 +1083,46 @@ export interface ConversationAnalysisData {
 export interface ConversationAnalysisDetail {
   turn: ConversationAnalysisTurn
   events: ConversationAnalysisEvent[]
+}
+
+export interface ConversationInsightItem {
+  key: string
+  count: number
+  label?: string
+  reviewTarget?: string | null
+}
+
+export interface ConversationInsights {
+  generatedAt: string
+  filters: Record<string, unknown>
+  scanned: number
+  summary: {
+    totalTurns: number
+    issueTurns: number
+    issueRate: number
+    slowTurns: number
+    slowP95Ms: number | null
+    noResultTurns: number
+    toolErrorTurns: number
+    agentsNeedingReview: number
+  }
+  topIssueTags: ConversationInsightItem[]
+  topFailedKeywords: ConversationInsightItem[]
+  toolFailures: ConversationInsightItem[]
+  agentBreakdown: ConversationInsightItem[]
+  reviewTargets: ConversationInsightItem[]
+  examples: Array<{
+    id: string
+    startedAt: string
+    agentId: string | null
+    channel: string
+    userText: string
+    finalText: string
+    issueTags: string[]
+    reviewTargets: string[]
+    durationMs?: number | null
+  }>
+  warnings: { type: string; summary: string }[]
 }
 
 export interface ConversationIngestStatus {
@@ -1103,12 +1156,21 @@ export interface ConversationAnalysisParams {
   status?: string
   model?: string
   q?: string
+  issueTag?: string
+  reviewTarget?: string
+  hasToolError?: boolean
+  slowOnly?: boolean
   limit?: number
   cursor?: string | null
 }
 
 export async function getConversationAnalysis(params: ConversationAnalysisParams = {}): Promise<ConversationAnalysisData> {
   const { data } = await api.get('/api/analysis/conversations', { params })
+  return data
+}
+
+export async function getConversationInsights(params: ConversationAnalysisParams = {}): Promise<ConversationInsights> {
+  const { data } = await api.get('/api/analysis/conversations/insights', { params })
   return data
 }
 
@@ -1127,7 +1189,7 @@ export async function backfillConversations(body: { days?: number; from?: string
   return data
 }
 
-export async function exportConversationAnalysis(params: ConversationAnalysisParams & { format: 'csv' | 'jsonl' | 'markdown' }): Promise<Blob> {
+export async function exportConversationAnalysis(params: ConversationAnalysisParams & { format?: 'csv' | 'jsonl' | 'markdown'; mode?: 'raw' | 'codex_review_pack' | 'issues_csv' | 'events_jsonl' }): Promise<Blob> {
   const { data } = await api.get('/api/analysis/conversations/export', { params, responseType: 'blob' })
   return data
 }
