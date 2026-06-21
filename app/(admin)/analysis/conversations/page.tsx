@@ -474,8 +474,8 @@ export default function ConversationAnalysisPage() {
         </CardContent>
       </Card>
 
-      <div className="grid min-h-[620px] overflow-hidden rounded-xl border bg-card xl:grid-cols-[420px_1fr]">
-        <section className="border-b xl:border-b-0 xl:border-r">
+      <div className="grid min-h-[620px] items-stretch overflow-hidden rounded-xl border bg-card xl:grid-cols-[420px_1fr]">
+        <section className="flex min-h-[420px] flex-col border-b xl:min-h-0 xl:border-b-0 xl:border-r">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <div>
               <p className="text-sm font-medium">Conversation turns</p>
@@ -490,7 +490,7 @@ export default function ConversationAnalysisPage() {
               </Badge>
             ) : null}
           </div>
-          <div className="max-h-[620px] overflow-auto">
+          <div className="min-h-0 flex-1 overflow-auto">
             {!isLoading && data?.turns.length === 0 ? (
               <div className="p-5 text-sm text-muted-foreground">
                 <p className="font-medium text-foreground">ยังไม่มีข้อมูลย้อนหลังในช่วงนี้</p>
