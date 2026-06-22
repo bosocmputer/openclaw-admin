@@ -1341,6 +1341,13 @@ export interface SystemHealthCheck {
   summary: string
   durationMs: number
   remediation?: string
+  warnings?: Array<{
+    id?: string
+    status?: string
+    summary?: string
+    ref?: string
+    capability?: string | null
+  }>
 }
 
 export interface SystemHealthAgent {
