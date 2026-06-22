@@ -40,6 +40,11 @@ const issueOptions = [
   'language_quality',
   'duplicate_reply',
   'needs_user_refine',
+  'unverified_price_guess',
+  'reply_repetition',
+  'multi_item_slow',
+  'search_retry_loop',
+  'wrong_agent_or_capability',
 ]
 
 const reviewTargetOptions = [
@@ -116,8 +121,8 @@ function statusVariant(status: string) {
 }
 
 function issueVariant(tag: string) {
-  if (['tool_error', 'model_timeout', 'unsupported_capability'].includes(tag)) return 'destructive'
-  if (['slow_turn', 'needs_user_refine', 'fallback_used'].includes(tag)) return 'secondary'
+  if (['tool_error', 'model_timeout', 'unsupported_capability', 'unverified_price_guess', 'search_retry_loop'].includes(tag)) return 'destructive'
+  if (['slow_turn', 'needs_user_refine', 'fallback_used', 'multi_item_slow', 'wrong_agent_or_capability'].includes(tag)) return 'secondary'
   return 'outline'
 }
 
