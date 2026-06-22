@@ -2,6 +2,7 @@
 
 > ดัดแปลงจาก INSTALL.md สำหรับ macOS โดยเฉพาะ  
 > ทดสอบกับ macOS Monterey (12.x) / Intel Mac
+> สถานะเอกสาร: ใช้สำหรับ **dev/local test บน macOS** เท่านั้น ถ้าติดตั้งหรืออัปเดต server ลูกค้าให้ใช้ `INSTALL.md` เป็น source of truth เพราะ production ใช้ Linux + PM2 + OpenClaw ERP Runtime Artifact
 
 ---
 
@@ -123,7 +124,7 @@ source ~/.zshrc
 แล้วติดตั้ง:
 
 ```bash
-npm install -g openclaw@2026.4.15 mcporter pm2
+npm install -g openclaw@2026.6.8 mcporter pm2
 ```
 
 ตรวจสอบ:
@@ -413,12 +414,18 @@ password: superadmin
 
 ## ขั้นตอนที่ 10 — ตั้งค่าระบบผ่านหน้าเว็บ
 
-### 10.1 ตั้ง Model (API Key)
+### 10.1 ตั้ง Model และทดสอบ Runtime
 
 1. เมนู **Model**
-2. เลือก Provider (แนะนำ **OpenRouter**)
-3. วาง API Key → กด **Test** → ต้องได้ ✓
-4. เลือก Model → กด **Save**
+2. ส่วน **Provider Keys**: ใส่ key ของ provider เช่น OpenRouter หรือ Kilo AI แล้วกด **ทดสอบ key**
+3. ส่วน **Model ข้อความ**:
+   - เลือก **Model หลัก** (บังคับ)
+   - เลือก **Model สำรอง** ได้หลายตัว (ไม่บังคับ)
+   - พิมพ์ข้อความทดสอบ แล้วกด **ทดสอบ model นี้**
+4. ส่วน **อ่านรูปสินค้า** เป็น optional: ใช้ทดสอบว่า chat model หรือ image model อ่านรูปได้จริง
+5. กด **บันทึกค่า Model** แล้วกด **Restart Gateway**
+
+> Kilo AI ต้องผ่าน runtime test จริงก่อนใช้งาน การเห็น model ใน catalog ไม่ได้แปลว่า gateway เรียกใช้ได้เสมอ
 
 ### 10.2 เพิ่ม Agent
 
@@ -457,9 +464,10 @@ password: superadmin
 
 ### 10.7 ตรวจสอบ Config
 
-1. **Dashboard** → ดู **Config Health** — ต้องเป็น ✓ Valid
-2. ถ้าไม่ Valid กด **Auto Fix**
-3. กด **Restart Gateway**
+1. เมนู **System Check**
+2. กด **Run Health Check**
+3. ถ้าเห็น **ระบบพร้อมใช้งาน** และไม่มีรายการใน **สิ่งที่ต้องจัดการ** แปลว่าผ่าน
+4. ถ้ามี warning ให้ใช้ action ในหน้านั้น เช่น **ทดสอบ Model ที่ตั้งไว้** หรือ **Restart Gateway**
 
 > **Clean Stale Sessions**: ถ้า Webchat ตอบซ้ำใน LINE — กด **Clean Stale Sessions** บน Dashboard
 > ระบบจะลบ `agent:*:main` sessions ที่มี `lastChannel=line` ค้างอยู่โดยอัตโนมัติ
@@ -733,10 +741,11 @@ pm2 logs openclaw-api --lines 30
 ### Bot ไม่ตอบ
 
 1. เมนู **Telegram** — ถ้าเห็น banner **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram**
-2. **Dashboard → Config Health** — ถ้าไม่ Valid กด **Auto Fix**
-3. เช็คว่า Bot ผูก Agent ไว้ใน **Telegram**
-4. เช็คว่า User ID ถูก add ใน **Agents → Users**
-5. กด **Restart Gateway** จาก Dashboard
+2. เมนู **System Check** → กด **Run Health Check**
+3. ถ้ามีรายการใน **สิ่งที่ต้องจัดการ** ให้ใช้ action ในหน้านั้นก่อน หรือ Copy Support Bundle ส่งให้ dev
+4. เช็คว่า Bot ผูก Agent ไว้ใน **Telegram**
+5. เช็คว่า User ID ถูก add ใน **Agents → Users**
+6. กด **Restart Gateway** จาก System Check หรือ Dashboard
 
 ### Webchat ไม่ตอบ (timeout / 502)
 

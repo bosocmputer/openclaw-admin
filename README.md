@@ -2,7 +2,7 @@
 
 Web Admin Panel สำหรับจัดการ OpenClaw ERP Chatbot — ไม่ต้อง SSH server
 
-รองรับ **OpenClaw v2026.6.1+**
+รองรับ **OpenClaw v2026.6.8 + OpenClaw ERP Runtime Artifact**
 
 ## โครงสร้างระบบ
 
@@ -19,16 +19,17 @@ openclaw-api    ← Express.js (pm2 บน host)
     ├── ~/.openclaw/openclaw.json
     ├── ~/.openclaw/workspace-*/SOUL.md
     ├── ~/.openclaw/openclaw.json mcp.servers
-    └── openclaw CLI (gateway restart, doctor)
+    └── openclaw CLI / ERP runtime helpers
+        (gateway restart, doctor, model runtime test)
 
-openclaw-gateway ← pm2 (port 18789)
+openclaw-gateway ← pm2 + ERP runtime artifact (port 18789)
 
 PostgreSQL 16  ← Docker container (port 5432)
-    └── admin_users, webchat_rooms, webchat_messages, audit_logs
+    └── admin_users, webchat_*, audit_logs, conversation_turns/events/exports
 ```
 
-> **openclaw-api** รันบน host ด้วย pm2 (ไม่ใช้ Docker) เพราะต้องการเข้าถึง openclaw CLI
-> **openclaw-gateway** รันผ่าน pm2 โดยใช้ `node dist/index.js` โดยตรง (ไม่ใช้ `openclaw gateway run` เพราะ CLI จะ exit หลัง spawn daemon)
+> **openclaw-api** รันบน host ด้วย pm2 (ไม่ใช้ Docker) เพราะต้องเข้าถึง OpenClaw runtime, config และ workspace files
+> **openclaw-gateway** production ควรรันผ่าน pm2 จาก ERP runtime artifact เช่น `/root/openclaw-runtime-2026.6.8-erp/dist/index.js` เพื่อให้ behavior ตรงกับ dev server และ customer rollout
 > ดูที่ repo แยก: [bosocmputer/openclaw-api](https://github.com/bosocmputer/openclaw-api)
 
 ## Security Architecture
@@ -68,8 +69,8 @@ Browser → GET /api/proxy/api/status
 
 | หน้า | URL | คำอธิบาย |
 | ---- | --- | --------- |
-| Dashboard | `/` | สถานะ Gateway, Doctor, สรุปจำนวน Agent/Member, ปุ่ม Restart |
-| Model | `/model` | ตั้งค่า API Key (OpenRouter, Anthropic, OpenAI, Gemini, Mistral, Groq) + ทดสอบ connection |
+| Dashboard | `/` | Operations dashboard: health, runtime, channel, latency, token/cost, recent turns และ next actions |
+| Model & Keys | `/model` | ตั้ง Provider Keys, เลือก Model ข้อความ, Model สำรอง, ทดสอบข้อความผ่าน runtime จริง และทดสอบอ่านรูปสินค้าแบบ optional |
 | Agents | `/agents` | จัดการ Agent — เพิ่ม/ลบ, ตั้ง Access Mode |
 | Agent Detail | `/agents/[id]` | แก้ SOUL.md, จัดการ Telegram Users (whitelist), ตั้งค่า MCP (URL + Access Mode + Test) |
 | Agent Chat | `/agents/[id]/chat` | ดู chat history ของ agent นั้นๆ |
@@ -81,9 +82,10 @@ Browser → GET /api/proxy/api/status
 | Checkpoints | `/sessions` | ดูและ restore session compaction checkpoints ต่อ agent |
 | Webhooks | `/webhooks` | CRUD webhook routes สำหรับรับข้อมูลจากระบบภายนอก |
 | Memory | `/memory` | ดู daily memory files + MEMORY.md + dreams.md ต่อ agent (auto-refresh 30s) |
-| Analysis | `/analysis` | วิเคราะห์ token usage + สถิติรายงาน per agent |
+| Analysis | `/analysis` | วิเคราะห์ usage/operational metrics |
+| Conversation Analysis | `/analysis/conversations` | ดูประวัติบทสนทนา, issue tags, trace/tool/model detail และ export pack สำหรับปรับ SOUL/MCP |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
-| System Check | `/system` | Health matrix, remediation commands, copy support bundle |
+| System Check | `/system` | Self-service health: สิ่งที่ต้องจัดการ, action ที่ปลอดภัย, runtime/model checks, restart gateway และ copy support bundle |
 | Guide | `/guide` | คู่มือผู้ใช้ (แสดง bot name จริงจาก config) |
 | Members | `/members` | จัดการผู้ใช้ระบบ (superadmin เท่านั้น) |
 
@@ -110,6 +112,7 @@ openclaw-admin/
 │   │   ├── webhooks/page.tsx       ← Webhooks CRUD
 │   │   ├── memory/page.tsx         ← Memory & Dreams viewer
 │   │   ├── analysis/page.tsx
+│   │   ├── analysis/conversations/ ← Conversation history + export for Codex/SOUL tuning
 │   │   ├── logs/page.tsx
 │   │   ├── guide/page.tsx
 │   │   └── members/
@@ -147,7 +150,7 @@ openclaw-admin/
 
 - Docker + Docker Compose
 - **openclaw-api รันด้วย pm2 บน host อยู่แล้ว** (port 4000)
-- **OpenClaw Gateway v2026.6.1+**
+- **OpenClaw Gateway v2026.6.8** ผ่าน **OpenClaw ERP Runtime Artifact**
 - **cloudflared** — สำหรับ LINE webhook (LINE ต้องการ HTTPS): ดู INSTALL.md ขั้นตอน 11.9
 
 ### 1. ติดตั้ง Docker (ครั้งแรกเท่านั้น)

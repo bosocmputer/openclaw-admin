@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-04-21 (รอบ 14 — OpenClaw v2026.4.15)
+> อัปเดต: 2026-06-22 (OpenClaw v2026.6.8 + ERP runtime artifact)
 
 ---
 
@@ -21,7 +21,8 @@
 │             proxy.ts → guard ทุก route, redirect /login             │
 ├─────────────────────────────────────────────────────────────────────┤
 │             PostgreSQL 16 (Docker port 5432)                        │
-│             volume: postgres_data — admin_users table               │
+│             volume: postgres_data — admin, webchat, audit,          │
+│             conversation analysis tables                            │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │ HTTP REST (Bearer token, ผ่าน /api/proxy — ซ่อน token จาก browser)
                                │ API_URL = http://192.168.2.109:4000  (server-only env)
@@ -29,19 +30,20 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │             openclaw-api — Express.js (pm2 port 4000)               │
 │             github: bosocmputer/openclaw-api                        │
-│             deploy: git pull && pm2 restart openclaw-api            │
+│             deploy: git pull && npm ci --omit=dev && pm2 restart    │
 └───┬───────────────┬────────────────┬──────────────────┬─────────────┘
     │               │                │                  │
     ▼               ▼                ▼                  ▼
-~/.openclaw/   ~/.openclaw/      ~/.openclaw/      openclaw CLI
+~/.openclaw/   ~/.openclaw/      ~/.openclaw/      OpenClaw runtime
 openclaw.json  workspace-*/      workspace-*/      (gateway restart,
-               SOUL.md           config/           doctor)
+               SOUL.md           config/           doctor, model test)
                                  mcporter.json
                                                         │
                                                         ▼
                                               ┌─────────────────┐
                                               │ openclaw-gateway │
-                                              │ pm2 port 18789   │
+                                              │ pm2 + ERP runtime│
+                                              │ port 18789       │
                                               └────────┬────────┘
                                                        │ HTTP POST /call
                                                        │ Header: mcp-access-mode
@@ -66,9 +68,9 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
 
 | Service | Deploy | Port | Repo | อัปเดต |
 | ------- | ------ | ---- | ---- | ------ |
-| openclaw-gateway | pm2 (node dist/index.js) | 18789 | — | `pm2 restart openclaw-gateway` |
-| openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull origin main && npm install && pm2 restart openclaw-api` |
-| openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull origin main && docker compose up -d --build` |
+| openclaw-gateway | pm2 + ERP runtime artifact | 18789 | bosocmputer/openclaw-runtime-artifacts | `pm2 restart openclaw-gateway` |
+| openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull --ff-only origin main && npm ci --omit=dev && pm2 restart openclaw-api --update-env` |
+| openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull --ff-only origin main && docker compose build openclaw-admin && docker compose up -d openclaw-admin` |
 | PostgreSQL | Docker | 5432 | — (same compose) | restart อัตโนมัติกับ openclaw-admin |
 
 ---
@@ -82,7 +84,7 @@ Browser → GET /api/config → อ่าน ~/.openclaw/openclaw.json → retur
 Browser → PUT /api/config → รับ JSON → เขียนทับ ~/.openclaw/openclaw.json
 ```
 
-ใช้ใน: Dashboard (read), Agents (add/delete), Telegram (bot/policy), Model (API key, model)
+ใช้ใน: Dashboard (read), Agents (add/delete), Telegram (bot/policy), Model & Keys (provider key/model), System Check
 
 ---
 
@@ -90,27 +92,37 @@ Browser → PUT /api/config → รับ JSON → เขียนทับ ~/.o
 
 ```
 Browser → POST /api/gateway/restart
-  → Express รัน: openclaw gateway restart
-  → systemd restart openclaw-gateway.service
+  → Express พยายาม pm2 restart openclaw-gateway ก่อน
+  → fallback เป็น openclaw gateway restart เฉพาะ environment ที่ไม่ได้ใช้ pm2
   → gateway โหลด openclaw.json ใหม่
 ```
 
-ทริกเกอร์อัตโนมัติหลัง: add/remove user ใน Agent Detail
+Production policy:
+
+- customer server ควรรัน gateway จาก `/root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789`
+- หลีกเลี่ยงการ restart ด้วย global `openclaw gateway restart` ใน production เพราะอาจกลับไปใช้ official/global runtime แทน ERP runtime artifact
+- restart action ใน Admin ต้องมี confirm และแสดงผลลัพธ์ชัดเจน
 
 ---
 
-### 3. Config Health (Doctor)
+### 3. System Health / Self-Service Remediation
 
 ```
-Browser → GET /api/doctor/status
-  → Express รัน: openclaw doctor
-  → parse stdout → return { valid, problems[] }
+Browser → GET /api/system/health?refresh=true
+  → Express รวมสถานะ gateway, runtime, model readiness, MCP, channel, SOUL และ telemetry
+  → return health checks + warnings + support bundle metadata
 
-Browser → POST /api/doctor/fix
-  → Express รัน: openclaw doctor --fix
-  → แก้ openclaw.json อัตโนมัติ
-  → gateway restart
+Browser → POST /api/models/runtime-test
+  → ทดสอบเฉพาะ model ที่ admin กดเอง ไม่รันอัตโนมัติตอนเปิดหน้า
+
+Browser → POST /api/dashboard/telegram-regression/pass
+  → บันทึกว่า regression Telegram ผ่านแล้วหลัง runtime update
+
+Browser → POST /api/gateway/restart
+  → restart gateway ผ่าน pm2-first flow
 ```
+
+UI `/system` แยกสิ่งที่ต้องจัดการจริง (`warn`/`fail`) ออกจากข้อมูลประกอบ (`info`) และซ่อน action เสี่ยงเมื่อระบบ OK
 
 ---
 
@@ -241,15 +253,25 @@ UI: polling ทุก 3 วินาที, filter level, search message/subsyst
 ### 9. Model
 
 ```
-GET /api/config → อ่าน env.<PROVIDER_KEY> + agents.defaults.model.primary
-GET /api/models → ดึง model list จาก OpenRouter API (ผ่าน Express)
-PUT /api/config → บันทึก API Key + model ที่เลือก
+GET  /api/models/catalog?provider=x
+  → live provider catalog + cache + clear status (ready/missing_key/auth_error/timeout)
 
-Multi-provider: OpenRouter / Google / Anthropic / OpenAI
-  แต่ละ provider มี envKey, modelPrefix, testUrl ของตัวเอง
-  Combobox (shadcn Command+Popover) ค้นหา + เลือก model + แสดงราคา
-  switch provider กลับมา provider เดิม → restore model ที่บันทึกไว้
-  Test API Key → ping testUrl ด้วย key ของ provider นั้น → OK / Error
+GET  /api/models/readiness?refresh=false
+  → อ่าน openclaw.json แล้วตรวจ primary/fallback/image model เทียบ catalog + runtime verification cache
+
+POST /api/models/message-test
+  → admin พิมพ์ข้อความทดสอบเอง แล้ว runtime เรียก primary/fallback จริง
+
+POST /api/models/image-message-test
+  → ทดสอบอ่านรูปสินค้าแบบ optional โดยใช้ chat model หรือ image model แยก
+
+PUT  /api/models/settings
+  → atomic config write + backup + validation ก่อนบันทึก
+
+UI `/model`:
+  Provider Keys → Model ข้อความ → ทดสอบข้อความ → อ่านรูปสินค้า optional → Save → Restart Gateway
+  OpenRouter และ Kilo แสดง catalog สด แต่การใช้งานจริงต้องผ่าน runtime test
+  Key/token ไม่ถูกส่งกลับ frontend และผลลัพธ์ถูก truncate/redact
 ```
 
 ---
@@ -357,6 +379,24 @@ UI sections:
   Members      → จัดกลุ่มตาม role (superadmin/admin/chat) + active status
   System Logs  → นับตาม level + ตาราง error ล่าสุด
 ```
+
+Conversation analysis เพิ่มเติม:
+
+```
+GET /api/analysis/conversations
+  → อ่าน conversation_turns แบบ durable จาก PostgreSQL พร้อม filter date/agent/channel/status/tag
+
+GET /api/analysis/conversations/:turnId
+  → transcript timeline: user text, trace ที่ runtime บันทึกจริง, tool calls, model/cost/token, final answer, warnings
+
+GET /api/analysis/conversations/insights
+  → issue tags, top failed keywords, slow turns, agent breakdown
+
+GET /api/analysis/conversations/export?mode=codex_review_pack
+  → Markdown pack สำหรับส่งให้ Codex/ทีมวิเคราะห์ SOUL/MCP/search ต่อ
+```
+
+หลักการ: `/monitor` เป็น live debug เดิม ส่วน `/analysis/conversations` เป็น historical analysis + export โดยใช้ข้อมูล redacted/truncated จาก PostgreSQL
 
 ---
 

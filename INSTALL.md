@@ -506,9 +506,11 @@ password: superadmin
 
 ### 10.7 ตรวจสอบ Config
 
-1. **Dashboard** → ดู **Config Health** — ต้องเป็น ✓ Valid
-2. ถ้าไม่ Valid กด **Auto Fix**
-3. กด **Restart Gateway**
+1. เมนู **System Check**
+2. กด **Run Health Check**
+3. ถ้าเห็น **ระบบพร้อมใช้งาน** และไม่มีรายการใน **สิ่งที่ต้องจัดการ** แปลว่าผ่าน
+4. ถ้ามี warning ให้ใช้ปุ่มแก้ไขในรายการนั้น เช่น **ทดสอบ Model ที่ตั้งไว้**, **ยืนยัน Regression Telegram ผ่านแล้ว**, หรือ **Restart Gateway**
+5. รายละเอียดทางเทคนิคอยู่ในส่วน **รายละเอียดการตรวจระบบ** และ **คำสั่งสำหรับทีมเทคนิค**
 
 > **Clean Stale Sessions**: ถ้า Webchat ตอบซ้ำใน LINE — กด **Clean Stale Sessions** บน Dashboard
 > ระบบจะลบ `agent:*:main` sessions ที่มี `lastChannel=line` ค้างอยู่โดยอัตโนมัติ
@@ -713,6 +715,17 @@ curl -sS -X POST "http://127.0.0.1:4000/api/models/message-test" \
 
 หลังติดตั้งหรืออัปเดต runtime/API/Admin ให้ทำ health gate นี้ทุกครั้งก่อนส่งมอบงาน ลูกค้าควรเห็น Dashboard เป็น `Overall Health = OK` หรืออย่างน้อยไม่มี warning ที่ต้อง action จริง
 
+#### วิธีแนะนำผ่านหน้าเว็บ
+
+1. เปิด **System Check** (`/system`)
+2. กด **Run Health Check**
+3. ถ้าเห็น **ระบบพร้อมใช้งาน** และไม่มีรายการใน **สิ่งที่ต้องจัดการ** ถือว่าผ่าน
+4. ถ้ามี `model runtime issue` ให้กด **ทดสอบ Model ที่ตั้งไว้** แล้วรอผลทีละ model
+5. ถ้ามี `ทดสอบ Telegram หลังเปลี่ยน runtime` ให้ทดสอบ Telegram จริงก่อน แล้วกด **ยืนยัน Regression Telegram ผ่านแล้ว**
+6. ถ้าเป็น `telemetry.telegram` แบบ info ให้ส่งข้อความทดสอบใน Telegram แล้วกด **Run Health Check** อีกครั้ง
+
+> หน้า `/system` จะไม่ยิง provider/runtime test เองตอนเปิดหน้า เพื่อลด cost และป้องกัน admin เข้าใจผิด ต้องกด action เองเท่านั้น
+
 #### 1) ยืนยันว่า Telegram regression ผ่านแล้ว
 
 ทดสอบใน Telegram จริงก่อน:
@@ -783,7 +796,7 @@ done < /tmp/models-to-test.txt
 
 > ถ้า `/tmp/models-to-test.txt` ว่าง แปลว่าไม่มี model runtime issue เหลืออยู่
 
-#### 3) ตรวจ Dashboard health ต้องไม่มี warning
+#### 3) ตรวจ System/Dashboard health ต้องไม่มี warning
 
 ```bash
 cd ~/openclaw-api
@@ -801,12 +814,18 @@ print("warnings =", [(w.get("id"), w.get("summary")) for w in d.get("health",{})
 PY
 ```
 
-ผลที่ต้องการ:
+ผลที่ต้องการใน CLI:
 
 ```text
 health = ok
 warnings = []
 ```
+
+ผลที่ต้องการใน UI:
+
+- Dashboard: `Overall Health = OK`
+- System Check: แสดง **ระบบพร้อมใช้งาน**
+- รายการ **สิ่งที่ต้องจัดการ** ต้องว่าง
 
 ---
 
@@ -906,7 +925,9 @@ pm2 save
 ```bash
 cd ~/openclaw-admin
 git pull --ff-only origin main
-docker compose up -d --build
+docker compose build openclaw-admin
+docker compose up -d openclaw-admin
+docker compose ps
 ```
 
 ### อัปเดตทั้งระบบ
@@ -925,7 +946,7 @@ docker compose up -d --build
 ขอเช็คยอดคงเหลือ โช๊ค jazz
 ```
 
-5. ทำหัวข้อ **11.1 Post-deploy Health Gate** เพื่อบันทึก regression, runtime-test model และยืนยันว่า Dashboard เป็น `health = ok`
+5. ทำหัวข้อ **11.1 Post-deploy Health Gate** เพื่อบันทึก regression, runtime-test model และยืนยันว่า Dashboard/System Check เป็น `health = ok`
 
 ---
 
@@ -987,22 +1008,23 @@ pm2 status
 ### Bot ไม่ตอบ
 
 1. เมนู **Telegram** — ถ้าเห็น banner **"Telegram ยังไม่ได้เปิดใช้งาน"** → กด **เปิดใช้งาน Telegram**
-2. **Dashboard → Config Health** — ถ้าไม่ Valid กด **Auto Fix**
-3. เช็คว่า Bot ผูก Agent ไว้ใน **Telegram**
-4. เช็คว่า User ID ถูก add ใน **Agents → Users**
-5. เช็คว่า gateway ใช้ runtime artifact:
+2. เมนู **System Check** → กด **Run Health Check**
+3. ถ้ามีรายการใน **สิ่งที่ต้องจัดการ** ให้ใช้ปุ่มแก้ไขในหน้านั้นก่อน หรือกด **Copy Support Bundle** ส่งให้ dev
+4. เช็คว่า Bot ผูก Agent ไว้ใน **Telegram**
+5. เช็คว่า User ID ถูก add ใน **Agents → Users**
+6. เช็คว่า gateway ใช้ runtime artifact:
 
 ```bash
 ps -ef | grep -E "openclaw-runtime-2026.6.8-erp|openclaw.*gateway" | grep -v grep
 ```
 
-6. เช็ค log:
+7. เช็ค log:
 
 ```bash
 tail -n 160 /tmp/openclaw/openclaw-$(date +%F).log
 ```
 
-7. Restart gateway:
+8. Restart gateway:
 
 ```bash
 pm2 restart openclaw-gateway
