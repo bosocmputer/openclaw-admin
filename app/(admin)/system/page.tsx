@@ -6,6 +6,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Activity,
   AlertTriangle,
+  ChevronDown,
   CheckCircle2,
   ClipboardCopy,
   ExternalLink,
@@ -16,7 +17,6 @@ import {
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
-  Terminal,
   Wrench,
   XCircle,
 } from 'lucide-react'
@@ -47,6 +47,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { cn } from '@/lib/utils'
 
 const DEFAULT_MCP_URL = 'http://192.168.2.248:3515/sse'
+const HEALTH_STALE_MS = 5 * 60 * 1000
 
 function statusClass(status: SystemCheckStatus) {
   switch (status) {
@@ -82,6 +83,17 @@ function countChecks(health?: SystemHealth) {
     info: checks.filter(c => c.status === 'info').length,
     criticalFail: checks.filter(c => c.severity === 'critical' && c.status === 'fail').length,
   }
+}
+
+function isLoadingHealth(health: SystemHealth | undefined, isLoading: boolean) {
+  return isLoading && !health
+}
+
+function healthAgeMs(health?: SystemHealth) {
+  if (!health?.generatedAt) return null
+  const generatedMs = Date.parse(health.generatedAt)
+  if (Number.isNaN(generatedMs)) return null
+  return Date.now() - generatedMs
 }
 
 function copyText(label: string, text: string) {
@@ -162,6 +174,28 @@ function checkAgentId(check: SystemHealthCheck) {
 function isActionableCheck(check: SystemHealthCheck) {
   if (check.status === 'warn' || check.status === 'fail') return true
   return ['runtime.guardrails', 'telemetry.telegram'].includes(check.id)
+}
+
+function needsRemediation(check: SystemHealthCheck) {
+  return check.status === 'warn' || check.status === 'fail'
+}
+
+function regressionAlreadyPassed(check: SystemHealthCheck) {
+  return check.id === 'runtime.guardrails' && /regression passed/i.test(check.summary)
+}
+
+function isTechnicalMarkerText(value: string) {
+  return /telegramVisibleAck|productRouterV2|monitorToolDetail/.test(value)
+}
+
+function adminSummary(check: SystemHealthCheck) {
+  if (check.id === 'runtime.guardrails' && regressionAlreadyPassed(check)) {
+    return 'Telegram regression ได้รับการยืนยันแล้ว รายละเอียด marker อยู่ในข้อมูลเทคนิค'
+  }
+  if (check.id === 'telemetry.telegram') {
+    return 'ยังไม่มี latency marker ล่าสุด ใช้ Monitor ตรวจหลังทดสอบ Telegram'
+  }
+  return isTechnicalMarkerText(check.summary) ? 'มีรายละเอียดเทคนิคเพิ่มเติมสำหรับทีม dev' : check.summary
 }
 
 function actionSummary(check: SystemHealthCheck) {
@@ -258,7 +292,7 @@ function CheckRow({ check, actions }: { check: SystemHealthCheck; actions?: Reac
       </Badge>
       <div className="min-w-0">
         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{check.label}</p>
-        <p className="mt-0.5 break-words text-xs text-zinc-500">{check.summary}</p>
+        <p className="mt-0.5 break-words text-xs text-zinc-500">{adminSummary(check)}</p>
         {check.remediation && (
           <p className="mt-1 break-words text-xs text-amber-700 dark:text-amber-300">{check.remediation}</p>
         )}
@@ -270,6 +304,112 @@ function CheckRow({ check, actions }: { check: SystemHealthCheck; actions?: Reac
   )
 }
 
+function LoadingBlock({ className }: { className?: string }) {
+  return <div className={cn('animate-pulse rounded-md bg-zinc-100 dark:bg-zinc-800', className)} />
+}
+
+function HealthSummarySkeleton() {
+  return (
+    <>
+      {['Overall', 'Critical', 'Warnings', 'Passing'].map(label => (
+        <Card key={label}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">{label}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <LoadingBlock className="h-7 w-20" />
+            <LoadingBlock className="h-3 w-32" />
+          </CardContent>
+        </Card>
+      ))}
+    </>
+  )
+}
+
+function SystemLoadingPanel() {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">กำลังโหลดสถานะระบบ...</p>
+          <p className="mt-1 text-sm text-zinc-500">ยังไม่แสดงตัวเลขหรือรายการตรวจจนกว่าจะได้ข้อมูลจริง</p>
+        </div>
+        <Loader2 className="size-5 animate-spin text-zinc-400" />
+      </CardContent>
+    </Card>
+  )
+}
+
+function SystemErrorPanel({
+  message,
+  onRetry,
+  onCopySupport,
+  retrying,
+  copying,
+}: {
+  message: string
+  onRetry: () => void
+  onCopySupport: () => void
+  retrying: boolean
+  copying: boolean
+}) {
+  return (
+    <Card className="border-red-200 bg-red-50/60 dark:border-red-900 dark:bg-red-950/30">
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
+            <XCircle className="size-4" />
+            <p className="text-sm font-medium">โหลดสถานะระบบไม่สำเร็จ</p>
+          </div>
+          <p className="mt-1 break-words text-sm text-red-700/80 dark:text-red-200/80">{message}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={onRetry} disabled={retrying}>
+            <RefreshCw className={retrying ? 'animate-spin' : ''} />
+            Retry
+          </Button>
+          <Button type="button" variant="outline" onClick={onCopySupport} disabled={copying}>
+            <ClipboardCopy />
+            Copy Support Bundle
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function CollapsibleSection({
+  title,
+  description,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string
+  description?: string
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <Card>
+      <button
+        type="button"
+        className="flex w-full items-start justify-between gap-3 px-4 py-4 text-left"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <div>
+          <CardTitle className="text-base">{title}</CardTitle>
+          {description && <p className="mt-1 text-sm text-zinc-500">{description}</p>}
+        </div>
+        <ChevronDown className={cn('mt-0.5 size-4 shrink-0 text-zinc-400 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && <CardContent className="pb-4">{children}</CardContent>}
+    </Card>
+  )
+}
+
 function ActionableHealthPanel({
   checks,
   runtimeProgress,
@@ -277,16 +417,24 @@ function ActionableHealthPanel({
   activeAction,
   onCancelRuntimeTests,
   renderActions,
+  infoOpen,
+  onToggleInfo,
+  onRefresh,
+  refreshing,
 }: {
   checks: SystemHealthCheck[]
   runtimeProgress: RuntimeProgress | null
   actionResults: ActionResult[]
   activeAction: string | null
   onCancelRuntimeTests: () => void
-  renderActions: (check: SystemHealthCheck) => ReactNode
+  renderActions: (check: SystemHealthCheck, surface?: 'panel' | 'table') => ReactNode
+  infoOpen: boolean
+  onToggleInfo: () => void
+  onRefresh: () => void
+  refreshing: boolean
 }) {
   const actionable = checks.filter(isActionableCheck)
-  const blocking = actionable.filter(check => check.status === 'warn' || check.status === 'fail')
+  const blocking = actionable.filter(needsRemediation)
   const informational = actionable.filter(check => check.status === 'info')
 
   return (
@@ -294,24 +442,35 @@ function ActionableHealthPanel({
       <CardHeader className="pb-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle className="text-base">Actionable Health</CardTitle>
+            <CardTitle className="text-base">{blocking.length ? 'สิ่งที่ต้องจัดการ' : 'ระบบพร้อมใช้งาน'}</CardTitle>
             <p className="mt-1 text-sm text-zinc-500">
-              Clear common warnings from the UI. Risky actions require confirmation and nothing runs automatically.
+              {blocking.length
+                ? 'แก้เฉพาะรายการที่มี warning หรือ failure. Action เสี่ยงต้องยืนยันก่อนเสมอ'
+                : 'ไม่มี warning หรือ critical failure. ใช้ Run Health Check หลังแก้ config, model, gateway หรือ channel'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Badge variant={blocking.length ? 'destructive' : 'secondary'}>{blocking.length} need action</Badge>
-            <Badge variant="outline">{informational.length} info</Badge>
+            <Badge variant={blocking.length ? 'destructive' : 'secondary'}>{blocking.length} ต้องจัดการ</Badge>
+            {informational.length > 0 && <Badge variant="outline">{informational.length} ข้อมูลเพิ่มเติม</Badge>}
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {actionable.length === 0 ? (
+        {blocking.length === 0 ? (
           <div className="rounded-lg border bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
-            All checks are clear. Use Run Health Check after changing config, models, gateway, or channel settings.
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-medium">พร้อมใช้งาน</p>
+                <p className="mt-1">ไม่ต้องดำเนินการเพิ่มตอนนี้ ตรวจซ้ำหลังเปลี่ยนค่าระบบหรือทดสอบ Telegram รอบใหม่</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
+                <RefreshCw className={refreshing ? 'animate-spin' : ''} />
+                Run Health Check
+              </Button>
+            </div>
           </div>
         ) : (
-          actionable.map(check => {
+          blocking.map(check => {
             const summary = actionSummary(check)
             return (
               <div key={check.id} className="rounded-lg border p-3">
@@ -332,16 +491,63 @@ function ActionableHealthPanel({
                         <p className="break-words text-zinc-700 dark:text-zinc-200">{summary.impact}</p>
                       </div>
                     </div>
-                    <p className="break-words text-xs text-zinc-500">{check.summary}</p>
+                    <p className="break-words text-xs text-zinc-500">{adminSummary(check)}</p>
                     <CheckWarnings check={check} />
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2 xl:max-w-[360px] xl:justify-end">
-                    {renderActions(check)}
+                    {renderActions(check, 'panel')}
                   </div>
                 </div>
               </div>
             )
           })
+        )}
+
+        {informational.length > 0 && (
+          <div className="rounded-lg border">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+              onClick={onToggleInfo}
+              aria-expanded={infoOpen}
+            >
+              <div>
+                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">ข้อมูลเพิ่มเติม</p>
+                <p className="text-xs text-zinc-500">รายการนี้ไม่ใช่ warning และไม่จำเป็นต้องแก้ทันที</p>
+              </div>
+              <ChevronDown className={cn('size-4 shrink-0 text-zinc-400 transition-transform', infoOpen && 'rotate-180')} />
+            </button>
+            {infoOpen && (
+              <div className="space-y-2 border-t p-3">
+                {informational.map(check => {
+                  const summary = actionSummary(check)
+                  return (
+                    <div key={check.id} className="rounded-md border bg-zinc-50 p-3 dark:bg-zinc-900">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StatusBadge status={check.status} />
+                            <span className="font-mono text-xs text-zinc-400">{check.id}</span>
+                            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{check.label}</p>
+                            {regressionAlreadyPassed(check) && <Badge variant="secondary">ยืนยัน Telegram แล้ว</Badge>}
+                          </div>
+                          <p className="mt-1 break-words text-sm text-zinc-600 dark:text-zinc-300">{summary.impact}</p>
+                          <details className="mt-2">
+                            <summary className="cursor-pointer text-xs font-medium text-zinc-500">รายละเอียดเทคนิค</summary>
+                            <p className="mt-1 break-words text-xs text-zinc-500">{check.summary}</p>
+                            <CheckWarnings check={check} />
+                          </details>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+                          {renderActions(check, 'panel')}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {runtimeProgress && (
@@ -431,7 +637,10 @@ export default function SystemPage() {
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
   const [actionResults, setActionResults] = useState<ActionResult[]>([])
   const [runtimeProgress, setRuntimeProgress] = useState<RuntimeProgress | null>(null)
-  const { data: health, isLoading, isFetching } = useQuery({
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [checkDetailsOpen, setCheckDetailsOpen] = useState(false)
+  const [commandsOpen, setCommandsOpen] = useState(false)
+  const { data: health, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ['system-health'],
     queryFn: () => getSystemHealth(false),
     staleTime: 15_000,
@@ -661,12 +870,19 @@ export default function SystemPage() {
   const counts = countChecks(health)
   const checks = useMemo(() => health?.checks ?? [], [health])
   const generated = health?.generatedAt ? new Date(health.generatedAt).toLocaleString('th-TH') : '-'
+  const loadingHealth = isLoadingHealth(health, isLoading)
+  const ageMs = healthAgeMs(health)
+  const staleHealth = Boolean(ageMs && ageMs > HEALTH_STALE_MS)
+  const hasNeedsAction = counts.warn > 0 || counts.fail > 0
+  const detailsOpen = hasNeedsAction || checkDetailsOpen
   const applyCommand = `bash ~/openclaw-api/scripts/update-server.sh --apply --mcp-url ${DEFAULT_MCP_URL} --openrouter-key "$OPENROUTER_KEY"`
   const healthCommand = 'bash ~/openclaw-api/scripts/update-server.sh --health-only'
 
-  function renderCheckActions(check: SystemHealthCheck) {
+  function renderCheckActions(check: SystemHealthCheck, surface: 'panel' | 'table' = 'table') {
     const disabled = Boolean(activeAction)
     const agentId = checkAgentId(check)
+    const mustFix = needsRemediation(check)
+    const panel = surface === 'panel'
     const actions: ReactNode[] = []
     const pushLink = (href: string, label: string) => {
       actions.push(
@@ -678,42 +894,50 @@ export default function SystemPage() {
     }
 
     if (check.id === 'model.readiness') {
-      actions.push(
-        <Button key="test-models" type="button" size="sm" onClick={runConfiguredModelRuntimeTests} disabled={disabled || runtimeProgress?.running}>
-          <PlayCircle />
-          ทดสอบ Model ที่ตั้งไว้
-        </Button>
-      )
+      if (mustFix) {
+        actions.push(
+          <Button key="test-models" type="button" size="sm" onClick={runConfiguredModelRuntimeTests} disabled={disabled || runtimeProgress?.running}>
+            <PlayCircle />
+            ทดสอบ Model ที่ตั้งไว้
+          </Button>
+        )
+      }
       pushLink('/model', 'Open Model & Keys')
     } else if (check.id === 'runtime.guardrails') {
-      actions.push(
-        <Button
-          key="confirm-regression"
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => setConfirmRequest({
-            kind: 'telegram-regression',
-            title: 'ยืนยัน Regression Telegram ผ่านแล้ว?',
-            description: 'ใช้เมื่อคุณทดสอบ /reset, ทักทาย, ค้นสินค้า และเลือกเลขรายการใน Telegram จริงแล้วเท่านั้น',
-            confirmLabel: 'ยืนยันว่าทดสอบผ่าน',
-          })}
-          disabled={disabled}
-        >
-          <ShieldCheck />
-          ยืนยันผ่านแล้ว
-        </Button>
-      )
+      if (regressionAlreadyPassed(check)) {
+        actions.push(<Badge key="regression-passed" variant="secondary">ยืนยัน Telegram แล้ว</Badge>)
+      } else if (mustFix || panel) {
+        actions.push(
+          <Button
+            key="confirm-regression"
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirmRequest({
+              kind: 'telegram-regression',
+              title: 'ยืนยัน Regression Telegram ผ่านแล้ว?',
+              description: 'ใช้เมื่อคุณทดสอบ /reset, ทักทาย, ค้นสินค้า และเลือกเลขรายการใน Telegram จริงแล้วเท่านั้น',
+              confirmLabel: 'ยืนยันว่าทดสอบผ่าน',
+            })}
+            disabled={disabled}
+          >
+            <ShieldCheck />
+            ยืนยันผ่านแล้ว
+          </Button>
+        )
+      }
       pushLink('/monitor', 'Open Monitor')
     } else if (check.id === 'telemetry.telegram') {
       pushLink('/monitor', 'Open Monitor')
-      actions.push(
-        <Button key="refresh" type="button" size="sm" variant="outline" onClick={() => refresh.mutate()} disabled={disabled || refresh.isPending || isFetching}>
-          <RefreshCw className={refresh.isPending ? 'animate-spin' : ''} />
-          Refresh Health
-        </Button>
-      )
-    } else if (check.id === 'gateway.process' || check.summary.toLowerCase().includes('gateway')) {
+      if (panel) {
+        actions.push(
+          <Button key="refresh" type="button" size="sm" variant="outline" onClick={() => refresh.mutate()} disabled={disabled || refresh.isPending || isFetching}>
+            <RefreshCw className={refresh.isPending ? 'animate-spin' : ''} />
+            Refresh Health
+          </Button>
+        )
+      }
+    } else if ((check.id === 'gateway.process' && mustFix) || (mustFix && check.summary.toLowerCase().includes('gateway'))) {
       actions.push(
         <Button
           key="restart"
@@ -737,26 +961,28 @@ export default function SystemPage() {
 
     if (check.id.startsWith('soul.') && agentId) {
       pushLink(`/agents/${encodeURIComponent(agentId)}`, 'Open Agent')
-      actions.push(
-        <Button
-          key="apply-soul"
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => setConfirmRequest({
-            kind: 'apply-soul',
-            agentId,
-            title: `Apply SOUL Template ให้ ${agentId}?`,
-            description: 'ระบบจะโหลด template ล่าสุด ทับ SOUL ปัจจุบัน, reset active sessions และ restart gateway ควรใช้เมื่อคุณต้องการรับ guardrail ล่าสุด',
-            confirmLabel: 'Apply Template',
-            destructive: true,
-          })}
-          disabled={disabled}
-        >
-          <ShieldCheck />
-          Apply Template
-        </Button>
-      )
+      if (mustFix) {
+        actions.push(
+          <Button
+            key="apply-soul"
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirmRequest({
+              kind: 'apply-soul',
+              agentId,
+              title: `Apply SOUL Template ให้ ${agentId}?`,
+              description: 'ระบบจะโหลด template ล่าสุด ทับ SOUL ปัจจุบัน, reset active sessions และ restart gateway ควรใช้เมื่อคุณต้องการรับ guardrail ล่าสุด',
+              confirmLabel: 'Apply Template',
+              destructive: true,
+            })}
+            disabled={disabled}
+          >
+            <ShieldCheck />
+            Apply Template
+          </Button>
+        )
+      }
     } else if ((check.id.startsWith('mcp.') || check.id.startsWith('model.fallback.') || check.id.startsWith('model.image.')) && agentId) {
       pushLink(`/agents/${encodeURIComponent(agentId)}`, 'Open Agent')
     }
@@ -764,25 +990,27 @@ export default function SystemPage() {
     if (check.id.startsWith('auth.')) pushLink('/model', 'Open Model & Keys')
     if (check.id === 'telegram.api') {
       pushLink('/telegram', 'Open Telegram')
-      actions.push(
-        <Button
-          key="restart-telegram"
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => setConfirmRequest({
-            kind: 'restart-gateway',
-            title: 'Restart Gateway?',
-            description: 'ใช้หลังแก้ Telegram token, binding หรือ channel config เพื่อให้ gateway โหลดค่าใหม่',
-            confirmLabel: 'Restart Gateway',
-            destructive: true,
-          })}
-          disabled={disabled}
-        >
-          <RotateCcw />
-          Restart Gateway
-        </Button>
-      )
+      if (mustFix) {
+        actions.push(
+          <Button
+            key="restart-telegram"
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirmRequest({
+              kind: 'restart-gateway',
+              title: 'Restart Gateway?',
+              description: 'ใช้หลังแก้ Telegram token, binding หรือ channel config เพื่อให้ gateway โหลดค่าใหม่',
+              confirmLabel: 'Restart Gateway',
+              destructive: true,
+            })}
+            disabled={disabled}
+          >
+            <RotateCcw />
+            Restart Gateway
+          </Button>
+        )
+      }
     }
 
     if (check.id === 'config.openclaw' && check.status !== 'ok') {
@@ -841,124 +1069,174 @@ export default function SystemPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Activity className="size-4" /> Overall
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {health ? <StatusBadge status={health.status} /> : <p className="text-sm text-zinc-400">{isLoading ? 'Loading...' : 'Unavailable'}</p>}
-            <p className="mt-2 text-xs text-zinc-500">Generated {generated}</p>
-            {health?.cache && <p className="text-xs text-zinc-400">cache {health.cache.hit ? 'hit' : 'miss'} · ttl {health.cache.ttlSeconds}s</p>}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <ShieldAlert className="size-4" /> Critical
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className={counts.criticalFail ? 'text-2xl font-semibold text-red-600' : 'text-2xl font-semibold text-emerald-600'}>
-              {counts.criticalFail}
-            </p>
-            <p className="text-xs text-zinc-500">critical failures</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <AlertTriangle className="size-4" /> Warnings
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-amber-600">{counts.warn}</p>
-            <p className="text-xs text-zinc-500">non-blocking warnings</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <CheckCircle2 className="size-4" /> Passing
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-emerald-600">{counts.ok}</p>
-            <p className="text-xs text-zinc-500">checks ok</p>
-          </CardContent>
-        </Card>
+        {loadingHealth ? (
+          <HealthSummarySkeleton />
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Activity className="size-4" /> Overall
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {health ? <StatusBadge status={health.status} /> : <p className="text-sm text-zinc-400">Unavailable</p>}
+                <p className="mt-2 text-xs text-zinc-500">Generated {generated}</p>
+                {health?.cache && <p className="text-xs text-zinc-400">cache {health.cache.hit ? 'hit' : 'miss'} · ttl {health.cache.ttlSeconds}s</p>}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <ShieldAlert className="size-4" /> Critical
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className={counts.criticalFail ? 'text-2xl font-semibold text-red-600' : 'text-2xl font-semibold text-emerald-600'}>
+                  {counts.criticalFail}
+                </p>
+                <p className="text-xs text-zinc-500">critical failures</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <AlertTriangle className="size-4" /> Warnings
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-semibold text-amber-600">{counts.warn}</p>
+                <p className="text-xs text-zinc-500">non-blocking warnings</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <CheckCircle2 className="size-4" /> Passing
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-semibold text-emerald-600">{counts.ok}</p>
+                <p className="text-xs text-zinc-500">checks ok</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
-      <ActionableHealthPanel
-        checks={checks}
-        runtimeProgress={runtimeProgress}
-        actionResults={actionResults}
-        activeAction={activeAction}
-        onCancelRuntimeTests={cancelRuntimeTests}
-        renderActions={renderCheckActions}
-      />
+      {loadingHealth && <SystemLoadingPanel />}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Agent Matrix</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto p-0">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="border-b bg-zinc-50 text-xs text-zinc-500 dark:bg-zinc-900">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium">Agent</th>
-                <th className="px-4 py-2 text-left font-medium">Access Mode</th>
-                <th className="px-4 py-2 text-left font-medium">MCP URL</th>
-                <th className="px-4 py-2 text-left font-medium">Tools</th>
-                <th className="px-4 py-2 text-left font-medium">Source</th>
-                <th className="px-4 py-2 text-left font-medium">SOUL</th>
-                <th className="px-4 py-2 text-left font-medium">Auth</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(health?.agents ?? []).map(agent => (
-                <tr key={agent.id} className="border-b last:border-b-0">
-                  <td className="px-4 py-3 font-mono text-xs font-medium">{agent.id}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{agent.accessMode}</td>
-                  <td className="max-w-[360px] break-all px-4 py-3 font-mono text-xs text-zinc-500">{agent.mcpUrl}</td>
-                  <td className="px-4 py-3">{agent.toolCount}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={agent.toolSource === 'live' ? 'default' : 'outline'}>{agent.toolSource ?? '-'}</Badge>
-                  </td>
-                  <td className="px-4 py-3"><StatusBadge status={agent.soulStatus} /></td>
-                  <td className="px-4 py-3"><StatusBadge status={agent.authStatus} /></td>
-                </tr>
-              ))}
-              {!health?.agents?.length && (
+      {isError && !health && (
+        <SystemErrorPanel
+          message={error instanceof Error ? error.message : 'ไม่สามารถโหลด health check ได้'}
+          onRetry={() => refresh.mutate()}
+          onCopySupport={() => support.mutate()}
+          retrying={refresh.isPending || isFetching}
+          copying={support.isPending}
+        />
+      )}
+
+      {staleHealth && health && (
+        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/30">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
+                <AlertTriangle className="size-4" />
+                <p className="text-sm font-medium">ข้อมูลอาจไม่ล่าสุด</p>
+              </div>
+              <p className="mt-1 text-sm text-amber-800/80 dark:text-amber-100/80">
+                Health generated เมื่อ {generated}. กด refresh หลัง restart gateway หรือแก้ config
+              </p>
+            </div>
+            <Button type="button" variant="outline" onClick={() => refresh.mutate()} disabled={refresh.isPending || isFetching}>
+              <RefreshCw className={refresh.isPending ? 'animate-spin' : ''} />
+              Run Health Check
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {health && (
+        <ActionableHealthPanel
+          checks={checks}
+          runtimeProgress={runtimeProgress}
+          actionResults={actionResults}
+          activeAction={activeAction}
+          onCancelRuntimeTests={cancelRuntimeTests}
+          renderActions={renderCheckActions}
+          infoOpen={infoOpen}
+          onToggleInfo={() => setInfoOpen(open => !open)}
+          onRefresh={() => refresh.mutate()}
+          refreshing={refresh.isPending || isFetching}
+        />
+      )}
+
+      {health && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Agent Matrix</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="border-b bg-zinc-50 text-xs text-zinc-500 dark:bg-zinc-900">
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-zinc-400">No agents found</td>
+                  <th className="px-4 py-2 text-left font-medium">Agent</th>
+                  <th className="px-4 py-2 text-left font-medium">Access Mode</th>
+                  <th className="px-4 py-2 text-left font-medium">MCP URL</th>
+                  <th className="px-4 py-2 text-left font-medium">Tools</th>
+                  <th className="px-4 py-2 text-left font-medium">Source</th>
+                  <th className="px-4 py-2 text-left font-medium">SOUL</th>
+                  <th className="px-4 py-2 text-left font-medium">Auth</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
+              </thead>
+              <tbody>
+                {(health.agents ?? []).map(agent => (
+                  <tr key={agent.id} className="border-b last:border-b-0">
+                    <td className="px-4 py-3 font-mono text-xs font-medium">{agent.id}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{agent.accessMode}</td>
+                    <td className="max-w-[360px] break-all px-4 py-3 font-mono text-xs text-zinc-500">{agent.mcpUrl}</td>
+                    <td className="px-4 py-3">{agent.toolCount}</td>
+                    <td className="px-4 py-3">
+                      <Badge variant={agent.toolSource === 'live' ? 'default' : 'outline'}>{agent.toolSource ?? '-'}</Badge>
+                    </td>
+                    <td className="px-4 py-3"><StatusBadge status={agent.soulStatus} /></td>
+                    <td className="px-4 py-3"><StatusBadge status={agent.authStatus} /></td>
+                  </tr>
+                ))}
+                {!health.agents?.length && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-zinc-400">No agents found</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Checks</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {checks.map(check => <CheckRow key={check.id} check={check} actions={renderCheckActions(check)} />)}
-          {!health?.checks?.length && (
-            <p className="px-4 py-6 text-center text-sm text-zinc-400">No health checks available</p>
-          )}
-        </CardContent>
-      </Card>
+      {health && (
+        <CollapsibleSection
+          title="รายละเอียดการตรวจระบบ"
+          description={hasNeedsAction ? 'เปิดไว้เพราะมีรายการที่ต้องจัดการ' : 'ซ่อนไว้เมื่อระบบพร้อม เพื่อลดความสับสนของ admin'}
+          open={detailsOpen}
+          onToggle={() => setCheckDetailsOpen(open => !open)}
+        >
+          <div className="overflow-hidden rounded-lg border">
+            {checks.map(check => <CheckRow key={check.id} check={check} actions={renderCheckActions(check, 'table')} />)}
+            {!checks.length && (
+              <p className="px-4 py-6 text-center text-sm text-zinc-400">No health checks available</p>
+            )}
+          </div>
+        </CollapsibleSection>
+      )}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Terminal className="size-4" /> Operator Commands
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <CollapsibleSection
+        title="คำสั่งสำหรับทีมเทคนิค"
+        description="ใช้เมื่อจำเป็นต้องทำงานผ่าน terminal หรือส่งคำสั่งให้ทีม dev"
+        open={commandsOpen}
+        onToggle={() => setCommandsOpen(open => !open)}
+      >
+        <div className="space-y-3">
           <div className="flex flex-col gap-2 rounded-md border bg-zinc-50 p-3 dark:bg-zinc-900 md:flex-row md:items-center md:justify-between">
             <code className="break-all text-xs">{healthCommand}</code>
             <Button variant="outline" size="sm" onClick={() => copyText('health command', healthCommand)}>
@@ -971,8 +1249,8 @@ export default function SystemPage() {
               <ClipboardCopy /> Copy
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleSection>
 
       <Dialog open={Boolean(confirmRequest)} onOpenChange={open => !open && setConfirmRequest(null)}>
         <DialogContent>
