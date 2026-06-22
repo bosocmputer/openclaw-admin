@@ -29,6 +29,7 @@ const adminGroups: NavGroup[] = [
     label: 'AI Setup',
     items: [
       { href: '/model', label: 'Model & Keys' },
+      { href: '/business-profiles', label: 'Business Profiles' },
       { href: '/compaction', label: 'Compaction' },
     ],
   },

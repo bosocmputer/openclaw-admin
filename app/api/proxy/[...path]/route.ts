@@ -40,6 +40,13 @@ function auditFor(method: string, path: string[]): { action: AuditAction; target
     if (method === 'POST' && child === 'backfill') return { action: 'conversation.backfill', detail: 'conversation history backfill requested' }
     if (method === 'GET' && child === 'export') return { action: 'conversation.export', detail: 'conversation history exported' }
   }
+  if (group === 'business-profiles') {
+    if (method === 'POST' && !id) return { action: 'business_profile.create' }
+    if (method === 'PUT' && id) return { action: 'business_profile.update', target: id }
+    if (method === 'DELETE' && id && child === 'link-agent') return { action: 'business_profile.unlink', target: id, detail: childId }
+    if (method === 'DELETE' && id) return { action: 'business_profile.delete', target: id }
+    if (method === 'POST' && id && child === 'link-agent') return { action: 'business_profile.link', target: id }
+  }
   if (group === 'members') {
     if (method === 'POST') return { action: 'member.create' }
     if (method === 'PUT' || method === 'PATCH') return { action: 'member.update', target: id }

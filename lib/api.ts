@@ -563,8 +563,46 @@ export interface AgentSoulTemplate {
   capabilities: AgentCapability[]
   deniedCapabilities: AgentCapability[]
   warnings: string[]
+  businessProfile?: BusinessProfile | null
+  businessProfileHash?: string | null
+  businessProfileApplied?: boolean
   generatedAt: string
   cache?: { hit: boolean; ttlSeconds: number }
+}
+
+export interface BusinessProfile {
+  id: string
+  name: string
+  nameTh: string
+  businessType: string
+  summary: string
+  customerQuestionPatterns: string[]
+  mainCategories: string[]
+  synonyms: string[]
+  safetyRules: string[]
+  soulBlock: string
+  soulBlockHash: string
+  soulBlockChars?: number
+  agentIds?: string[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface BusinessProfileTemplate extends Omit<BusinessProfile, 'id'> {
+  templateId: string
+}
+
+export interface AgentBusinessProfileState {
+  profile: BusinessProfile | null
+  link: {
+    profileId: string
+    agentId: string
+    lastAppliedHash: string | null
+    lastAppliedAt: string | null
+    createdAt?: string
+    updatedAt?: string
+  } | null
+  isApplied: boolean
 }
 
 export async function testAgentMcp(agentId: string, accessMode: string): Promise<{
@@ -585,6 +623,43 @@ export async function testAgentMcp(agentId: string, accessMode: string): Promise
 
 export async function getAgentSoulTemplate(agentId: string, persona: string, refreshTools = false): Promise<AgentSoulTemplate> {
   const { data } = await api.get(`/api/agents/${agentId}/soul/template`, { params: { persona, refreshTools } })
+  return data
+}
+
+export async function getBusinessProfiles(): Promise<BusinessProfile[]> {
+  const { data } = await api.get('/api/business-profiles')
+  return data
+}
+
+export async function getBusinessProfileTemplates(): Promise<BusinessProfileTemplate[]> {
+  const { data } = await api.get('/api/business-profiles/templates')
+  return data
+}
+
+export async function createBusinessProfile(profile: Omit<BusinessProfile, 'id' | 'soulBlockHash' | 'createdAt' | 'updatedAt' | 'agentIds'>): Promise<BusinessProfile> {
+  const { data } = await api.post('/api/business-profiles', profile)
+  return data
+}
+
+export async function updateBusinessProfile(id: string, profile: Omit<BusinessProfile, 'id' | 'soulBlockHash' | 'createdAt' | 'updatedAt' | 'agentIds'>): Promise<BusinessProfile> {
+  const { data } = await api.put(`/api/business-profiles/${id}`, profile)
+  return data
+}
+
+export async function deleteBusinessProfile(id: string): Promise<void> {
+  await api.delete(`/api/business-profiles/${id}`)
+}
+
+export async function linkBusinessProfileToAgent(profileId: string, agentId: string): Promise<void> {
+  await api.post(`/api/business-profiles/${profileId}/link-agent`, { agentId })
+}
+
+export async function unlinkBusinessProfileFromAgent(profileId: string, agentId: string): Promise<void> {
+  await api.delete(`/api/business-profiles/${profileId}/link-agent/${agentId}`)
+}
+
+export async function getAgentBusinessProfile(agentId: string): Promise<AgentBusinessProfileState> {
+  const { data } = await api.get(`/api/agents/${agentId}/business-profile`)
   return data
 }
 

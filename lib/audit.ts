@@ -9,6 +9,8 @@ export type AuditAction =
   | 'webchat.room.create' | 'webchat.room.update' | 'webchat.room.delete'
   | 'gateway.restart'
   | 'conversation.backfill' | 'conversation.export'
+  | 'business_profile.create' | 'business_profile.update' | 'business_profile.delete'
+  | 'business_profile.link' | 'business_profile.unlink'
 
 export async function audit(params: {
   actor: string       // username

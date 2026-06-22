@@ -10,6 +10,7 @@ interface Crumb {
 const crumbMap: Array<{ match: (p: string) => boolean; crumb: Crumb }> = [
   { match: p => p === '/',                  crumb: { section: 'Overview',       label: 'Dashboard'    } },
   { match: p => p.startsWith('/model'),     crumb: { section: 'AI Setup',       label: 'Model & Keys' } },
+  { match: p => p.startsWith('/business-profiles'), crumb: { section: 'AI Setup', label: 'Business Profiles' } },
   { match: p => p.startsWith('/compaction'),crumb: { section: 'AI Setup',       label: 'Compaction'   } },
   { match: p => p.startsWith('/agents'),    crumb: { section: 'Channels',       label: 'Agents'       } },
   { match: p => p.startsWith('/telegram'),  crumb: { section: 'Channels',       label: 'Telegram'     } },

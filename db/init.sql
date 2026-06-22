@@ -146,6 +146,35 @@ CREATE INDEX IF NOT EXISTS idx_conversation_turns_status_started  ON conversatio
 CREATE INDEX IF NOT EXISTS idx_conversation_turns_chat_started    ON conversation_turns(chat_user, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conversation_events_turn           ON conversation_events(turn_id, event_index ASC);
 
+CREATE TABLE IF NOT EXISTS business_profiles (
+  id                         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                       TEXT NOT NULL,
+  name_th                    TEXT NOT NULL,
+  business_type              TEXT NOT NULL,
+  summary                    TEXT NOT NULL DEFAULT '',
+  customer_question_patterns JSONB NOT NULL DEFAULT '[]'::jsonb,
+  main_categories            JSONB NOT NULL DEFAULT '[]'::jsonb,
+  synonyms                   JSONB NOT NULL DEFAULT '[]'::jsonb,
+  safety_rules               JSONB NOT NULL DEFAULT '[]'::jsonb,
+  soul_block                 TEXT NOT NULL,
+  soul_block_hash            TEXT NOT NULL,
+  created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS business_profile_agent_links (
+  profile_id        UUID NOT NULL REFERENCES business_profiles(id) ON DELETE CASCADE,
+  agent_id          TEXT NOT NULL,
+  last_applied_hash TEXT,
+  last_applied_at   TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_business_profiles_type          ON business_profiles(business_type);
+CREATE INDEX IF NOT EXISTS idx_business_profile_links_profile  ON business_profile_agent_links(profile_id);
+
 INSERT INTO admin_users (username, password, role, display_name)
 VALUES (
   'superadmin',

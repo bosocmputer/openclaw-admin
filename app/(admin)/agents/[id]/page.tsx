@@ -6,6 +6,7 @@ import {
   getAgentMcp, putAgentMcp,
   getAgentUsers, addAgentUser, deleteAgentUser,
   restartGateway, testAgentMcp, getAgentSoulTemplate, resetAgentSessions,
+  getAgentBusinessProfile,
   type AgentSoulTemplate, type McpConfig, type McpTool,
 } from '@/lib/api'
 import { useState, useEffect, use } from 'react'
@@ -110,6 +111,10 @@ function SoulPanel({ agentId }: { agentId: string }) {
     queryKey: ['soul', agentId],
     queryFn: () => getAgentSoul(agentId),
   })
+  const { data: businessProfileState } = useQuery({
+    queryKey: ['agent-business-profile', agentId],
+    queryFn: () => getAgentBusinessProfile(agentId),
+  })
 
   useEffect(() => {
     if (data !== undefined) {
@@ -133,6 +138,7 @@ function SoulPanel({ agentId }: { agentId: string }) {
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['soul', agentId] })
+      qc.invalidateQueries({ queryKey: ['agent-business-profile', agentId] })
       setDirty(false)
       setResetSessionsAfterSave(false)
       if (result.reset) {
@@ -174,6 +180,8 @@ function SoulPanel({ agentId }: { agentId: string }) {
   const currentContract = extractSoulContract(soul)
   const pendingContract = pendingTemplate ? extractSoulContract(pendingTemplate.soul) : null
   const pendingDiff = pendingTemplate ? diffSummary(soul, pendingTemplate.soul, currentContract, pendingContract) : null
+  const linkedBusinessProfile = businessProfileState?.profile ?? null
+  const businessProfileApplied = businessProfileState?.isApplied ?? false
 
   return (
     <>
@@ -186,6 +194,11 @@ function SoulPanel({ agentId }: { agentId: string }) {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {dirty && <Badge variant="outline" className="text-amber-600 border-amber-400">Unsaved</Badge>}
+              {linkedBusinessProfile && (
+                <Badge variant={businessProfileApplied ? 'secondary' : 'destructive'}>
+                  {businessProfileApplied ? 'Business Profile applied' : 'Business Profile changed'}
+                </Badge>
+              )}
               <div className="flex items-center gap-1.5">
                 <select
                   value={persona}
@@ -208,6 +221,26 @@ function SoulPanel({ agentId }: { agentId: string }) {
           </div>
         </CardHeader>
         <CardContent className="flex flex-col flex-1 gap-3 min-h-0">
+          {linkedBusinessProfile ? (
+            <div className={`rounded-md border px-3 py-2 text-xs ${
+              businessProfileApplied
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200'
+                : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200'
+            }`}>
+              <p className="font-medium">
+                Business Profile: {linkedBusinessProfile.nameTh}
+              </p>
+              <p className="mt-0.5">
+                {businessProfileApplied
+                  ? 'SOUL ปัจจุบันใช้ profile เวอร์ชันล่าสุดแล้ว'
+                  : 'Profile ถูกแก้ไขหรือเพิ่งผูกใหม่ ให้กด Load Template แล้ว preview ก่อน Save SOUL'}
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-md border bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:bg-zinc-900">
+              ยังไม่ได้ผูก Business Profile กับ agent นี้ · <Link className="underline" href="/business-profiles">ไปที่ Business Profiles</Link>
+            </div>
+          )}
           {legacyPatterns.length > 0 && (
             <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -285,6 +318,13 @@ function SoulPanel({ agentId }: { agentId: string }) {
                   <p className="font-medium">{pendingTemplate.personaLabel}</p>
                 </div>
               </div>
+              {pendingTemplate.businessProfile && (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
+                  <p className="font-medium">Business Profile included</p>
+                  <p className="mt-1">{pendingTemplate.businessProfile.nameTh} · hash {pendingTemplate.businessProfileHash}</p>
+                  <p className="mt-1">ส่วนนี้จะถูกใส่ใน SOUL.md หลังบุคลิกและก่อน MCP Tool Contract</p>
+                </div>
+              )}
               {pendingTemplate.warnings.length > 0 && (
                 <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" />
