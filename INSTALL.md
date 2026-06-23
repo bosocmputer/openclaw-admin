@@ -171,7 +171,7 @@ sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ต้องได้ค่า:
 
 ```text
-0815ca746da1363615d41432b1488c7a0b87274b063784524793718f2fcacbc5  openclaw-runtime-2026.6.8-erp-latest.tar.gz
+54c3672d4f1eb0c7b275c23210e128ef9004e5244b3ada0ed39db1a12fd5c214  openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ```
 
 ถ้า checksum ไม่ตรง ให้ลบไฟล์แล้ว download ใหม่ ห้ามติดตั้งต่อ
@@ -881,7 +881,7 @@ sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ต้องได้:
 
 ```text
-0815ca746da1363615d41432b1488c7a0b87274b063784524793718f2fcacbc5  openclaw-runtime-2026.6.8-erp-latest.tar.gz
+54c3672d4f1eb0c7b275c23210e128ef9004e5244b3ada0ed39db1a12fd5c214  openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ```
 
 ถ้า checksum ตรง ให้ติดตั้ง:
@@ -1370,7 +1370,7 @@ systemctl --user status openclaw-gateway.service --no-pager
 | OpenRouter API Key | |
 | MCP Server URL | |
 | Runtime Artifact URL | `https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.8-erp-20260623-line-observability/openclaw-runtime-2026.6.8-erp-latest.tar.gz` |
-| Runtime SHA256 | `0815ca746da1363615d41432b1488c7a0b87274b063784524793718f2fcacbc5` |
+| Runtime SHA256 | `54c3672d4f1eb0c7b275c23210e128ef9004e5244b3ada0ed39db1a12fd5c214` |
 | LINE Tunnel URL | (เปลี่ยนทุก restart) |
 
 ---
