@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArchiveRestore, CheckCircle2, FileText, Lightbulb, RotateCcw, ShieldCheck, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -125,16 +125,15 @@ function sourceIdsFromText(text: string) {
     .slice(0, 50)
 }
 
-function initialMemoryTab(): MemoryTab {
-  if (typeof window === 'undefined') return 'overview'
+function memoryTabFromSearch(): MemoryTab | null {
   const tabParam = new URLSearchParams(window.location.search).get('tab')
   if (tabParam === 'overview' || tabParam === 'learning' || tabParam === 'files' || tabParam === 'backups') return tabParam
-  return 'overview'
+  return null
 }
 
 export default function MemoryPage() {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<MemoryTab>(() => initialMemoryTab())
+  const [tab, setTab] = useState<MemoryTab>('overview')
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [candidateStatus, setCandidateStatus] = useState('pending')
   const [viewDialog, setViewDialog] = useState<{ title: string; content: string; loading?: boolean } | null>(null)
@@ -148,6 +147,13 @@ export default function MemoryPage() {
     sourceTurnIdsText: '',
     confidence: '0.8',
   })
+
+  useEffect(() => {
+    const nextTab = memoryTabFromSearch()
+    if (!nextTab) return undefined
+    const timeout = window.setTimeout(() => setTab(nextTab), 0)
+    return () => window.clearTimeout(timeout)
+  }, [])
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['memory-status'],
