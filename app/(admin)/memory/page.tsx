@@ -125,9 +125,16 @@ function sourceIdsFromText(text: string) {
     .slice(0, 50)
 }
 
+function initialMemoryTab(): MemoryTab {
+  if (typeof window === 'undefined') return 'overview'
+  const tabParam = new URLSearchParams(window.location.search).get('tab')
+  if (tabParam === 'overview' || tabParam === 'learning' || tabParam === 'files' || tabParam === 'backups') return tabParam
+  return 'overview'
+}
+
 export default function MemoryPage() {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<MemoryTab>('overview')
+  const [tab, setTab] = useState<MemoryTab>(() => initialMemoryTab())
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [candidateStatus, setCandidateStatus] = useState('pending')
   const [viewDialog, setViewDialog] = useState<{ title: string; content: string; loading?: boolean } | null>(null)

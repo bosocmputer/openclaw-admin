@@ -14,9 +14,11 @@ import {
   getConversationAnalysisDetail,
   getConversationInsights,
   getConversationIngestStatus,
+  getMemoryLearningCandidates,
   type ConversationAnalysisParams,
   type ConversationIssue,
   type ConversationAnalysisTurn,
+  type MemoryLearningCandidate,
   type MemoryLearningTargetType,
   type MonitorMedia,
 } from '@/lib/api'
@@ -300,7 +302,21 @@ function TurnListSkeleton() {
   )
 }
 
-function TurnRow({ turn, selected, onSelect }: { turn: ConversationAnalysisTurn; selected: boolean; onSelect: () => void }) {
+function activeLearningCandidates(candidates?: MemoryLearningCandidate[]) {
+  return (candidates ?? []).filter(candidate => candidate.status !== 'rejected')
+}
+
+function TurnRow({
+  turn,
+  selected,
+  learningCount,
+  onSelect,
+}: {
+  turn: ConversationAnalysisTurn
+  selected: boolean
+  learningCount: number
+  onSelect: () => void
+}) {
   const primaryIssue = turn.primaryIssueTag || turn.issueTags?.[0]
   const extraIssueCount = Math.max(0, (turn.issueTags?.length ?? 0) - (primaryIssue ? 1 : 0))
   const primaryTarget = turn.primaryReviewTarget || turn.reviewTargets?.[0]
@@ -329,6 +345,12 @@ function TurnRow({ turn, selected, onSelect }: { turn: ConversationAnalysisTurn;
               <Badge variant="outline" className={cn('gap-1', selected ? 'border-white/30 text-white' : '')}>
                 <ImageIcon className="size-3" />
                 รูป {turn.mediaCount}
+              </Badge>
+            ) : null}
+            {learningCount > 0 ? (
+              <Badge variant="outline" className={cn('gap-1', selected ? 'border-white/30 text-white' : '')}>
+                <Lightbulb className="size-3" />
+                ส่งเข้า Learning แล้ว
               </Badge>
             ) : null}
           </div>
@@ -401,6 +423,14 @@ export default function ConversationAnalysisPage() {
     queryFn: () => getConversationInsights(baseParams),
     retry: false,
   })
+  const { data: learningCandidateData } = useQuery({
+    queryKey: ['memory-learning-candidates', 'analysis', agent],
+    queryFn: () => getMemoryLearningCandidates({
+      agentId: agent === 'all' ? undefined : agent,
+      limit: 500,
+    }),
+    retry: false,
+  })
   const selectedTurn = useMemo(() => {
     if (!data?.turns.length) return null
     return data.turns.find(turn => turn.id === selectedId) || data.turns[0]
@@ -442,6 +472,18 @@ export default function ConversationAnalysisPage() {
   const hasTrace = events.some(event => event.type === 'trace')
   const selectedIssues = detail?.turn?.issues ?? selectedTurn?.issues ?? []
   const selectedMediaItems = detail?.turn?.media ?? selectedTurn?.media ?? []
+  const learningCandidatesByTurnId = useMemo(() => {
+    const map = new Map<string, MemoryLearningCandidate[]>()
+    for (const candidate of activeLearningCandidates(learningCandidateData?.candidates)) {
+      for (const turnId of candidate.sourceTurnIds ?? []) {
+        const list = map.get(turnId) ?? []
+        list.push(candidate)
+        map.set(turnId, list)
+      }
+    }
+    return map
+  }, [learningCandidateData?.candidates])
+  const selectedLearningCandidates = selectedTurn ? (learningCandidatesByTurnId.get(selectedTurn.id) ?? []) : []
   const createLearningMutation = useMutation({
     mutationFn: () => {
       if (!selectedTurn) throw new Error('ยังไม่ได้เลือก conversation')
@@ -455,7 +497,13 @@ export default function ConversationAnalysisPage() {
       })
     },
     onSuccess: candidate => {
-      toast.success(candidate.deduped ? 'Learning candidate นี้มีอยู่แล้ว' : 'สร้าง Learning candidate แล้ว')
+      toast.success(candidate.deduped ? 'Learning candidate นี้มีอยู่แล้ว' : 'ส่งเข้า Learning Review แล้ว', {
+        action: {
+          label: 'เปิด Learning Review',
+          onClick: () => openLearningReview(),
+        },
+      })
+      queryClient.invalidateQueries({ queryKey: ['memory-learning-candidates'] })
       setLearningDialogOpen(false)
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'สร้าง Learning candidate ไม่สำเร็จ'),
@@ -509,6 +557,10 @@ export default function ConversationAnalysisPage() {
     setLearningTargetType(target)
     setLearningSummary(defaultLearningSummary(selectedTurn, selectedIssues))
     setLearningDialogOpen(true)
+  }
+
+  function openLearningReview() {
+    window.location.href = '/memory?tab=learning'
   }
 
   return (
@@ -768,7 +820,13 @@ export default function ConversationAnalysisPage() {
                   {group.day}
                 </div>
                 {group.turns.map(turn => (
-                  <TurnRow key={turn.id} turn={turn} selected={turn.id === selectedTurn?.id} onSelect={() => setSelectedId(turn.id)} />
+                  <TurnRow
+                    key={turn.id}
+                    turn={turn}
+                    selected={turn.id === selectedTurn?.id}
+                    learningCount={learningCandidatesByTurnId.get(turn.id)?.length ?? 0}
+                    onSelect={() => setSelectedId(turn.id)}
+                  />
                 ))}
               </div>
             ))}
@@ -801,6 +859,12 @@ export default function ConversationAnalysisPage() {
                         รูป {selectedTurn.mediaCount}
                       </Badge>
                     ) : null}
+                    {selectedLearningCandidates.length ? (
+                      <Badge variant="default" className="gap-1">
+                        <Lightbulb className="size-3" />
+                        ส่งเข้า Learning แล้ว
+                      </Badge>
+                    ) : null}
                     {(selectedTurn.reviewTargets ?? []).map(target => <Badge key={target} variant="secondary">{target}</Badge>)}
                     <span className="text-sm text-muted-foreground">{formatDateTime(selectedTurn.startedAt)}</span>
                   </div>
@@ -808,10 +872,17 @@ export default function ConversationAnalysisPage() {
                   <p className="mt-1 break-all text-xs text-muted-foreground">{selectedTurn.id}</p>
                 </div>
                 <div className="flex flex-col items-stretch gap-2 sm:items-end">
-                  <Button type="button" variant="outline" size="sm" onClick={openLearningDialog}>
-                    <Lightbulb className="size-4" />
-                    Create Learning Candidate
-                  </Button>
+                  {selectedLearningCandidates.length ? (
+                    <Button type="button" variant="outline" size="sm" onClick={openLearningReview}>
+                      <Lightbulb className="size-4" />
+                      เปิด Learning Review
+                    </Button>
+                  ) : (
+                    <Button type="button" variant="outline" size="sm" onClick={openLearningDialog}>
+                      <Lightbulb className="size-4" />
+                      ส่งเรื่องนี้ให้ Admin Review
+                    </Button>
+                  )}
                   <div className="grid grid-cols-3 gap-2 text-right text-xs">
                     <div><p className="text-muted-foreground">Latency</p><p className="font-medium">{formatMs(selectedTurn.durationMs)}</p></div>
                     <div><p className="text-muted-foreground">Cost</p><p className="font-medium">{formatMoney(selectedTurn.cost)}</p></div>
@@ -933,7 +1004,7 @@ export default function ConversationAnalysisPage() {
       <Dialog open={learningDialogOpen} onOpenChange={setLearningDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Create Learning Candidate</DialogTitle>
+            <DialogTitle>ส่งเรื่องนี้ให้ Admin Review</DialogTitle>
           </DialogHeader>
           {selectedTurn ? (
             <div className="space-y-4">
@@ -946,6 +1017,10 @@ export default function ConversationAnalysisPage() {
                   ))}
                 </div>
                 <p className="mt-2 line-clamp-3 text-muted-foreground">{selectedTurn.userText || '(empty question)'}</p>
+              </div>
+
+              <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-sm text-sky-950 dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-sky-100">
+                รายการนี้จะเข้า Learning Review ก่อนเท่านั้น ระบบยังไม่แก้ MEMORY, SOUL, Business Profile หรือ MCP/Search จนกว่า admin จะอนุมัติในหน้า Memory Learning
               </div>
 
               <label className="space-y-1.5">
@@ -996,7 +1071,7 @@ export default function ConversationAnalysisPage() {
                   onClick={() => createLearningMutation.mutate()}
                 >
                   <Lightbulb className="size-4" />
-                  {createLearningMutation.isPending ? 'กำลังสร้าง...' : 'สร้าง Candidate'}
+                  {createLearningMutation.isPending ? 'กำลังส่ง...' : 'ส่งเข้า Learning Review'}
                 </Button>
               </div>
             </div>
