@@ -170,7 +170,7 @@ function uniqueRuntimeIssues(issues: ModelReadinessIssue[] = []) {
 }
 
 function checkAgentId(check: SystemHealthCheck) {
-  const match = check.id.match(/^(soul|mcp|auth|model\.fallback|model\.image)\.(.+)$/)
+  const match = check.id.match(/^(soul|mcp|auth|model\.fallback|model\.image|business_profile)\.(.+)$/)
   return match?.[2] || null
 }
 
@@ -224,6 +224,28 @@ function actionSummary(check: SystemHealthCheck) {
     return {
       cause: 'ชื่อ Telegram bot ดูเหมือน bot เฉพาะงาน แต่ถูก route ไป agent กว้าง เช่น admin/general',
       impact: 'ถ้าตั้งใจให้ทดลองถามกว้าง ๆ สามารถยืนยัน decision นี้ได้ ถ้าไม่ตั้งใจควรเปลี่ยน route ไป agent เฉพาะงาน',
+    }
+  }
+  if (check.id === 'line.webhook') {
+    return {
+      cause: check.status === 'warn'
+        ? 'LINE webhook URL หรือ path ที่ตรวจจาก tunnel ปัจจุบันติดต่อไม่ได้'
+        : 'มี LINE OA configured และระบบตรวจสถานะ webhook เท่าที่ server เห็นได้',
+      impact: check.status === 'warn'
+        ? 'LINE OA อาจส่งข้อความเข้า gateway ไม่ถึง หรือ LINE Console อาจยังใช้ tunnel URL เก่า'
+        : 'ถ้าใช้ quick tunnel ต้องยังตรวจ LINE Developers Console ให้ตรงกับ URL ปัจจุบัน',
+    }
+  }
+  if (check.id === 'session.stalled.media') {
+    return {
+      cause: 'พบ marker ว่า session ที่เกี่ยวกับรูปหรือ LINE อาจค้างใน gateway log ล่าสุด',
+      impact: 'ข้อความถัดไปของ user อาจค้างใน queue จนกว่าจะ reset session หรือ restart gateway',
+    }
+  }
+  if (check.id.startsWith('business_profile.')) {
+    return {
+      cause: 'Agent ผูก Business Profile แล้ว แต่ SOUL.md อาจยังไม่ได้ Load Template ล่าสุด',
+      impact: 'agent อาจยังใช้บริบทธุรกิจเก่าหรือผิดหมวดจนตอบ/ค้นหาไม่ตรงงานจริง',
     }
   }
   if (check.id === 'gateway.process') {
@@ -959,6 +981,37 @@ export default function SystemPage() {
           </Button>
         )
       }
+    } else if (check.id === 'line.webhook') {
+      pushLink('/line', 'Open LINE')
+      actions.push(
+        <Button key="refresh-line" type="button" size="sm" variant="outline" onClick={() => refresh.mutate()} disabled={disabled || refresh.isPending || isFetching}>
+          <RefreshCw className={refresh.isPending ? 'animate-spin' : ''} />
+          Refresh Health
+        </Button>
+      )
+    } else if (check.id === 'session.stalled.media') {
+      pushLink('/monitor', 'Open Monitor')
+      if (mustFix) {
+        actions.push(
+          <Button
+            key="clean-stalled-media"
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirmRequest({
+              kind: 'clean-sessions',
+              title: 'Clean stale sessions?',
+              description: 'ใช้เมื่อพบ session ค้างหลังส่งรูปหรือ LINE queue ค้าง ระบบจะล้าง session ที่ stale และควรทดสอบ channel ใหม่หลังจากนั้น',
+              confirmLabel: 'Clean Stale Sessions',
+              destructive: true,
+            })}
+            disabled={disabled}
+          >
+            <RotateCcw />
+            Clean Sessions
+          </Button>
+        )
+      }
     } else if (check.id === 'telegram.binding.intent') {
       const bindingWarnings = (check.warnings || []).filter(item => item.accountId && item.agentId)
       for (const warning of bindingWarnings) {
@@ -1009,7 +1062,7 @@ export default function SystemPage() {
       )
     }
 
-    if (check.id.startsWith('soul.') && agentId) {
+    if ((check.id.startsWith('soul.') || check.id.startsWith('business_profile.')) && agentId) {
       pushLink(`/agents/${encodeURIComponent(agentId)}`, 'Open Agent')
       if (mustFix) {
         actions.push(

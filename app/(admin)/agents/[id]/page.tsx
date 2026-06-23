@@ -325,6 +325,13 @@ function SoulPanel({ agentId }: { agentId: string }) {
                   <p className="mt-1">ส่วนนี้จะถูกใส่ใน SOUL.md หลังบุคลิกและก่อน MCP Tool Contract</p>
                 </div>
               )}
+              {pendingTemplate.nativeCapabilities?.length ? (
+                <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200">
+                  <p className="font-medium">Native capabilities included</p>
+                  <p className="mt-1 font-mono">{pendingTemplate.nativeCapabilities.join(', ')}</p>
+                  <p className="mt-1">Native image จะแยกจาก MCP tools และใช้เป็นบริบทก่อนตรวจข้อมูลธุรกิจด้วย MCP</p>
+                </div>
+              ) : null}
               {pendingTemplate.warnings.length > 0 && (
                 <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" />

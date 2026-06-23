@@ -566,6 +566,8 @@ export interface AgentSoulTemplate {
   businessProfile?: BusinessProfile | null
   businessProfileHash?: string | null
   businessProfileApplied?: boolean
+  nativeCapabilities?: string[]
+  nativeContractStatus?: 'included' | 'not_required' | string
   generatedAt: string
   cache?: { hit: boolean; ttlSeconds: number }
 }
@@ -1460,6 +1462,13 @@ export interface SystemHealthCheck {
     acknowledgedAt?: string
     note?: string
   }>
+  nativeCapabilities?: string[]
+  nativeMediaStatus?: 'ok' | 'missing' | 'not_required' | string
+  profileId?: string
+  profileHash?: string
+  lastAppliedHash?: string | null
+  publicUrl?: string
+  accounts?: Array<{ id?: string; accountId?: string; webhookPath?: string }>
 }
 
 export interface SystemHealthAgent {
