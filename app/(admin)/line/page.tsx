@@ -4,7 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getLineConfig, getLineBotInfo, getLineBindings, getLinePending, getAgents,
   addLineAccount, deleteLineAccount, updateLineAccount, setLineBinding, approveLinePairing, restartGateway,
+  getLineDeliveryStats,
   type LineBotInfo,
+  type LineDeliveryStats,
 } from '@/lib/api'
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,14 +18,6 @@ import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import Image from 'next/image'
-
-interface LineAccountState {
-  channelAccessToken: string
-  channelSecret: string
-  dmPolicy: string
-  showToken: boolean
-  showSecret: boolean
-}
 
 function AccountCard({
   accountId,
@@ -163,6 +157,97 @@ function AccountCard({
               <p className="text-xs text-zinc-400">DM Policy: pairing (auto-approve)</p>
             </div>
           </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function lineStatsDateToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' }).replace(/-/g, '')
+}
+
+function statCount(part?: LineDeliveryStats['reply']): string {
+  if (!part) return '-'
+  if (part.status !== 'ok') return 'unavailable'
+  const value = part.count ?? part.totalUsage ?? part.value
+  return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '-'
+}
+
+function DeliveryQuotaPanel({ accountIds }: { accountIds: string[] }) {
+  const [selectedAccountId, setSelectedAccountId] = useState(accountIds[0] ?? '')
+  const [date, setDate] = useState(lineStatsDateToday())
+
+  const accountId = (accountIds.includes(selectedAccountId) ? selectedAccountId : accountIds[0]) ?? ''
+  const statsQuery = useQuery({
+    queryKey: ['line-delivery-stats', accountId, date],
+    queryFn: () => getLineDeliveryStats(accountId, date),
+    enabled: Boolean(accountId),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+  const stats = statsQuery.data as LineDeliveryStats | undefined
+
+  if (accountIds.length === 0) return null
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">Delivery & Quota</CardTitle>
+            <p className="mt-1 text-xs text-zinc-500">
+              ดูจำนวน reply/push และ quota ของ LINE OA วันนี้ ใช้เป็น insight ไม่ใช่ health fail
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={accountId} onValueChange={value => setSelectedAccountId(value ?? '')}>
+              <SelectTrigger className="h-9 w-[180px]">
+                <SelectValue placeholder="เลือก LINE OA" />
+              </SelectTrigger>
+              <SelectContent>
+                {accountIds.map(id => <SelectItem key={id} value={id}>{id}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Input
+              aria-label="LINE stats date"
+              value={date}
+              onChange={event => setDate(event.target.value.replace(/\D/g, '').slice(0, 8))}
+              className="h-9 w-[120px] font-mono"
+              placeholder="YYYYMMDD"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => statsQuery.refetch()}
+              disabled={statsQuery.isFetching}
+            >
+              {statsQuery.isFetching ? 'Loading...' : 'Refresh'}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: 'Reply messages', value: statCount(stats?.reply), hint: 'ใช้ replyToken ก่อน' },
+            { label: 'Push messages', value: statCount(stats?.push), hint: 'fallback หรือเกิน 5 objects' },
+            { label: 'Monthly usage', value: statCount(stats?.consumption), hint: 'LINE quota consumption' },
+            { label: 'Monthly quota', value: statCount(stats?.quota), hint: 'quota จาก LINE API' },
+          ].map(item => (
+            <div key={item.label} className="rounded-lg border bg-zinc-50 p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500">{item.label}</p>
+              <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{item.value}</p>
+              <p className="mt-0.5 text-[11px] text-zinc-400">{item.hint}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          {statsQuery.isError ? <span className="text-amber-600">โหลด stats ไม่สำเร็จ</span> : null}
+          {stats?.safeMessage ? <span>{stats.safeMessage}</span> : null}
+          {stats?.checkedAt ? <span>checked {new Date(stats.checkedAt).toLocaleString('th-TH')}</span> : null}
+          {stats?.cache?.hit ? <Badge variant="outline">cache</Badge> : null}
         </div>
       </CardContent>
     </Card>
@@ -375,6 +460,8 @@ export default function LinePage() {
       {accountIds.length === 0 && (
         <p className="text-sm text-zinc-400">ยังไม่มี LINE OA — เพิ่มด้านบนได้เลย</p>
       )}
+
+      <DeliveryQuotaPanel accountIds={accountIds} />
 
       {/* Account cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

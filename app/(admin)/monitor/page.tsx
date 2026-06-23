@@ -81,6 +81,17 @@ interface FlatEvent {
   turnInputTokens?: number
   turnOutputTokens?: number
   media?: MonitorMedia[]
+  marker?: string
+  method?: string
+  deliveryMethod?: string
+  accountId?: string
+  chatType?: string
+  messageCount?: number | null
+  durationMs?: number | null
+  replyTokenAgeMs?: number | null
+  fallbackReason?: string | null
+  loadingSeconds?: number | null
+  eventCount?: number | null
 }
 
 function eventTimeMs(e: Pick<FlatEvent, 'timeMs' | 'timestamp' | 'ts'>): number | null {
@@ -149,6 +160,9 @@ function typeBadge(type: string) {
     case 'reply':    return { icon: '✅', cls: 'text-green-400' }
     case 'warning':  return { icon: '⚠', cls: 'text-amber-400' }
     case 'error':    return { icon: '❌', cls: 'text-red-400' }
+    case 'line_delivery': return { icon: 'LINE', cls: 'text-emerald-400' }
+    case 'line_loading':  return { icon: '⏳', cls: 'text-cyan-300' }
+    case 'line_fallback': return { icon: '↪', cls: 'text-amber-300' }
     default:         return { icon: '·',  cls: 'text-zinc-600' }
   }
 }
@@ -280,6 +294,17 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             intent: (e as MonitorEvent).intent,
             route: (e as MonitorEvent).route,
             media: (e as MonitorEvent).media,
+            marker: (e as MonitorEvent).marker,
+            method: (e as MonitorEvent).method,
+            deliveryMethod: (e as MonitorEvent).deliveryMethod,
+            accountId: (e as MonitorEvent).accountId,
+            chatType: (e as MonitorEvent).chatType,
+            messageCount: (e as MonitorEvent).messageCount,
+            durationMs: (e as MonitorEvent).durationMs,
+            replyTokenAgeMs: (e as MonitorEvent).replyTokenAgeMs,
+            fallbackReason: (e as MonitorEvent).fallbackReason,
+            loadingSeconds: (e as MonitorEvent).loadingSeconds,
+            eventCount: (e as MonitorEvent).eventCount,
             turnTotalCost: e.type === 'reply' && turnModelCalls > 0 ? turnCost : undefined,
             turnModelCalls: e.type === 'reply' && turnModelCalls > 0 ? turnModelCalls : undefined,
             turnInputTokens: e.type === 'reply' && turnModelCalls > 0 ? turnInputTokens : undefined,
@@ -296,6 +321,48 @@ function buildGroups(data: MonitorData): SessionGroup[] {
         })
       }
     }
+  }
+
+  const lineTelemetryEvents = (data.globalEvents ?? [])
+    .filter(event => String(event.type || '').startsWith('line_'))
+    .map((event): FlatEvent => ({
+      ts: event.ts,
+      tsThai: legacyTsToThai(event.ts),
+      timestamp: event.timestamp ?? null,
+      timeMs: event.timeMs ?? null,
+      type: event.type,
+      text: event.text,
+      agentId: event.agentId || 'gateway',
+      channel: 'line',
+      user: event.user || event.accountId || 'line',
+      sessionKey: 'gateway-line-telemetry',
+      isLive: false,
+      latency: typeof event.durationMs === 'number' ? Math.round(event.durationMs / 100) / 10 : undefined,
+      marker: event.marker,
+      method: event.method,
+      deliveryMethod: event.deliveryMethod,
+      accountId: event.accountId,
+      chatType: event.chatType,
+      messageCount: event.messageCount,
+      durationMs: event.durationMs,
+      replyTokenAgeMs: event.replyTokenAgeMs,
+      fallbackReason: event.fallbackReason,
+      loadingSeconds: event.loadingSeconds,
+      eventCount: event.eventCount,
+    }))
+
+  if (lineTelemetryEvents.length > 0) {
+    groups.push({
+      sessionKey: 'gateway-line-telemetry',
+      agentId: 'gateway',
+      channel: 'line',
+      user: 'line delivery',
+      state: lineTelemetryEvents.some(event => event.type === 'line_delivery' && /failed/i.test(event.text)) ? 'error' : 'replied',
+      lastMessageAt: lineTelemetryEvents[0]?.timestamp ?? null,
+      elapsed: 0,
+      sessionCost: 0,
+      events: lineTelemetryEvents,
+    })
   }
 
   return groups.sort((a, b) => {
@@ -666,6 +733,9 @@ export default function MonitorPage() {
             else if (e.type === 'tool')     rowCls = isExp ? 'bg-purple-950/30' : 'bg-purple-950/15 hover:bg-purple-950/25'
             else if (e.type === 'warning')  rowCls = isExp ? 'bg-amber-950/35' : 'bg-amber-950/20 hover:bg-amber-950/30'
             else if (e.type === 'error')    rowCls = isExp ? 'bg-red-950/35' : 'bg-red-950/20 hover:bg-red-950/30'
+            else if (e.type === 'line_delivery') rowCls = isExp ? 'bg-emerald-950/25' : 'bg-emerald-950/10 hover:bg-emerald-950/20'
+            else if (e.type === 'line_loading') rowCls = isExp ? 'bg-cyan-950/25' : 'bg-cyan-950/10 hover:bg-cyan-950/20'
+            else if (e.type === 'line_fallback') rowCls = isExp ? 'bg-amber-950/35' : 'bg-amber-950/20 hover:bg-amber-950/30'
             else if (isExp)                 rowCls = 'bg-zinc-800'
 
             let expandText = e.text
@@ -697,7 +767,21 @@ export default function MonitorPage() {
                   e.cost != null ? `Cost: $${e.cost.toFixed(6)}` : null,
                 ].filter(Boolean).join('\n')
               : ''
-            const expandedBody = [expandText, modelMetaText, toolMetaText].filter(Boolean).join('\n\n')
+            const lineMetaText = e.type.startsWith('line_')
+              ? [
+                  e.accountId ? `LINE account: ${e.accountId}` : null,
+                  e.method ? `Method: ${e.method}` : null,
+                  e.chatType ? `Chat type: ${e.chatType}` : null,
+                  e.messageCount != null ? `Message objects: ${e.messageCount}` : null,
+                  e.eventCount != null ? `Webhook events: ${e.eventCount}` : null,
+                  e.loadingSeconds != null ? `Loading seconds: ${e.loadingSeconds}` : null,
+                  e.durationMs != null ? `Duration: ${e.durationMs}ms` : null,
+                  e.replyTokenAgeMs != null ? `Reply token age: ${e.replyTokenAgeMs}ms` : null,
+                  e.fallbackReason ? `Fallback reason: ${e.fallbackReason}` : null,
+                  e.marker ? `Marker: ${e.marker}` : null,
+                ].filter(Boolean).join('\n')
+              : ''
+            const expandedBody = [expandText, lineMetaText, modelMetaText, toolMetaText].filter(Boolean).join('\n\n')
 
             return (
               <div
@@ -732,6 +816,11 @@ export default function MonitorPage() {
                     <span className="ml-1 hidden shrink-0 items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-cyan-300 sm:inline-flex">
                       <ImageIcon className="size-3" />
                       รูป {e.media.length}
+                    </span>
+                  ) : null}
+                  {e.type.startsWith('line_') && e.method ? (
+                    <span className={`ml-1 hidden shrink-0 rounded border px-1.5 py-0.5 text-[11px] sm:inline ${e.type === 'line_fallback' ? 'border-amber-800 text-amber-300' : e.method === 'loading' ? 'border-cyan-800 text-cyan-300' : 'border-emerald-800 text-emerald-300'}`}>
+                      LINE {e.method}{e.type === 'line_fallback' ? ' fallback' : ''}
                     </span>
                   ) : null}
                   {e.model && e.type !== 'message' && (

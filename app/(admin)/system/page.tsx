@@ -981,6 +981,17 @@ export default function SystemPage() {
           </Button>
         )
       }
+    } else if (check.id === 'telemetry.line') {
+      pushLink('/monitor', 'Open Monitor')
+      pushLink('/line', 'Open LINE')
+      if (panel) {
+        actions.push(
+          <Button key="refresh-line-telemetry" type="button" size="sm" variant="outline" onClick={() => refresh.mutate()} disabled={disabled || refresh.isPending || isFetching}>
+            <RefreshCw className={refresh.isPending ? 'animate-spin' : ''} />
+            Refresh Health
+          </Button>
+        )
+      }
     } else if (check.id === 'line.webhook') {
       pushLink('/line', 'Open LINE')
       actions.push(

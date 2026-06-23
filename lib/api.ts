@@ -498,6 +498,35 @@ export async function getLineBotInfo(): Promise<Record<string, LineBotInfo>> {
   return data
 }
 
+export interface LineDeliveryStatsPart {
+  status: 'ok' | 'unavailable' | string
+  count?: number | null
+  value?: number | null
+  totalUsage?: number | null
+  reason?: string
+}
+
+export interface LineDeliveryStats {
+  ok: boolean
+  status: 'ok' | 'unavailable' | string
+  accountId: string
+  date: string
+  quota?: LineDeliveryStatsPart
+  consumption?: LineDeliveryStatsPart
+  reply?: LineDeliveryStatsPart
+  push?: LineDeliveryStatsPart
+  checkedAt?: string
+  safeMessage?: string
+  cache?: { hit: boolean; ttlSeconds: number }
+}
+
+export async function getLineDeliveryStats(accountId: string, date?: string): Promise<LineDeliveryStats> {
+  const { data } = await api.get('/api/line/delivery-stats', {
+    params: { accountId, ...(date ? { date } : {}) },
+  })
+  return data
+}
+
 export async function getLineBindings(): Promise<{ accountId: string; agentId: string }[]> {
   const { data } = await api.get('/api/line/bindings')
   return data
@@ -884,6 +913,17 @@ export interface MonitorEvent {
   intent?: string
   route?: string
   media?: MonitorMedia[]
+  marker?: string
+  method?: 'reply' | 'push' | 'loading' | string
+  deliveryMethod?: 'reply' | 'push' | 'loading' | string
+  accountId?: string
+  chatType?: 'user' | 'group' | 'room' | 'unknown' | string
+  messageCount?: number | null
+  durationMs?: number | null
+  replyTokenAgeMs?: number | null
+  fallbackReason?: string | null
+  loadingSeconds?: number | null
+  eventCount?: number | null
 }
 
 export interface MonitorMedia {
