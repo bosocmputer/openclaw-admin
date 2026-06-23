@@ -1136,6 +1136,7 @@ export interface ConversationAnalysisTurn {
   cost?: number | null
   toolCount: number
   warningCount: number
+  media?: MonitorMedia[]
   mediaCount?: number
   hasMedia?: boolean
   issues: ConversationIssue[]

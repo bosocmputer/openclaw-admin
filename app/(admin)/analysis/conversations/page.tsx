@@ -16,12 +16,14 @@ import {
   type ConversationAnalysisParams,
   type ConversationIssue,
   type ConversationAnalysisTurn,
+  type MonitorMedia,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const timeZone = 'Asia/Bangkok'
@@ -115,6 +117,13 @@ function formatMoney(value?: number | null) {
   return `$${value.toFixed(4)}`
 }
 
+function formatBytes(value?: number) {
+  if (!value || value <= 0) return ''
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${Math.round(value / 102.4) / 10} KB`
+  return `${Math.round(value / (1024 * 102.4)) / 10} MB`
+}
+
 function formatPercent(value?: number | null) {
   if (!value) return '0%'
   return `${Math.round(value * 100)}%`
@@ -159,6 +168,48 @@ function evidencePreview(issue: ConversationIssue) {
   } catch {
     return shortText(String(issue.tag), 360)
   }
+}
+
+function conversationMediaUrl(media: MonitorMedia) {
+  if (!media.hasPreview) return ''
+  if (media.previewUrl?.startsWith('/api/')) return `/api/proxy${media.previewUrl}`
+  if (media.id) return `/api/proxy/api/monitor/media/${encodeURIComponent(media.id)}`
+  return ''
+}
+
+function MediaPreviewCard({ media, onOpen }: { media: MonitorMedia; onOpen: () => void }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const src = conversationMediaUrl(media)
+  const canPreview = Boolean(src) && !imageFailed
+  return (
+    <div className="rounded-lg border bg-background p-2">
+      {canPreview ? (
+        <button
+          type="button"
+          className="block w-full overflow-hidden rounded-md border bg-muted text-left transition hover:border-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onOpen}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={media.fileName || 'conversation media preview'}
+            className="h-32 w-full object-cover"
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+          />
+        </button>
+      ) : (
+        <div className="flex h-32 items-center justify-center rounded-md border border-dashed bg-muted/30 p-3 text-center text-xs text-muted-foreground">
+          {media.hasPreview ? 'Preview หมดอายุหรือยังไม่พร้อม ให้เปิด /monitor หากเป็นข้อความล่าสุด' : 'มีรูปใน log นี้ แต่ไม่มีไฟล์ preview'}
+        </div>
+      )}
+      <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+        <p className="truncate font-medium text-foreground">{media.fileName || media.mimeType || 'media'}</p>
+        <p>{media.mimeType || 'unknown'} {formatBytes(media.sizeBytes)}</p>
+        {media.caption ? <p className="line-clamp-2">{media.caption}</p> : null}
+      </div>
+    </div>
+  )
 }
 
 function daysBetween(from: string, to: string) {
@@ -263,6 +314,7 @@ export default function ConversationAnalysisPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [triageTab, setTriageTab] = useState<TriageTab>('all')
+  const [selectedMedia, setSelectedMedia] = useState<MonitorMedia | null>(null)
 
   const params: ConversationAnalysisParams = {
     from: fromLocalInput(from),
@@ -335,6 +387,7 @@ export default function ConversationAnalysisPage() {
   const events = detail?.events ?? []
   const hasTrace = events.some(event => event.type === 'trace')
   const selectedIssues = detail?.turn?.issues ?? selectedTurn?.issues ?? []
+  const selectedMediaItems = detail?.turn?.media ?? selectedTurn?.media ?? []
   const groupedTurns = useMemo(() => {
     const groups: Array<{ day: string; turns: ConversationAnalysisTurn[] }> = []
     for (const turn of data?.turns ?? []) {
@@ -692,6 +745,40 @@ export default function ConversationAnalysisPage() {
                 </div>
               </div>
 
+              {selectedTurn.mediaCount ? (
+                <div className="rounded-lg border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">รูปแนบ</p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedMediaItems.length
+                          ? 'กดรูปเพื่อดู preview ขนาดใหญ่'
+                          : 'Turn นี้มีรูป แต่ log เก่าอาจไม่มีไฟล์ preview ให้เปิดดู'}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="gap-1">
+                      <ImageIcon className="size-3" />
+                      {selectedTurn.mediaCount} media
+                    </Badge>
+                  </div>
+                  {selectedMediaItems.length ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {selectedMediaItems.map((media, mediaIndex) => (
+                        <MediaPreviewCard
+                          key={`${media.id ?? media.fileName ?? mediaIndex}`}
+                          media={media}
+                          onOpen={() => setSelectedMedia(media)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                      มี media แต่ไม่มีไฟล์ preview ใน history นี้ ระบบจะ preview ได้กับ log ใหม่ที่ runtime บันทึก media ref แบบปลอดภัยเท่านั้น
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
               {selectedIssues.length ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
                   <div className="flex items-center gap-2">
@@ -756,6 +843,42 @@ export default function ConversationAnalysisPage() {
           )}
         </section>
       </div>
+
+      <Dialog open={Boolean(selectedMedia)} onOpenChange={open => { if (!open) setSelectedMedia(null) }}>
+        <DialogContent className="max-w-5xl sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Conversation media</DialogTitle>
+          </DialogHeader>
+          {selectedMedia ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <div className="flex min-h-[280px] items-center justify-center overflow-hidden rounded-lg border bg-black">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={conversationMediaUrl(selectedMedia)}
+                  alt={selectedMedia.fileName || 'conversation media preview'}
+                  className="max-h-[72vh] w-auto max-w-full object-contain"
+                />
+              </div>
+              <div className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">ไฟล์</p>
+                  <p className="break-all font-medium">{selectedMedia.fileName || '(no file name)'}</p>
+                  <p className="text-xs text-muted-foreground">{selectedMedia.mimeType || 'unknown'} {formatBytes(selectedMedia.sizeBytes)}</p>
+                </div>
+                {selectedMedia.caption ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Caption</p>
+                    <p className="whitespace-pre-wrap">{selectedMedia.caption}</p>
+                  </div>
+                ) : null}
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Preview โหลดผ่าน authenticated proxy และใช้ opaque media id เท่านั้น หน้าเว็บไม่เห็น local path หรือ Telegram file id
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
