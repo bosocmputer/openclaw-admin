@@ -18,7 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -42,6 +42,11 @@ interface ProfileDraft {
   safetyRulesText: string
   soulBlock: string
 }
+
+type DiscardRequest =
+  | { kind: 'newFromTemplate'; templateId?: string }
+  | { kind: 'selectProfile'; profileId: string }
+  | { kind: 'applyTemplate'; templateId: string }
 
 function linesToText(lines?: string[]) {
   return (lines || []).join('\n')
@@ -123,6 +128,7 @@ export default function BusinessProfilesPage() {
   const [selectedId, setSelectedId] = useState<string>('new')
   const [draftState, setDraft] = useState<ProfileDraft | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BusinessProfile | null>(null)
+  const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null)
   const [templateId, setTemplateId] = useState<string>('')
   const [lastLinkedAgentId, setLastLinkedAgentId] = useState<string | null>(null)
 
@@ -276,36 +282,59 @@ export default function BusinessProfilesPage() {
     onError: () => toast.error('อัปเดต agent link ไม่สำเร็จ'),
   })
 
-  function confirmDiscardChanges() {
-    if (!hasUnsavedChanges) return true
-    return window.confirm('มีการแก้ไขที่ยังไม่ได้บันทึก ต้องการทิ้งการแก้ไขนี้หรือไม่?')
+  function runDiscardableAction(request: DiscardRequest) {
+    if (hasUnsavedChanges) {
+      setDiscardRequest(request)
+      return
+    }
+    executeDiscardableAction(request)
   }
 
   function startNewFromTemplate(id = templates[0]?.templateId) {
-    if (!id || !confirmDiscardChanges()) return
+    if (!id) return
+    runDiscardableAction({ kind: 'newFromTemplate', templateId: id })
+  }
+
+  function executeDiscardableAction(request: DiscardRequest) {
+    if (request.kind === 'selectProfile') {
+      const profile = profiles.find(item => item.id === request.profileId)
+      if (!profile) return
+      setSelectedId(profile.id)
+      setTemplateId('')
+      setDraft(draftFromProfile(profile))
+      setLastLinkedAgentId(null)
+      setDiscardRequest(null)
+      return
+    }
+
+    const id = request.templateId || templates[0]?.templateId
+    if (!id) return
     const template = templates.find(item => item.templateId === id)
     if (!template) return
-    setSelectedId('new')
-    setTemplateId(id)
-    setDraft(draftFromTemplate(template))
-    setLastLinkedAgentId(null)
+
+    if (request.kind === 'newFromTemplate') {
+      setSelectedId('new')
+      setTemplateId(id)
+      setDraft(draftFromTemplate(template))
+      setLastLinkedAgentId(null)
+      setDiscardRequest(null)
+      return
+    }
+
+    if (request.kind === 'applyTemplate') {
+      setTemplateId(id)
+      setSelectedId('new')
+      setDraft(draftFromTemplate(template))
+      setDiscardRequest(null)
+    }
   }
 
   function selectProfile(profile: BusinessProfile) {
-    if (!confirmDiscardChanges()) return
-    setSelectedId(profile.id)
-    setTemplateId('')
-    setDraft(draftFromProfile(profile))
-    setLastLinkedAgentId(null)
+    runDiscardableAction({ kind: 'selectProfile', profileId: profile.id })
   }
 
   function applyTemplate(id: string) {
-    if (!confirmDiscardChanges()) return
-    const template = templates.find(item => item.templateId === id)
-    if (!template) return
-    setTemplateId(id)
-    setSelectedId('new')
-    setDraft(draftFromTemplate(template))
+    runDiscardableAction({ kind: 'applyTemplate', templateId: id })
   }
 
   const soulChars = draft?.soulBlock.length ?? 0
@@ -613,6 +642,28 @@ export default function BusinessProfilesPage() {
             >
               <Trash2 className="mr-2 size-4" />
               ลบ Profile
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!discardRequest} onOpenChange={open => { if (!open) setDiscardRequest(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ทิ้งการแก้ไขที่ยังไม่ได้บันทึก?</DialogTitle>
+            <DialogDescription>
+              มีข้อมูล Business Profile ที่แก้ไขค้างไว้ ถ้าไปต่อ ระบบจะเปลี่ยน profile/template และ draft ปัจจุบันจะหายไป
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDiscardRequest(null)}>
+              กลับไปแก้ต่อ
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => discardRequest && executeDiscardableAction(discardRequest)}
+            >
+              ทิ้งการแก้ไข
             </Button>
           </DialogFooter>
         </DialogContent>
