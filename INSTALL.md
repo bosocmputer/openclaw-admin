@@ -381,6 +381,9 @@ PORT=4000
 DATABASE_URL=postgresql://openclaw:POSTGRES_PASSWORD_HERE@localhost:5432/openclaw_admin
 HOOKS_TOKEN=ค่า HOOKS_TOKEN จากขั้นตอน 5 (ค่าเดิม อย่า generate ใหม่)
 OPENCLAW_BIN=/root/openclaw-runtime-2026.6.8-erp/dist/index.js
+CONVERSATION_ANALYSIS_ENABLED=1
+MEMORY_LEARNING_REVIEW_ENABLED=1
+MONITOR_MEDIA_PREVIEW_ENABLED=1
 ```
 
 > - `API_TOKEN` ต้องตรงกับ `API_TOKEN` ใน `~/openclaw-admin/.env`
@@ -388,6 +391,9 @@ OPENCLAW_BIN=/root/openclaw-runtime-2026.6.8-erp/dist/index.js
 > - `HOOKS_TOKEN` ต้องตรงกับ `hooks.token` ใน `~/.openclaw/openclaw.json`
 > - DATABASE_URL ใช้ `localhost` เสมอ — PostgreSQL expose port 5432 ออกมาที่ host
 > - `OPENCLAW_BIN` สำคัญมาก — ทำให้หน้า Model ทดสอบด้วย ERP runtime artifact ตัวเดียวกับ gateway จริง ไม่ใช่ global `openclaw`
+> - `CONVERSATION_ANALYSIS_ENABLED=1` เปิดหน้าประวัติบทสนทนาและ export
+> - `MEMORY_LEARNING_REVIEW_ENABLED=1` เปิด Learning Review queue ในหน้า Memory
+> - `MONITOR_MEDIA_PREVIEW_ENABLED=1` เปิด preview รูปใน Monitor/Conversation Analysis เมื่อ runtime มี media ref ที่ปลอดภัย
 
 ### 8.3 รันด้วย pm2
 
@@ -656,22 +662,50 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
 
 ---
 
-### 10.12 ตรวจสอบ Memory & Dreams
+### 10.12 ตรวจสอบ Memory Learning
 
-ดูสถานะ memory ของแต่ละ agent:
+หน้า **Memory** ใช้สำหรับทีม admin/operator เท่านั้น ไม่ใช่หน้าที่ลูกค้าหรือ chat user ใช้งาน
 
 1. เมนู **Memory**
-2. แต่ละ agent card แสดง 3 ส่วน:
-   - **บันทึกรายวัน** — จำนวนไฟล์ `memory/*.md` ที่ AI สร้างจริง + preview + กด **ดูทั้งหมด** เพื่อเลือกอ่านแต่ละไฟล์
-   - **MEMORY.md** — ความจำระยะยาว (main session เท่านั้น) + ปุ่ม **อ่าน**
-   - **Dreams.md** — ผลสรุป dreaming phase + ปุ่ม **อ่าน**
-   - Badge **dreaming on/off** — สถานะ `memory.dreaming.enabled`
+2. แท็บ **Overview** อธิบาย Learning Loop:
+   - `MEMORY.md` = ความจำที่ runtime ใช้ตอบจริง
+   - `memory/*.md` = บันทึกรายวัน/working notes สำหรับ review
+   - `DREAMS.md` = review diary จาก dreaming phase ยังไม่ถือเป็น truth โดยตรง
+3. แท็บ **Learning Review** ใช้ตรวจ candidate ที่สร้างจาก Conversation Analysis หรือ admin กรอกเอง
+4. Candidate แต่ละรายการต้องถูก admin ตัดสินก่อน:
+   - `MEMORY.md` = fact/preference เฉพาะ agent/ร้านที่ยืนยันแล้ว
+   - `Business Profile` = pattern ธุรกิจทั่วไป
+   - `SOUL` = กติกาการตอบ/safety/tool contract
+   - `MCP/Search` = synonym, normalization หรือ search behavior
+   - `Model/Runtime` = timeout, fallback, latency หรือ runtime behavior
+5. Apply อัตโนมัติใน v1 ทำได้เฉพาะ target `MEMORY.md` และระบบจะสร้าง backup ก่อนทุกครั้ง
+6. ถ้า apply memory จริง ให้ restart gateway หรือ reset active sessions เพื่อให้ bot โหลด context ใหม่
 
-> AI จะบันทึกชื่อและข้อมูล user ลง `memory/YYYY-MM-DD.md` ทันทีเมื่อ user แนะนำตัวในการสนทนา
->
-> หน้านี้ auto-refresh ทุก 30 วินาที
+> ลูกค้าแชทตามปกติ ระบบเก็บ evidence จากบทสนทนาไว้ใน Conversation Analysis แล้ว admin ค่อยส่งเรื่องที่ควรเรียนรู้เข้า Learning Review
+> ห้ามให้ chat user เขียน memory โดยตรง เพราะเสี่ยงจำข้อมูลผิดหรือ prompt injection
 
 ---
+
+### 10.13 ใช้ Conversation Analysis เพื่อรอ feedback ลูกค้า
+
+หลังติดตั้ง/อัปเดตและให้ลูกค้าทดลองใช้งาน ให้ใช้หน้านี้เพื่อเก็บข้อมูลจริงก่อนจูน agent:
+
+1. เปิด **Conversation Analysis** (`/analysis/conversations`)
+2. Filter ช่วงวันที่, agent, channel หรือ issue tag
+3. ดู turn detail: คำถาม, คำตอบ, tool/model evidence, media preview และ raw timeline ที่ runtime บันทึกจริง
+4. กด **Export for Codex** เพื่อส่งข้อมูลให้ทีมวิเคราะห์ SOUL/MCP/Search ต่อ
+5. ถ้าเจอ turn ที่ควรนำไปเรียนรู้ ให้กด **ส่งเรื่องนี้ให้ Admin Review**
+6. เปิด **Memory → Learning Review** หรือปุ่ม **เปิด Learning Review** เพื่อตรวจ candidate ต่อ
+
+หลักการแยกชั้น:
+
+- ปัญหาค้นสินค้าไม่เจอหรือคำพ้อง → `MCP/Search`
+- กติกาตอบผิด เช่น เดาราคา/เดาสต็อก → `SOUL`
+- บริบทธุรกิจทั่วไปซ้ำหลายเคส → `Business Profile`
+- Model timeout/fallback/latency → `Model/Runtime`
+- ความจำเฉพาะร้านที่ admin ยืนยันแล้ว → `MEMORY.md`
+
+> Export ไม่รวมไฟล์รูปจริง ส่งเฉพาะ metadata/text preview แบบ redacted เท่านั้น
 
 ## ขั้นตอนที่ 11 — ทดสอบระบบ
 
@@ -916,6 +950,19 @@ pm2 save
 cd ~/openclaw-api
 git pull --ff-only origin main
 npm ci --omit=dev
+
+grep -q '^CONVERSATION_ANALYSIS_ENABLED=' .env \
+  && sed -i 's/^CONVERSATION_ANALYSIS_ENABLED=.*/CONVERSATION_ANALYSIS_ENABLED=1/' .env \
+  || echo 'CONVERSATION_ANALYSIS_ENABLED=1' >> .env
+
+grep -q '^MEMORY_LEARNING_REVIEW_ENABLED=' .env \
+  && sed -i 's/^MEMORY_LEARNING_REVIEW_ENABLED=.*/MEMORY_LEARNING_REVIEW_ENABLED=1/' .env \
+  || echo 'MEMORY_LEARNING_REVIEW_ENABLED=1' >> .env
+
+grep -q '^MONITOR_MEDIA_PREVIEW_ENABLED=' .env \
+  && sed -i 's/^MONITOR_MEDIA_PREVIEW_ENABLED=.*/MONITOR_MEDIA_PREVIEW_ENABLED=1/' .env \
+  || echo 'MONITOR_MEDIA_PREVIEW_ENABLED=1' >> .env
+
 pm2 restart openclaw-api --update-env
 pm2 save
 ```

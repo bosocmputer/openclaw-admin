@@ -25,7 +25,9 @@ openclaw-api    ← Express.js (pm2 บน host)
 openclaw-gateway ← pm2 + ERP runtime artifact (port 18789)
 
 PostgreSQL 16  ← Docker container (port 5432)
-    └── admin_users, webchat_*, audit_logs, conversation_turns/events/exports
+    └── admin_users, webchat_*, audit_logs,
+        conversation_turns/events/exports,
+        business_profiles, memory_learning_candidates
 ```
 
 > **openclaw-api** รันบน host ด้วย pm2 (ไม่ใช้ Docker) เพราะต้องเข้าถึง OpenClaw runtime, config และ workspace files
@@ -71,6 +73,7 @@ Browser → GET /api/proxy/api/status
 | ---- | --- | --------- |
 | Dashboard | `/` | Operations dashboard: health, runtime, channel, latency, token/cost, recent turns และ next actions |
 | Model & Keys | `/model` | ตั้ง Provider Keys, เลือก Model ข้อความ, Model สำรอง, ทดสอบข้อความผ่าน runtime จริง และทดสอบอ่านรูปสินค้าแบบ optional |
+| Business Profiles | `/business-profiles` | กำหนดบริบทธุรกิจแบบ bounded แล้วให้ Agent Load Template เพิ่มเข้า SOUL.md โดย admin ยืนยันเอง |
 | Agents | `/agents` | จัดการ Agent — เพิ่ม/ลบ, ตั้ง Access Mode |
 | Agent Detail | `/agents/[id]` | แก้ SOUL.md, จัดการ Telegram Users (whitelist), ตั้งค่า MCP (URL + Access Mode + Test) |
 | Agent Chat | `/agents/[id]/chat` | ดู chat history ของ agent นั้นๆ |
@@ -81,9 +84,9 @@ Browser → GET /api/proxy/api/status
 | Compaction | `/compaction` | ตั้งค่า memory compaction (รองรับ fields ใหม่ v2026.3.28) |
 | Checkpoints | `/sessions` | ดูและ restore session compaction checkpoints ต่อ agent |
 | Webhooks | `/webhooks` | CRUD webhook routes สำหรับรับข้อมูลจากระบบภายนอก |
-| Memory | `/memory` | ดู daily memory files + MEMORY.md + dreams.md ต่อ agent (auto-refresh 30s) |
+| Memory Learning | `/memory` | ดู MEMORY.md, daily memory, DREAMS.md และ Learning Review queue สำหรับ approve/reject/apply/rollback ความจำ |
 | Analysis | `/analysis` | วิเคราะห์ usage/operational metrics |
-| Conversation Analysis | `/analysis/conversations` | ดูประวัติบทสนทนา, issue tags, trace/tool/model detail และ export pack สำหรับปรับ SOUL/MCP |
+| Conversation Analysis | `/analysis/conversations` | ดูประวัติบทสนทนา, issue tags, trace/tool/model/media detail, export pack และส่ง turn เข้า Learning Review |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
 | System Check | `/system` | Self-service health: สิ่งที่ต้องจัดการ, action ที่ปลอดภัย, runtime/model checks, restart gateway และ copy support bundle |
 | Guide | `/guide` | คู่มือผู้ใช้ (แสดง bot name จริงจาก config) |
@@ -98,6 +101,7 @@ openclaw-admin/
 │   │   ├── layout.tsx              ← Auth guard + Sidebar
 │   │   ├── page.tsx                ← Dashboard
 │   │   ├── model/page.tsx
+│   │   ├── business-profiles/page.tsx
 │   │   ├── agents/
 │   │   │   ├── page.tsx
 │   │   │   └── [id]/
@@ -110,9 +114,9 @@ openclaw-admin/
 │   │   ├── compaction/page.tsx
 │   │   ├── sessions/page.tsx       ← Session Checkpoints
 │   │   ├── webhooks/page.tsx       ← Webhooks CRUD
-│   │   ├── memory/page.tsx         ← Memory & Dreams viewer
+│   │   ├── memory/page.tsx         ← Memory Learning + Review Queue + file viewer
 │   │   ├── analysis/page.tsx
-│   │   ├── analysis/conversations/ ← Conversation history + export for Codex/SOUL tuning
+│   │   ├── analysis/conversations/ ← Conversation history + export + learning candidate bridge
 │   │   ├── logs/page.tsx
 │   │   ├── guide/page.tsx
 │   │   └── members/
@@ -201,9 +205,19 @@ docker compose up -d --build
 
 ```bash
 cd ~/openclaw-admin
-git pull
-docker compose up -d --build
+git pull --ff-only origin main
+docker compose build openclaw-admin
+docker compose up -d openclaw-admin
+docker compose ps
 ```
+
+### Operational Status (2026-06-23)
+
+- Dev server `192.168.2.109` is current on OpenClaw v2026.6.8 ERP runtime artifact.
+- Customer rollout path for `chang168` is current through `openclaw-api` + `openclaw-admin`; gateway remains pm2 + ERP runtime artifact.
+- `/analysis/conversations` supports triage, media preview, export for Codex, and sending selected turns to `/memory` Learning Review.
+- `/memory` separates `MEMORY.md` truth, daily memory notes, `DREAMS.md` review diary, and admin-approved Learning Candidates.
+- Current operating mode: wait for customer conversation data, export/analyze, then approve targeted improvements to Business Profile, SOUL, MCP/Search, Model/Runtime, or MEMORY.md.
 
 ### Migration (ถ้า DB มีข้อมูลอยู่แล้ว)
 
