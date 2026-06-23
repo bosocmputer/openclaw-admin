@@ -1625,7 +1625,7 @@ export async function getDailyMemoryContent(agentId: string, filename: string): 
   return data.content ?? ''
 }
 
-export type MemoryLearningTargetType = 'memory' | 'business_profile' | 'soul' | 'mcp_search'
+export type MemoryLearningTargetType = 'memory' | 'business_profile' | 'soul' | 'mcp_search' | 'model_runtime'
 export type MemoryLearningStatus = 'pending' | 'approved' | 'applied' | 'rejected'
 
 export interface MemoryLearningCandidate {

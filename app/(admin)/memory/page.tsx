@@ -38,6 +38,22 @@ const targetOptions: Array<{ value: MemoryLearningTargetType; label: string; des
   { value: 'business_profile', label: 'Business Profile', description: 'บริบทธุรกิจและ pattern ของร้าน' },
   { value: 'soul', label: 'SOUL', description: 'กติกาการตอบและ safety/tool contract' },
   { value: 'mcp_search', label: 'MCP/Search', description: 'คำพ้อง, normalization, หรือ search behavior' },
+  { value: 'model_runtime', label: 'Model/Runtime', description: 'model timeout, latency, fallback หรือ runtime behavior' },
+]
+
+const learningSteps = [
+  {
+    title: '1. ดูสิ่งที่เกิดขึ้นจริง',
+    body: 'ใช้บทสนทนา, issue tags, MEMORY.md และ DREAMS.md เป็นหลักฐาน ไม่ให้ AI เดาเอง',
+  },
+  {
+    title: '2. สร้างรายการให้ตรวจ',
+    body: 'สิ่งที่น่าจำหรือควรปรับจะเข้า Learning Review ก่อนเสมอ',
+  },
+  {
+    title: '3. Admin เลือกว่าจะลงชั้นไหน',
+    body: 'MEMORY.md ใช้ตอบจริง ส่วน Business Profile, SOUL, MCP/Search และ Model/Runtime เป็นงาน review ต่อ',
+  },
 ]
 
 function formatChars(n = 0) {
@@ -76,6 +92,13 @@ function statusVariant(status: string) {
   if (status === 'approved') return 'secondary'
   if (status === 'rejected') return 'destructive'
   return 'outline'
+}
+
+function shortPreview(value?: string, max = 520) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const lines = text.split('\n').slice(0, 8).join('\n')
+  return lines.length > max ? `${lines.slice(0, max)}…` : lines
 }
 
 function sizeWarningText(agent: MemoryAgentStatus) {
@@ -236,9 +259,9 @@ export default function MemoryPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Memory</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Memory Learning</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            ดูความจำของ agent และอนุมัติสิ่งที่ควรจำจากบทสนทนาจริง ก่อนเขียนเข้า MEMORY.md หรือส่งต่อไป Business Profile, SOUL, MCP/Search
+            เลือกสิ่งที่ chatbot ควรเรียนรู้จากบทสนทนาจริง แล้วให้ admin ตรวจทานก่อนนำไปใช้กับ agent
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -247,6 +270,31 @@ export default function MemoryPage() {
           <Badge variant="outline">{summary.dreamsCount} DREAMS.md</Badge>
         </div>
       </div>
+
+      <section className="rounded-xl border bg-card">
+        <div className="border-b p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-base font-semibold">Learning Loop ทำงานอย่างไร</h2>
+              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                ระบบนี้ไม่ train model และไม่เขียนความจำให้อัตโนมัติ ทุกอย่างต้องผ่านคิวตรวจของ admin ก่อน
+              </p>
+            </div>
+            <Button type="button" variant="outline" onClick={() => setTab('learning')}>
+              <Lightbulb className="size-4" />
+              เปิด Learning Review
+            </Button>
+          </div>
+        </div>
+        <div className="grid gap-0 divide-y lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+          {learningSteps.map(step => (
+            <div key={step.title} className="p-4">
+              <p className="text-sm font-medium">{step.title}</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <Tabs value={tab} onValueChange={value => setTab(value as MemoryTab)} className="gap-4">
         <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
@@ -260,23 +308,23 @@ export default function MemoryPage() {
           <div className="grid gap-3 lg:grid-cols-3">
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm font-medium">ความจำที่ใช้ตอบจริง</p>
+                <p className="text-sm font-medium">ใช้ตอบจริง</p>
                 <p className="mt-2 text-2xl font-semibold">{summary.memoryCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">agent มี MEMORY.md ที่ถูก inject เข้า session ปกติเมื่อ runtime โหลด workspace</p>
+                <p className="mt-1 text-xs text-muted-foreground">MEMORY.md คือความจำที่ runtime อ่านเข้า context ของ agent</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm font-medium">Working notes</p>
+                <p className="text-sm font-medium">บันทึกระหว่างวัน</p>
                 <p className="mt-2 text-2xl font-semibold">{summary.dailyCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">ไฟล์ memory/YYYY-MM-DD.md ใช้ค้น/ทบทวน ไม่ควรยัดทั้งหมดเข้า prompt ทุก turn</p>
+                <p className="mt-1 text-xs text-muted-foreground">memory/*.md ใช้ทบทวนและหา insight ไม่ควรใส่ทั้งหมดเข้า prompt</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm font-medium">Dream diary</p>
+                <p className="text-sm font-medium">ไดอารี่สำหรับ review</p>
                 <p className="mt-2 text-2xl font-semibold">{summary.dreamsCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">DREAMS.md ใช้ review insight ไม่ถือเป็น source of truth จนกว่า admin approve</p>
+                <p className="mt-1 text-xs text-muted-foreground">DREAMS.md เป็นข้อสังเกตหลังบ้าน ยังไม่ใช่ความจริงที่ chatbot ควรจำ</p>
               </CardContent>
             </Card>
           </div>
@@ -326,8 +374,8 @@ export default function MemoryPage() {
           <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Create Learning Candidate</CardTitle>
-                <p className="text-sm text-muted-foreground">บันทึกสิ่งที่ควร review จากบทสนทนา ก่อนให้ admin approve</p>
+                <CardTitle className="text-base">เพิ่มรายการให้ตรวจ</CardTitle>
+                <p className="text-sm text-muted-foreground">ใช้เมื่อเจอ pattern จากบทสนทนาที่ควรจำหรือควรส่งต่อทีมปรับระบบ</p>
               </CardHeader>
               <CardContent className="space-y-3">
                 <label className="space-y-1.5">
@@ -340,7 +388,7 @@ export default function MemoryPage() {
                   </Select>
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium">Target</span>
+                  <span className="text-sm font-medium">ควรนำไปปรับส่วนไหน</span>
                   <Select value={form.targetType} onValueChange={value => setForm(f => ({ ...f, targetType: (value || 'memory') as MemoryLearningTargetType }))}>
                     <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -350,7 +398,7 @@ export default function MemoryPage() {
                   <p className="text-xs text-muted-foreground">{targetOptions.find(option => option.value === form.targetType)?.description}</p>
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium">Summary</span>
+                  <span className="text-sm font-medium">สิ่งที่ควรเรียนรู้</span>
                   <Textarea
                     rows={4}
                     value={form.summary}
@@ -359,7 +407,7 @@ export default function MemoryPage() {
                   />
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium">Evidence</span>
+                  <span className="text-sm font-medium">หลักฐาน</span>
                   <Textarea
                     rows={3}
                     value={form.evidenceText}
@@ -381,7 +429,7 @@ export default function MemoryPage() {
                   onClick={() => createMutation.mutate()}
                 >
                   <Lightbulb className="size-4" />
-                  สร้าง Candidate
+                  สร้างรายการตรวจ
                 </Button>
               </CardContent>
             </Card>
@@ -390,8 +438,8 @@ export default function MemoryPage() {
               <CardHeader className="pb-2">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <CardTitle className="text-base">Learning Review Queue</CardTitle>
-                    <p className="text-sm text-muted-foreground">approve ก่อน apply เสมอ เพื่อกัน AI จำผิดหรือจำรก</p>
+                    <CardTitle className="text-base">รายการที่รอ admin ตรวจ</CardTitle>
+                    <p className="text-sm text-muted-foreground">อนุมัติก่อนเสมอ เฉพาะ MEMORY.md เท่านั้นที่ระบบเขียนให้อัตโนมัติใน v1</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Select value={effectiveAgentId} onValueChange={value => setSelectedAgentId(value || '')}>
@@ -416,13 +464,13 @@ export default function MemoryPage() {
               <CardContent>
                 {candidateData && !candidateData.enabled ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                    Learning Review ถูกปิดไว้ ตั้ง `MEMORY_LEARNING_REVIEW_ENABLED=1` หรืออย่าตั้งเป็น `0`
+                    Learning Review ถูกปิดไว้ ตั้ง `MEMORY_LEARNING_REVIEW_ENABLED=1` ใน openclaw-api ก่อนใช้งาน
                   </div>
                 ) : null}
                 {candidatesLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด candidates...</div> : null}
                 {!candidatesLoading && !candidates.length ? (
                   <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    ยังไม่มี candidate ในตัวกรองนี้ สร้างจากฟอร์มด้านซ้าย หรือจากหน้า Conversation Analysis
+                    ยังไม่มีรายการในตัวกรองนี้ สร้างจากฟอร์มด้านซ้าย หรือจากหน้า Conversation Analysis
                   </div>
                 ) : null}
                 <div className="space-y-3">
@@ -464,7 +512,7 @@ export default function MemoryPage() {
                       </div>
                       {candidate.targetType !== 'memory' ? (
                         <div className="mt-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">
-                          Target นี้เก็บไว้เพื่อ review และส่งต่อทีม ใน v1 ระบบ apply อัตโนมัติเฉพาะ MEMORY.md เท่านั้น
+                          Target นี้เป็นรายการให้ทีม review ต่อ ยังไม่เขียนเข้า agent อัตโนมัติ เพื่อกันจำผิดชั้นหรือแก้ระบบผิดจุด
                         </div>
                       ) : null}
                       {candidate.evidence.length ? (
@@ -500,7 +548,7 @@ export default function MemoryPage() {
                         <Button variant="outline" size="sm" onClick={() => openView(`${agent.agentId} — MEMORY.md`, () => getMemoryContent(agent.agentId))}>อ่าน</Button>
                       ) : null}
                     </div>
-                    {agent.memory.preview ? <pre className="mt-2 line-clamp-4 whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{agent.memory.preview}</pre> : null}
+                    {agent.memory.preview ? <pre className="mt-2 max-h-28 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-relaxed">{shortPreview(agent.memory.preview)}</pre> : null}
                   </div>
 
                   <div className="rounded-lg border p-3">
@@ -513,7 +561,7 @@ export default function MemoryPage() {
                         <Button variant="outline" size="sm" onClick={() => openView(`${agent.agentId} — ${agent.dreams.canonicalName || 'DREAMS.md'}`, () => getDreamsContent(agent.agentId))}>อ่าน</Button>
                       ) : null}
                     </div>
-                    {agent.dreams.preview ? <pre className="mt-2 line-clamp-3 whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{agent.dreams.preview}</pre> : null}
+                    {agent.dreams.preview ? <pre className="mt-2 max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-relaxed">{shortPreview(agent.dreams.preview, 360)}</pre> : null}
                   </div>
 
                   <div className="rounded-lg border p-3">
@@ -581,14 +629,14 @@ export default function MemoryPage() {
       </Tabs>
 
       <Dialog open={!!viewDialog} onOpenChange={open => { if (!open) setViewDialog(null) }}>
-        <DialogContent className="max-h-[82vh] max-w-3xl sm:max-w-3xl">
+        <DialogContent className="grid max-h-[86vh] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-sm">
               <FileText className="size-4" />
               {viewDialog?.title}
             </DialogTitle>
           </DialogHeader>
-          <div className="min-h-0 overflow-auto rounded-lg border bg-muted p-3">
+          <div className="min-h-0 overflow-auto overscroll-contain rounded-lg border bg-muted p-3">
             {viewDialog?.loading ? (
               <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
             ) : (

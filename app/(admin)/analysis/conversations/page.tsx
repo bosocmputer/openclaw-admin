@@ -185,13 +185,17 @@ const learningTargetOptions: Array<{ value: MemoryLearningTargetType; label: str
   { value: 'business_profile', label: 'Business Profile', description: 'pattern ธุรกิจทั่วไปของร้าน' },
   { value: 'soul', label: 'SOUL', description: 'กติกาการตอบและ safety/tool contract' },
   { value: 'mcp_search', label: 'MCP/Search', description: 'คำพ้อง, normalization หรือ search behavior' },
+  { value: 'model_runtime', label: 'Model/Runtime', description: 'model timeout, latency, fallback หรือ runtime behavior' },
 ]
 
 function defaultLearningTarget(issues: ConversationIssue[]): MemoryLearningTargetType {
   const targets = new Set(issues.map(issue => issue.reviewTarget))
+  const tags = new Set(issues.map(issue => issue.tag))
   if (targets.has('MCP/search')) return 'mcp_search'
   if (targets.has('SOUL')) return 'soul'
+  if (targets.has('model/runtime')) return 'model_runtime'
   if (targets.has('business capability')) return 'business_profile'
+  if (tags.has('slow_turn') || tags.has('model_timeout') || tags.has('fallback_used')) return 'model_runtime'
   return 'memory'
 }
 
