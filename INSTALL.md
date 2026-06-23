@@ -15,7 +15,7 @@
 | OpenRouter API Key | `sk-or-v1-...` | จาก openrouter.ai |
 | Kilo AI API Key (ถ้าใช้) | `kg_...` หรือ key จาก Kilo | ต้องทดสอบ runtime จริงก่อน save model |
 | MCP Server URL | `http://192.168.1.50:3001/sse` | ถามทีมที่ติดตั้ง MCP |
-| OpenClaw ERP Runtime Artifact | `https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/d1be03c3542b69a4a896f90a7ba66ab2b00ae97d/releases/2026.6.8-erp-20260623-line-observability/openclaw-runtime-2026.6.8-erp-latest.tar.gz` | ใช้แทน `npm install -g openclaw` สำหรับ gateway |
+| OpenClaw ERP Runtime Artifact | `https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/c4ddd015b53143f0feeb8e31fd334535bd2f3256/releases/2026.6.8-erp-20260623-line-telemetry-info/openclaw-runtime-2026.6.8-erp-latest.tar.gz` | ใช้แทน `npm install -g openclaw` สำหรับ gateway |
 | รหัสผ่าน Admin | ตั้งเองได้ | สำหรับ login หน้าเว็บ |
 
 ---
@@ -163,7 +163,7 @@ wizard จะถามเรื่อง model/provider — **เลือกอ
 cd /root
 
 curl -fL -o openclaw-runtime-2026.6.8-erp-latest.tar.gz \
-  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/d1be03c3542b69a4a896f90a7ba66ab2b00ae97d/releases/2026.6.8-erp-20260623-line-observability/openclaw-runtime-2026.6.8-erp-latest.tar.gz
+  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/c4ddd015b53143f0feeb8e31fd334535bd2f3256/releases/2026.6.8-erp-20260623-line-telemetry-info/openclaw-runtime-2026.6.8-erp-latest.tar.gz
 
 sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ```
@@ -171,7 +171,7 @@ sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ต้องได้ค่า:
 
 ```text
-54c3672d4f1eb0c7b275c23210e128ef9004e5244b3ada0ed39db1a12fd5c214  openclaw-runtime-2026.6.8-erp-latest.tar.gz
+a6c58d10b219b818bac94dca90fc8a5b1e4dcd5f725739ffa78ba6523a3ef0bb  openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ```
 
 ถ้า checksum ไม่ตรง ให้ลบไฟล์แล้ว download ใหม่ ห้ามติดตั้งต่อ
@@ -873,7 +873,7 @@ warnings = []
 cd /root
 
 curl -fL -o openclaw-runtime-2026.6.8-erp-latest.tar.gz \
-  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/d1be03c3542b69a4a896f90a7ba66ab2b00ae97d/releases/2026.6.8-erp-20260623-line-observability/openclaw-runtime-2026.6.8-erp-latest.tar.gz
+  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/c4ddd015b53143f0feeb8e31fd334535bd2f3256/releases/2026.6.8-erp-20260623-line-telemetry-info/openclaw-runtime-2026.6.8-erp-latest.tar.gz
 
 sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ```
@@ -881,7 +881,7 @@ sha256sum openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ต้องได้:
 
 ```text
-54c3672d4f1eb0c7b275c23210e128ef9004e5244b3ada0ed39db1a12fd5c214  openclaw-runtime-2026.6.8-erp-latest.tar.gz
+a6c58d10b219b818bac94dca90fc8a5b1e4dcd5f725739ffa78ba6523a3ef0bb  openclaw-runtime-2026.6.8-erp-latest.tar.gz
 ```
 
 ถ้า checksum ตรง ให้ติดตั้ง:
@@ -1369,8 +1369,8 @@ systemctl --user status openclaw-gateway.service --no-pager
 | Telegram Bot Token(s) | |
 | OpenRouter API Key | |
 | MCP Server URL | |
-| Runtime Artifact URL | `https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/d1be03c3542b69a4a896f90a7ba66ab2b00ae97d/releases/2026.6.8-erp-20260623-line-observability/openclaw-runtime-2026.6.8-erp-latest.tar.gz` |
-| Runtime SHA256 | `54c3672d4f1eb0c7b275c23210e128ef9004e5244b3ada0ed39db1a12fd5c214` |
+| Runtime Artifact URL | `https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/c4ddd015b53143f0feeb8e31fd334535bd2f3256/releases/2026.6.8-erp-20260623-line-telemetry-info/openclaw-runtime-2026.6.8-erp-latest.tar.gz` |
+| Runtime SHA256 | `a6c58d10b219b818bac94dca90fc8a5b1e4dcd5f725739ffa78ba6523a3ef0bb` |
 | LINE Tunnel URL | (เปลี่ยนทุก restart) |
 
 ---
