@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Pause, Play } from 'lucide-react'
-import { getMonitorEvents, getSessionReplay, type MonitorData, type MonitorEvent } from '@/lib/api'
+import { Image as ImageIcon, Pause, Play } from 'lucide-react'
+import { getMonitorEvents, getSessionReplay, type MonitorData, type MonitorEvent, type MonitorMedia } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 // ─── Time helpers ──────────────────────────────────────────────────────────────
 function legacyTsToThai(ts: string): string {
@@ -79,6 +80,7 @@ interface FlatEvent {
   turnModelCalls?: number
   turnInputTokens?: number
   turnOutputTokens?: number
+  media?: MonitorMedia[]
 }
 
 function eventTimeMs(e: Pick<FlatEvent, 'timeMs' | 'timestamp' | 'ts'>): number | null {
@@ -177,6 +179,20 @@ function modelTitle(e: Pick<FlatEvent, 'model' | 'provider' | 'modelSource' | 'f
   return parts.join('\n')
 }
 
+function formatBytes(value?: number) {
+  if (!value || value <= 0) return ''
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${Math.round(value / 102.4) / 10} KB`
+  return `${Math.round(value / (1024 * 102.4)) / 10} MB`
+}
+
+function monitorMediaUrl(media: MonitorMedia) {
+  if (!media.hasPreview) return ''
+  if (media.previewUrl?.startsWith('/api/')) return `/api/proxy${media.previewUrl}`
+  if (media.id) return `/api/proxy/api/monitor/media/${encodeURIComponent(media.id)}`
+  return ''
+}
+
 const AGENT_COLORS = ['text-blue-400', 'text-emerald-400', 'text-orange-400', 'text-pink-400', 'text-cyan-400', 'text-violet-400']
 const agentColorMap: Record<string, string> = {}
 let agentColorIdx = 0
@@ -263,6 +279,7 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             cleanKeyword: (e as MonitorEvent).cleanKeyword,
             intent: (e as MonitorEvent).intent,
             route: (e as MonitorEvent).route,
+            media: (e as MonitorEvent).media,
             turnTotalCost: e.type === 'reply' && turnModelCalls > 0 ? turnCost : undefined,
             turnModelCalls: e.type === 'reply' && turnModelCalls > 0 ? turnModelCalls : undefined,
             turnInputTokens: e.type === 'reply' && turnModelCalls > 0 ? turnInputTokens : undefined,
@@ -315,6 +332,7 @@ export default function MonitorPage() {
   const [expandedIdxSet, setExpandedIdxSet] = useState<Set<number>>(new Set())
   const [expandAll, setExpandAll] = useState(false)
   const [replayOpen, setReplayOpen] = useState(false)
+  const [selectedMedia, setSelectedMedia] = useState<{ media: MonitorMedia; event: FlatEvent } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // ข้อ 2: adaptive refresh — เร็วขึ้นเมื่อมี active session
@@ -393,7 +411,10 @@ export default function MonitorPage() {
       }
       if (!(typeMap[stateFilter] ?? []).includes(e.type)) return false
     }
-    if (q) return e.text.toLowerCase().includes(q) || e.agentId.includes(q) || e.user.includes(q)
+    if (q) {
+      const mediaText = (e.media ?? []).map(media => `${media.fileName ?? ''} ${media.caption ?? ''} ${media.mimeType ?? ''}`).join(' ')
+      return e.text.toLowerCase().includes(q) || e.agentId.includes(q) || e.user.includes(q) || mediaText.toLowerCase().includes(q)
+    }
     return true
   })
   const hiddenNoiseCount = filteredWithNoise.filter(isNoiseEvent).length
@@ -707,6 +728,12 @@ export default function MonitorPage() {
                     )}
                     {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
                   </span>
+                  {e.media?.length ? (
+                    <span className="ml-1 hidden shrink-0 items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-cyan-300 sm:inline-flex">
+                      <ImageIcon className="size-3" />
+                      รูป {e.media.length}
+                    </span>
+                  ) : null}
                   {e.model && e.type !== 'message' && (
                     <span
                       className={`ml-1 hidden max-w-44 shrink-0 truncate rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] sm:inline ${e.modelSource === 'configured' ? 'text-amber-400' : 'text-zinc-500'}`}
@@ -759,14 +786,57 @@ export default function MonitorPage() {
                   <span className="shrink-0 w-4 text-right text-zinc-600">{isExp ? '▲' : '▼'}</span>
                 </div>
                 {isExp && (
-                  <pre className={`px-2 pb-2 pt-0.5 text-zinc-200 whitespace-pre-wrap break-all leading-relaxed border-t border-zinc-800 ${showEventDates ? 'ml-32' : 'ml-20'}`}>
-                    {expandedBody}
-                    {e.type === 'tool' && e.toolResult && (
-                      <span className="block mt-2 pt-2 border-t border-zinc-700 text-zinc-400">
-                        {'↩ Result:\n'}{e.toolResult}
-                      </span>
-                    )}
-                  </pre>
+                  <div className={`border-t border-zinc-800 px-2 pb-2 pt-1 ${showEventDates ? 'ml-32' : 'ml-20'}`}>
+                    {expandedBody ? (
+                      <pre className="text-zinc-200 whitespace-pre-wrap break-all leading-relaxed">
+                        {expandedBody}
+                        {e.type === 'tool' && e.toolResult && (
+                          <span className="block mt-2 pt-2 border-t border-zinc-700 text-zinc-400">
+                            {'↩ Result:\n'}{e.toolResult}
+                          </span>
+                        )}
+                      </pre>
+                    ) : null}
+                    {e.media?.length ? (
+                      <div className={expandedBody ? 'mt-3 border-t border-zinc-800 pt-3' : 'pt-1'}>
+                        <div className="mb-2 flex items-center gap-2 text-xs text-cyan-300">
+                          <ImageIcon className="size-3.5" />
+                          media {e.media.length}
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {e.media.map((media, mediaIndex) => {
+                            const src = monitorMediaUrl(media)
+                            return (
+                              <div key={`${media.id ?? media.fileName ?? mediaIndex}`} className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-2">
+                                {src ? (
+                                  <button
+                                    type="button"
+                                    className="block w-full overflow-hidden rounded border border-zinc-800 bg-black text-left"
+                                    onClick={event => {
+                                      event.stopPropagation()
+                                      setSelectedMedia({ media, event: e })
+                                    }}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={src} alt={media.fileName || 'monitor media preview'} className="h-28 w-full object-cover" loading="lazy" />
+                                  </button>
+                                ) : (
+                                  <div className="flex h-28 items-center justify-center rounded border border-dashed border-zinc-700 bg-zinc-950 p-3 text-center text-xs text-zinc-500">
+                                    มี media แต่ไม่มีไฟล์ preview ใน log นี้
+                                  </div>
+                                )}
+                                <div className="mt-2 space-y-0.5 text-[11px] text-zinc-500">
+                                  <p className="truncate text-zinc-300">{media.fileName || media.mimeType || 'media'}</p>
+                                  <p>{media.mimeType || 'unknown'} {formatBytes(media.sizeBytes)}</p>
+                                  {media.caption ? <p className="line-clamp-2 text-zinc-400">{media.caption}</p> : null}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 )}
               </div>
             )
@@ -775,6 +845,50 @@ export default function MonitorPage() {
         <div ref={bottomRef} />
       </div>
       )}
+
+      <Dialog open={Boolean(selectedMedia)} onOpenChange={open => { if (!open) setSelectedMedia(null) }}>
+        <DialogContent className="max-w-5xl bg-zinc-950 text-zinc-100 sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Media preview</DialogTitle>
+          </DialogHeader>
+          {selectedMedia ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <div className="flex min-h-[280px] items-center justify-center overflow-hidden rounded-lg border border-zinc-800 bg-black">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={monitorMediaUrl(selectedMedia.media)}
+                  alt={selectedMedia.media.fileName || 'monitor media preview'}
+                  className="max-h-[72vh] w-auto max-w-full object-contain"
+                />
+              </div>
+              <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-sm">
+                <div>
+                  <p className="text-xs text-zinc-500">เวลา</p>
+                  <p>{formatEventTime(selectedMedia.event, true)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500">Channel</p>
+                  <p>{selectedMedia.event.channel} · {selectedMedia.event.agentId}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500">ไฟล์</p>
+                  <p className="break-all">{selectedMedia.media.fileName || '(no file name)'}</p>
+                  <p className="text-xs text-zinc-500">{selectedMedia.media.mimeType || 'unknown'} {formatBytes(selectedMedia.media.sizeBytes)}</p>
+                </div>
+                {selectedMedia.media.caption ? (
+                  <div>
+                    <p className="text-xs text-zinc-500">Caption</p>
+                    <p className="whitespace-pre-wrap">{selectedMedia.media.caption}</p>
+                  </div>
+                ) : null}
+                <p className="text-xs leading-relaxed text-zinc-500">
+                  Preview นี้โหลดผ่าน API ที่ตรวจ allowlist แล้วเท่านั้น และไม่แสดง path หรือ Telegram file id ฝั่งหน้าเว็บ
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <style>{`
         @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

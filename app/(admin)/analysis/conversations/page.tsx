@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Archive, BarChart3, CalendarClock, ChevronRight, Download, FileText, Filter, RefreshCw, Search, Tags, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, BarChart3, CalendarClock, ChevronRight, Download, FileText, Image as ImageIcon, RefreshCw, Search, SlidersHorizontal, Tags, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -55,6 +55,18 @@ const reviewTargetOptions = [
   'business capability',
 ]
 
+const triageTabs = [
+  { id: 'all', label: 'ทั้งหมด' },
+  { id: 'soul', label: 'SOUL' },
+  { id: 'mcp', label: 'MCP/Search' },
+  { id: 'no_result', label: 'ไม่พบสินค้า' },
+  { id: 'slow', label: 'ตอบช้า' },
+  { id: 'price', label: 'เดาราคา' },
+  { id: 'media', label: 'มีรูป' },
+] as const
+
+type TriageTab = typeof triageTabs[number]['id']
+
 function pad(value: number) {
   return String(value).padStart(2, '0')
 }
@@ -78,6 +90,17 @@ function formatDateTime(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+  }).format(new Date(value))
+}
+
+function formatDay(value?: string | null) {
+  if (!value) return '-'
+  return new Intl.DateTimeFormat('th-TH', {
+    timeZone,
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
   }).format(new Date(value))
 }
 
@@ -156,6 +179,9 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 }
 
 function TurnRow({ turn, selected, onSelect }: { turn: ConversationAnalysisTurn; selected: boolean; onSelect: () => void }) {
+  const primaryIssue = turn.primaryIssueTag || turn.issueTags?.[0]
+  const extraIssueCount = Math.max(0, (turn.issueTags?.length ?? 0) - (primaryIssue ? 1 : 0))
+  const primaryTarget = turn.primaryReviewTarget || turn.reviewTargets?.[0]
   return (
     <button
       type="button"
@@ -170,18 +196,26 @@ function TurnRow({ turn, selected, onSelect }: { turn: ConversationAnalysisTurn;
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-xs tabular-nums opacity-70">{formatDateTime(turn.startedAt)}</span>
             <Badge variant={selected ? 'secondary' : statusVariant(turn.status)}>{turn.status}</Badge>
-            <Badge variant="outline" className={selected ? 'border-white/30 text-white' : ''}>{turn.route}</Badge>
-            {(turn.issueTags ?? []).slice(0, 2).map(tag => (
-              <Badge key={tag} variant={selected ? 'secondary' : issueVariant(tag)} className={selected ? '' : 'max-w-[160px] truncate'}>
-                {tag}
+            {primaryIssue ? (
+              <Badge variant={selected ? 'secondary' : issueVariant(primaryIssue)} className={selected ? '' : 'max-w-[170px] truncate'}>
+                {primaryIssue}
               </Badge>
-            ))}
+            ) : null}
+            {extraIssueCount > 0 ? <Badge variant="outline" className={selected ? 'border-white/30 text-white' : ''}>+{extraIssueCount} issues</Badge> : null}
+            {turn.mediaCount ? (
+              <Badge variant="outline" className={cn('gap-1', selected ? 'border-white/30 text-white' : '')}>
+                <ImageIcon className="size-3" />
+                รูป {turn.mediaCount}
+              </Badge>
+            ) : null}
           </div>
           <p className="mt-2 line-clamp-2 text-sm font-medium">{turn.userText || '(empty user message)'}</p>
-          <p className={cn('mt-1 line-clamp-1 text-xs', selected ? 'text-white/70' : 'text-muted-foreground')}>
-            {turn.agentId || 'unknown'} · {turn.channel} · {turn.intent}
-            {(turn.reviewTargets ?? []).length ? ` · ${(turn.reviewTargets ?? []).join(', ')}` : ''}
-          </p>
+          <div className={cn('mt-1 flex flex-wrap items-center gap-1.5 text-xs', selected ? 'text-white/70' : 'text-muted-foreground')}>
+            <span>{turn.agentId || 'unknown'} · {turn.channel}</span>
+            {turn.route ? <span>· {turn.route}</span> : null}
+            {primaryTarget ? <span>· {primaryTarget}</span> : null}
+            {turn.durationMs ? <span className="tabular-nums">· {formatMs(turn.durationMs)}</span> : null}
+          </div>
         </div>
         <ChevronRight className="mt-1 size-4 shrink-0 opacity-50" />
       </div>
@@ -202,9 +236,12 @@ export default function ConversationAnalysisPage() {
   const [reviewTarget, setReviewTarget] = useState('all')
   const [hasToolError, setHasToolError] = useState(false)
   const [slowOnly, setSlowOnly] = useState(false)
+  const [hasMedia, setHasMedia] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [cursor, setCursor] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [triageTab, setTriageTab] = useState<TriageTab>('all')
 
   const params: ConversationAnalysisParams = {
     from: fromLocalInput(from),
@@ -217,6 +254,7 @@ export default function ConversationAnalysisPage() {
     reviewTarget: reviewTarget === 'all' ? undefined : reviewTarget,
     hasToolError: hasToolError || undefined,
     slowOnly: slowOnly || undefined,
+    hasMedia: hasMedia || undefined,
     q: keyword.trim() || undefined,
     limit: 100,
     cursor,
@@ -276,12 +314,42 @@ export default function ConversationAnalysisPage() {
   const events = detail?.events ?? []
   const hasTrace = events.some(event => event.type === 'trace')
   const selectedIssues = detail?.turn?.issues ?? selectedTurn?.issues ?? []
+  const groupedTurns = useMemo(() => {
+    const groups: Array<{ day: string; turns: ConversationAnalysisTurn[] }> = []
+    for (const turn of data?.turns ?? []) {
+      const day = formatDay(turn.startedAt)
+      const last = groups[groups.length - 1]
+      if (!last || last.day !== day) {
+        groups.push({ day, turns: [turn] })
+      } else {
+        last.turns.push(turn)
+      }
+    }
+    return groups
+  }, [data?.turns])
 
   function resetCursorAndRefetch() {
     setCursor(null)
     setSelectedId(null)
     void queryClient.invalidateQueries({ queryKey: ['conversation-analysis'] })
     void queryClient.invalidateQueries({ queryKey: ['conversation-insights'] })
+  }
+
+  function applyTriageTab(next: TriageTab) {
+    setTriageTab(next)
+    setCursor(null)
+    setSelectedId(null)
+    setIssueTag('all')
+    setReviewTarget('all')
+    setHasToolError(false)
+    setSlowOnly(false)
+    setHasMedia(false)
+    if (next === 'soul') setReviewTarget('SOUL')
+    if (next === 'mcp') setReviewTarget('MCP/search')
+    if (next === 'no_result') setIssueTag('search_no_result')
+    if (next === 'slow') setSlowOnly(true)
+    if (next === 'price') setIssueTag('unverified_price_guess')
+    if (next === 'media') setHasMedia(true)
   }
 
   return (
@@ -306,104 +374,133 @@ export default function ConversationAnalysisPage() {
       </div>
 
       <Card>
-        <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="size-4" />
-            ตัวกรอง
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 pt-4 xl:grid-cols-[repeat(8,minmax(0,1fr))]">
-          <label className="space-y-1.5 xl:col-span-2">
-            <span className="text-xs font-medium text-muted-foreground">เริ่ม</span>
-            <Input type="datetime-local" value={from} onChange={e => { setFrom(e.target.value); setCursor(null) }} />
-          </label>
-          <label className="space-y-1.5 xl:col-span-2">
-            <span className="text-xs font-medium text-muted-foreground">สิ้นสุด</span>
-            <Input type="datetime-local" value={to} onChange={e => { setTo(e.target.value); setCursor(null) }} />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Agent</span>
-            <Select value={agent} onValueChange={v => { setAgent(v || 'all'); setCursor(null) }}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">ทั้งหมด</SelectItem>
-                {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.id}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Channel</span>
-            <Select value={channel} onValueChange={v => { setChannel(v || 'all'); setCursor(null) }}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">ทั้งหมด</SelectItem>
-                <SelectItem value="telegram">Telegram</SelectItem>
-                <SelectItem value="line">LINE</SelectItem>
-                <SelectItem value="webchat">Webchat</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Status</span>
-            <Select value={status} onValueChange={v => { setStatus(v || 'all'); setCursor(null) }}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">ทั้งหมด</SelectItem>
-                <SelectItem value="ok">ok</SelectItem>
-                <SelectItem value="warn">warn</SelectItem>
-                <SelectItem value="error">error</SelectItem>
-                <SelectItem value="pending">pending</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Route</span>
-            <Select value={route} onValueChange={v => { setRoute(v || 'all'); setCursor(null) }}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">ทั้งหมด</SelectItem>
-                <SelectItem value="tool_path">tool_path</SelectItem>
-                <SelectItem value="model_path">model_path</SelectItem>
-                <SelectItem value="native">native</SelectItem>
-                <SelectItem value="capability_denied">capability_denied</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Issue tag</span>
-            <Select value={issueTag} onValueChange={v => { setIssueTag(v || 'all'); setCursor(null) }}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">ทั้งหมด</SelectItem>
-                {issueOptions.map(tag => <SelectItem key={tag} value={tag}>{tag}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Review target</span>
-            <Select value={reviewTarget} onValueChange={v => { setReviewTarget(v || 'all'); setCursor(null) }}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">ทั้งหมด</SelectItem>
-                {reviewTargetOptions.map(target => <SelectItem key={target} value={target}>{target}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-1.5 xl:col-span-3">
-            <span className="text-xs font-medium text-muted-foreground">ค้นหา</span>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
-              <Input className="pl-8" value={keyword} onChange={e => { setKeyword(e.target.value); setCursor(null) }} placeholder="ค้นจากคำถาม, คำตอบ, tool หรือ turn id" />
+        <CardContent className="space-y-4 pt-4">
+          <div className="grid gap-3 xl:grid-cols-[180px_180px_minmax(260px,1fr)_auto]">
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">เริ่ม</span>
+              <Input type="datetime-local" value={from} onChange={e => { setFrom(e.target.value); setCursor(null) }} />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">สิ้นสุด</span>
+              <Input type="datetime-local" value={to} onChange={e => { setTo(e.target.value); setCursor(null) }} />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">ค้นหา</span>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
+                <Input className="pl-8" value={keyword} onChange={e => { setKeyword(e.target.value); setCursor(null) }} placeholder="ค้นคำถาม, คำตอบ, tool หรือ turn id" />
+              </div>
+            </label>
+            <div className="flex items-end gap-2">
+              <Button variant="secondary" onClick={resetCursorAndRefetch}>ใช้ตัวกรอง</Button>
+              <Button type="button" variant="outline" onClick={() => setFiltersOpen(v => !v)}>
+                <SlidersHorizontal className="size-4" />
+                ตัวกรองขั้นสูง
+              </Button>
             </div>
-          </label>
-          <div className="flex flex-wrap items-end gap-2 xl:col-span-5">
-            <Button type="button" variant={hasToolError ? 'default' : 'outline'} onClick={() => { setHasToolError(v => !v); setCursor(null) }}>
-              Tool error
-            </Button>
-            <Button type="button" variant={slowOnly ? 'default' : 'outline'} onClick={() => { setSlowOnly(v => !v); setCursor(null) }}>
-              Slow only
-            </Button>
-            <Button variant="secondary" onClick={resetCursorAndRefetch}>ใช้ตัวกรอง</Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {triageTabs.map(tab => (
+              <Button
+                key={tab.id}
+                type="button"
+                size="sm"
+                variant={triageTab === tab.id ? 'default' : 'outline'}
+                onClick={() => applyTriageTab(tab.id)}
+              >
+                {tab.id === 'media' ? <ImageIcon className="size-3.5" /> : null}
+                {tab.label}
+              </Button>
+            ))}
+          </div>
+
+          {filtersOpen ? (
+            <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 xl:grid-cols-[repeat(6,minmax(0,1fr))]">
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Agent</span>
+                <Select value={agent} onValueChange={v => { setAgent(v || 'all'); setCursor(null) }}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.id}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Channel</span>
+                <Select value={channel} onValueChange={v => { setChannel(v || 'all'); setCursor(null) }}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    <SelectItem value="telegram">Telegram</SelectItem>
+                    <SelectItem value="line">LINE</SelectItem>
+                    <SelectItem value="webchat">Webchat</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Status</span>
+                <Select value={status} onValueChange={v => { setStatus(v || 'all'); setCursor(null) }}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    <SelectItem value="ok">ok</SelectItem>
+                    <SelectItem value="warn">warn</SelectItem>
+                    <SelectItem value="error">error</SelectItem>
+                    <SelectItem value="pending">pending</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Route</span>
+                <Select value={route} onValueChange={v => { setRoute(v || 'all'); setCursor(null) }}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    <SelectItem value="tool_path">tool_path</SelectItem>
+                    <SelectItem value="model_path">model_path</SelectItem>
+                    <SelectItem value="native">native</SelectItem>
+                    <SelectItem value="capability_denied">capability_denied</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Issue tag</span>
+                <Select value={issueTag} onValueChange={v => { setIssueTag(v || 'all'); setCursor(null); setTriageTab('all') }}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    {issueOptions.map(tag => <SelectItem key={tag} value={tag}>{tag}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Review target</span>
+                <Select value={reviewTarget} onValueChange={v => { setReviewTarget(v || 'all'); setCursor(null); setTriageTab('all') }}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    {reviewTargetOptions.map(target => <SelectItem key={target} value={target}>{target}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </label>
+              <div className="flex flex-wrap items-end gap-2 xl:col-span-6">
+                <Button type="button" variant={hasToolError ? 'default' : 'outline'} onClick={() => { setHasToolError(v => !v); setCursor(null); setTriageTab('all') }}>
+                  Tool error
+                </Button>
+                <Button type="button" variant={slowOnly ? 'default' : 'outline'} onClick={() => { setSlowOnly(v => !v); setCursor(null); setTriageTab('all') }}>
+                  Slow only
+                </Button>
+                <Button type="button" variant={hasMedia ? 'default' : 'outline'} onClick={() => { setHasMedia(v => !v); setCursor(null); setTriageTab('all') }}>
+                  <ImageIcon className="size-4" />
+                  มีรูป
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             <Button
               variant="outline"
               disabled={exportDisabled}
@@ -419,6 +516,7 @@ export default function ConversationAnalysisPage() {
               <Download className="size-4" />
               Raw CSV
             </Button>
+            {exportTooWide ? <span className="text-xs text-amber-700">Export จำกัดสูงสุด 31 วันต่อครั้ง</span> : null}
           </div>
         </CardContent>
       </Card>
@@ -479,7 +577,7 @@ export default function ConversationAnalysisPage() {
         </CardContent>
       </Card>
 
-      <div className="grid min-h-[620px] items-stretch overflow-hidden rounded-xl border bg-card xl:grid-cols-[420px_1fr]">
+      <div className="grid min-h-[620px] max-h-[calc(100vh-320px)] items-stretch overflow-hidden rounded-xl border bg-card xl:grid-cols-[minmax(520px,0.42fr)_minmax(0,1fr)]">
         <section className="flex min-h-[420px] flex-col border-b xl:min-h-0 xl:border-b-0 xl:border-r">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <div>
@@ -502,8 +600,15 @@ export default function ConversationAnalysisPage() {
                 <p className="mt-1">ลองขยายช่วงวันที่ หรือกด Backfill 7 วันเพื่อนำ log ที่ยังมีอยู่เข้า database</p>
               </div>
             ) : null}
-            {data?.turns.map(turn => (
-              <TurnRow key={turn.id} turn={turn} selected={turn.id === selectedTurn?.id} onSelect={() => setSelectedId(turn.id)} />
+            {groupedTurns.map(group => (
+              <div key={group.day}>
+                <div className="sticky top-0 z-10 border-b bg-muted/95 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
+                  {group.day}
+                </div>
+                {group.turns.map(turn => (
+                  <TurnRow key={turn.id} turn={turn} selected={turn.id === selectedTurn?.id} onSelect={() => setSelectedId(turn.id)} />
+                ))}
+              </div>
             ))}
             {data?.hasMore ? (
               <div className="p-3">
@@ -515,7 +620,7 @@ export default function ConversationAnalysisPage() {
           </div>
         </section>
 
-        <section className="min-w-0">
+        <section className="min-w-0 overflow-auto">
           {!selectedTurn ? (
             <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
               เลือก conversation เพื่อดู transcript
@@ -528,6 +633,12 @@ export default function ConversationAnalysisPage() {
                     <Badge variant={statusVariant(selectedTurn.status)}>{selectedTurn.status}</Badge>
                     <Badge variant="outline">{selectedTurn.agentId || 'unknown'}</Badge>
                     <Badge variant="outline">{selectedTurn.channel}</Badge>
+                    {selectedTurn.mediaCount ? (
+                      <Badge variant="outline" className="gap-1">
+                        <ImageIcon className="size-3" />
+                        รูป {selectedTurn.mediaCount}
+                      </Badge>
+                    ) : null}
                     {(selectedTurn.reviewTargets ?? []).map(target => <Badge key={target} variant="secondary">{target}</Badge>)}
                     <span className="text-sm text-muted-foreground">{formatDateTime(selectedTurn.startedAt)}</span>
                   </div>
@@ -538,6 +649,17 @@ export default function ConversationAnalysisPage() {
                   <div><p className="text-muted-foreground">Latency</p><p className="font-medium">{formatMs(selectedTurn.durationMs)}</p></div>
                   <div><p className="text-muted-foreground">Cost</p><p className="font-medium">{formatMoney(selectedTurn.cost)}</p></div>
                   <div><p className="text-muted-foreground">Tools</p><p className="font-medium">{selectedTurn.toolCount}</p></div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground">คำถาม</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm">{selectedTurn.userText || '(empty)'}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground">คำตอบ</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm">{selectedTurn.finalText || '(no final reply)'}</p>
                 </div>
               </div>
 
@@ -561,28 +683,15 @@ export default function ConversationAnalysisPage() {
                 </div>
               ) : null}
 
-              <div className="grid gap-3 lg:grid-cols-2">
-                <div className="rounded-lg border p-3">
-                  <p className="text-xs font-medium text-muted-foreground">คำถาม</p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm">{selectedTurn.userText || '(empty)'}</p>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="text-xs font-medium text-muted-foreground">คำตอบ</p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm">{selectedTurn.finalText || '(no final reply)'}</p>
-                </div>
-              </div>
-
-              <div className="rounded-lg border">
-                <div className="flex items-center justify-between border-b px-3 py-2">
+              <details className="rounded-lg border">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
                   <div>
-                    <p className="text-sm font-medium">Timeline</p>
-                    <p className="text-xs text-muted-foreground">
-                      Trace แสดงเฉพาะข้อมูลที่ runtime บันทึกไว้จริง
-                    </p>
+                    <p className="text-sm font-medium">Raw timeline</p>
+                    <p className="text-xs text-muted-foreground">Trace แสดงเฉพาะข้อมูลที่ runtime บันทึกไว้จริง</p>
                   </div>
                   <Badge variant="outline">{events.length} events</Badge>
-                </div>
-                <div className="divide-y">
+                </summary>
+                <div className="divide-y border-t">
                   {!hasTrace ? (
                     <div className="px-3 py-2 text-xs text-muted-foreground">
                       ไม่มี trace ที่ runtime บันทึกไว้สำหรับ turn นี้
@@ -613,7 +722,7 @@ export default function ConversationAnalysisPage() {
                     </details>
                   ))}
                 </div>
-              </div>
+              </details>
             </div>
           )}
         </section>

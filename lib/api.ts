@@ -881,6 +881,18 @@ export interface MonitorEvent {
   cleanKeyword?: string
   intent?: string
   route?: string
+  media?: MonitorMedia[]
+}
+
+export interface MonitorMedia {
+  id?: string | null
+  kind: 'image' | 'file' | string
+  mimeType: string
+  fileName?: string
+  sizeBytes?: number
+  caption?: string
+  hasPreview: boolean
+  previewUrl?: string
 }
 
 export interface MonitorSession {
@@ -952,6 +964,8 @@ export interface MonitorConversationTurn {
   durationMs?: number | null
   ackMs?: number | null
   modelMs?: number | null
+  media?: MonitorMedia[]
+  mediaCount?: number
   toolPath: MonitorConversationTool[]
   warnings: { type: string; issue?: string; toolName?: string; summary: string }[]
 }
@@ -1122,6 +1136,8 @@ export interface ConversationAnalysisTurn {
   cost?: number | null
   toolCount: number
   warningCount: number
+  mediaCount?: number
+  hasMedia?: boolean
   issues: ConversationIssue[]
   issueTags: string[]
   reviewTargets: string[]
@@ -1235,6 +1251,7 @@ export interface ConversationAnalysisParams {
   reviewTarget?: string
   hasToolError?: boolean
   slowOnly?: boolean
+  hasMedia?: boolean
   limit?: number
   cursor?: string | null
 }

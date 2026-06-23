@@ -112,15 +112,21 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
     body,
   })
 
-  const text = await res.text()
+  const bodyBuffer = await res.arrayBuffer()
   const auditEntry = auditFor(req.method, path)
   if (res.ok && auditEntry && req.method !== 'HEAD') {
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || undefined
     await audit({ actor: session.username, ip, ...auditEntry })
   }
-  return new NextResponse(text, {
+  const responseHeaders = new Headers()
+  for (const header of ['Content-Type', 'Cache-Control', 'Content-Length', 'X-Content-Type-Options']) {
+    const value = res.headers.get(header)
+    if (value) responseHeaders.set(header, value)
+  }
+  if (!responseHeaders.has('Content-Type')) responseHeaders.set('Content-Type', 'application/json')
+  return new NextResponse(bodyBuffer, {
     status: res.status,
-    headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' },
+    headers: responseHeaders,
   })
 }
 
