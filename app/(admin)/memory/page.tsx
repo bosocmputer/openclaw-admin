@@ -1,329 +1,650 @@
 'use client'
 
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArchiveRestore, CheckCircle2, FileText, Lightbulb, RotateCcw, ShieldCheck, XCircle } from 'lucide-react'
+import { toast } from 'sonner'
+
+import {
+  applyMemoryLearningCandidate,
+  approveMemoryLearningCandidate,
+  createMemoryLearningCandidate,
+  getDailyMemoryContent,
+  getDreamsContent,
+  getMemoryBackups,
+  getMemoryContent,
+  getMemoryLearningCandidates,
+  getMemoryStatus,
+  rejectMemoryLearningCandidate,
+  rollbackMemoryBackup,
+  type MemoryAgentStatus,
+  type MemoryBackup,
+  type MemoryLearningCandidate,
+  type MemoryLearningTargetType,
+} from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import Link from 'next/link'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 
-interface DailyMemory {
-  fileCount: number
-  totalChars: number
-  latestDate: string | null
-  latestPreview: string
-  files: string[]
-}
+type MemoryTab = 'overview' | 'learning' | 'files' | 'backups'
 
-interface MemoryAgentStatus {
-  agentId: string
-  workspace: string
-  memory: { exists: boolean; sizeChars: number; preview: string }
-  dreams: { exists: boolean; sizeChars: number; preview: string }
-  dailyMemory: DailyMemory
-  dreaming: { enabled: boolean; config: Record<string, unknown> | null }
-}
+const targetOptions: Array<{ value: MemoryLearningTargetType; label: string; description: string }> = [
+  { value: 'memory', label: 'MEMORY.md', description: 'ความจำเฉพาะ agent หรือร้านที่ admin ยืนยันแล้ว' },
+  { value: 'business_profile', label: 'Business Profile', description: 'บริบทธุรกิจและ pattern ของร้าน' },
+  { value: 'soul', label: 'SOUL', description: 'กติกาการตอบและ safety/tool contract' },
+  { value: 'mcp_search', label: 'MCP/Search', description: 'คำพ้อง, normalization, หรือ search behavior' },
+]
 
-async function fetchMemoryStatus(): Promise<MemoryAgentStatus[]> {
-  const { data } = await api.get('/api/memory/status')
-  return data
-}
-
-async function fetchMemoryContent(agentId: string, type: 'memory' | 'dreams'): Promise<string> {
-  const { data } = await api.get(`/api/memory/${agentId}/${type}`)
-  return data.content ?? ''
-}
-
-async function fetchDailyContent(agentId: string, filename: string): Promise<string> {
-  const { data } = await api.get(`/api/memory/${agentId}/daily/${filename}`)
-  return data.content ?? ''
-}
-
-function formatChars(n: number) {
+function formatChars(n = 0) {
   if (n > 1000) return `${(n / 1000).toFixed(1)}k ตัวอักษร`
   return `${n} ตัวอักษร`
 }
 
-function formatDate(dateStr: string | null) {
-  if (!dateStr) return ''
-  // e.g. "2026-04-02-cement-inquiry" → show as-is, or "2026-04-02" → show date
-  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!match) return dateStr
-  return `${match[3]}/${match[2]}/${match[1]}`
+function formatTokens(n?: number) {
+  if (!n) return '~0 tokens'
+  if (n > 1000) return `~${(n / 1000).toFixed(1)}k tokens`
+  return `~${n} tokens`
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '-'
+  return new Intl.DateTimeFormat('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
+function formatBytes(value?: number) {
+  if (!value) return '0 B'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${Math.round(value / 102.4) / 10} KB`
+  return `${Math.round(value / (1024 * 102.4)) / 10} MB`
+}
+
+function targetLabel(target: string) {
+  return targetOptions.find(option => option.value === target)?.label || target
+}
+
+function statusVariant(status: string) {
+  if (status === 'applied') return 'default'
+  if (status === 'approved') return 'secondary'
+  if (status === 'rejected') return 'destructive'
+  return 'outline'
+}
+
+function sizeWarningText(agent: MemoryAgentStatus) {
+  if (agent.memory.sizeWarning === 'block') return 'MEMORY.md ใหญ่มาก ควรสรุปก่อนเพิ่ม'
+  if (agent.memory.sizeWarning === 'warn') return 'MEMORY.md ใกล้ใหญ่เกิน budget'
+  if (agent.memory.injectedLikely === 'truncated') return 'อาจถูกตัดบางส่วนตอนส่งเข้า model'
+  return 'ขนาดยังอยู่ในช่วงปลอดภัย'
+}
+
+function evidenceFromText(text: string) {
+  return text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+    .map(line => ({ note: line }))
+}
+
+function sourceIdsFromText(text: string) {
+  return text
+    .split(/[\n,]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .slice(0, 50)
 }
 
 export default function MemoryPage() {
-  const [viewDialog, setViewDialog] = useState<{ title: string } | null>(null)
-  const [viewContent, setViewContent] = useState('')
-  const [viewLoading, setViewLoading] = useState(false)
-  const [expandedDailyAgent, setExpandedDailyAgent] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const [tab, setTab] = useState<MemoryTab>('overview')
+  const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [candidateStatus, setCandidateStatus] = useState('pending')
+  const [viewDialog, setViewDialog] = useState<{ title: string; content: string; loading?: boolean } | null>(null)
+  const [applyCandidate, setApplyCandidate] = useState<MemoryLearningCandidate | null>(null)
+  const [rollbackBackup, setRollbackBackup] = useState<MemoryBackup | null>(null)
+  const [form, setForm] = useState({
+    agentId: '',
+    targetType: 'memory' as MemoryLearningTargetType,
+    summary: '',
+    evidenceText: '',
+    sourceTurnIdsText: '',
+    confidence: '0.8',
+  })
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['memory-status'],
-    queryFn: fetchMemoryStatus,
+    queryFn: getMemoryStatus,
     refetchInterval: 30000,
   })
 
+  const effectiveAgentId = selectedAgentId || agents[0]?.agentId || ''
+  const candidateAgentId = form.agentId || effectiveAgentId
+
+  const { data: candidateData, isLoading: candidatesLoading } = useQuery({
+    queryKey: ['memory-learning-candidates', candidateStatus, effectiveAgentId],
+    queryFn: () => getMemoryLearningCandidates({
+      status: candidateStatus === 'all' ? undefined : candidateStatus,
+      agentId: effectiveAgentId || undefined,
+      limit: 200,
+    }),
+    retry: false,
+  })
+
+  const { data: backupData } = useQuery({
+    queryKey: ['memory-backups', effectiveAgentId],
+    queryFn: () => getMemoryBackups(effectiveAgentId),
+    enabled: Boolean(effectiveAgentId),
+    retry: false,
+  })
+
+  const summary = useMemo(() => {
+    const memoryCount = agents.filter(agent => agent.memory.exists).length
+    const dreamsCount = agents.filter(agent => agent.dreams.exists).length
+    const dailyCount = agents.reduce((sum, agent) => sum + (agent.dailyMemory?.fileCount || 0), 0)
+    const warningCount = agents.filter(agent => agent.memory.sizeWarning === 'warn' || agent.memory.sizeWarning === 'block' || agent.memory.injectedLikely === 'truncated').length
+    return { memoryCount, dreamsCount, dailyCount, warningCount }
+  }, [agents])
+
   async function openView(title: string, loader: () => Promise<string>) {
-    setViewDialog({ title })
-    setViewLoading(true)
-    setViewContent('')
+    setViewDialog({ title, content: '', loading: true })
     try {
       const content = await loader()
-      setViewContent(content)
+      setViewDialog({ title, content })
     } catch {
-      setViewContent('โหลดไม่สำเร็จ')
-    } finally {
-      setViewLoading(false)
+      setViewDialog({ title, content: 'โหลดไม่สำเร็จ' })
     }
   }
 
-  const anyDreamingEnabled = agents.some(a => a.dreaming.enabled)
-  const anyActivityExists = agents.some(a => a.memory.exists || a.dreams.exists || a.dailyMemory.fileCount > 0)
+  function invalidateMemory() {
+    queryClient.invalidateQueries({ queryKey: ['memory-status'] })
+    queryClient.invalidateQueries({ queryKey: ['memory-learning-candidates'] })
+    queryClient.invalidateQueries({ queryKey: ['memory-backups'] })
+  }
+
+  const createMutation = useMutation({
+    mutationFn: () => createMemoryLearningCandidate({
+      agentId: candidateAgentId,
+      targetType: form.targetType,
+      summary: form.summary.trim(),
+      evidence: evidenceFromText(form.evidenceText),
+      sourceTurnIds: sourceIdsFromText(form.sourceTurnIdsText),
+      confidence: Number(form.confidence),
+    }),
+    onSuccess: candidate => {
+      toast.success(candidate.deduped ? 'มี candidate นี้อยู่แล้ว' : 'สร้าง Learning Candidate แล้ว')
+      setForm(f => ({ ...f, summary: '', evidenceText: '', sourceTurnIdsText: '' }))
+      invalidateMemory()
+      setTab('learning')
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'สร้าง candidate ไม่สำเร็จ'),
+  })
+
+  const approveMutation = useMutation({
+    mutationFn: approveMemoryLearningCandidate,
+    onSuccess: () => {
+      toast.success('อนุมัติ candidate แล้ว')
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'อนุมัติไม่สำเร็จ'),
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: rejectMemoryLearningCandidate,
+    onSuccess: () => {
+      toast.success('Reject candidate แล้ว')
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Reject ไม่สำเร็จ'),
+  })
+
+  const applyMutation = useMutation({
+    mutationFn: (candidate: MemoryLearningCandidate) => applyMemoryLearningCandidate(candidate.id),
+    onSuccess: result => {
+      toast.success('Apply เข้า MEMORY.md แล้ว')
+      setApplyCandidate(null)
+      setViewDialog({
+        title: 'Apply result',
+        content: JSON.stringify(result.result, null, 2),
+      })
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Apply ไม่สำเร็จ'),
+  })
+
+  const rollbackMutation = useMutation({
+    mutationFn: (backup: MemoryBackup) => rollbackMemoryBackup(effectiveAgentId, backup.backupId),
+    onSuccess: result => {
+      toast.success('Rollback MEMORY.md แล้ว')
+      setRollbackBackup(null)
+      setViewDialog({ title: 'Rollback result', content: JSON.stringify(result, null, 2) })
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Rollback ไม่สำเร็จ'),
+  })
+
+  const candidates = candidateData?.candidates ?? []
 
   return (
-    <div className="space-y-6 w-full">
-      <div>
-        <h1 className="text-2xl font-bold">Memory</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          ความจำระยะยาวของ AI Agent — ข้อมูลที่ AI บันทึกไว้เพื่อใช้ในการสนทนาครั้งถัดไป
-        </p>
-      </div>
-
-      {/* Explainer */}
-      <div className="rounded-lg border border-violet-200 bg-violet-50 dark:bg-violet-950/30 dark:border-violet-800 p-4 space-y-4">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="font-semibold text-sm text-violet-800 dark:text-violet-200">Memory ทำงานอย่างไร?</p>
-          <p className="text-sm text-violet-700 dark:text-violet-300 mt-1">
-            ปกติ AI จะ "ลืม" ทุกอย่างเมื่อ session จบหรือถูก compaction
-            Memory คือระบบให้ AI บันทึกข้อมูลสำคัญลงไฟล์ เพื่อจำไว้ใช้ในครั้งถัดไป
+          <h1 className="text-2xl font-semibold tracking-tight">Memory</h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            ดูความจำของ agent และอนุมัติสิ่งที่ควรจำจากบทสนทนาจริง ก่อนเขียนเข้า MEMORY.md หรือส่งต่อไป Business Profile, SOUL, MCP/Search
           </p>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          <div className="rounded-md bg-white dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 p-3 space-y-1">
-            <p className="font-semibold text-violet-700 dark:text-violet-300">📅 memory/YYYY-MM-DD.md</p>
-            <p className="text-violet-600 dark:text-violet-400">บันทึกรายวัน — AI จด log การสนทนาแต่ละวัน</p>
-            <p className="text-zinc-500 dark:text-zinc-400 italic">นี่คือหลักฐานว่า AI ทำงานจริง</p>
-          </div>
-          <div className="rounded-md bg-white dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 p-3 space-y-1">
-            <p className="font-semibold text-violet-700 dark:text-violet-300">🧠 MEMORY.md</p>
-            <p className="text-violet-600 dark:text-violet-400">ความจำระยะยาว — AI คัดสรุปสิ่งสำคัญไว้ (main session เท่านั้น)</p>
-            <p className="text-zinc-500 dark:text-zinc-400 italic">เช่น: ข้อมูลสำคัญที่ควรจำตลอดไป</p>
-          </div>
-          <div className="rounded-md bg-white dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 p-3 space-y-1">
-            <p className="font-semibold text-violet-700 dark:text-violet-300">💤 Dreams.md</p>
-            <p className="text-violet-600 dark:text-violet-400">AI สรุปบทเรียนช่วง off-peak อัตโนมัติ</p>
-            <p className="text-zinc-500 dark:text-zinc-400 italic">เช่น: สินค้าที่ถูกถามบ่อยที่สุด</p>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={summary.warningCount ? 'secondary' : 'outline'}>{summary.warningCount} size warnings</Badge>
+          <Badge variant="outline">{summary.memoryCount} MEMORY.md</Badge>
+          <Badge variant="outline">{summary.dreamsCount} DREAMS.md</Badge>
         </div>
-
-        {!anyDreamingEnabled && (
-          <div className="border-t border-violet-200 dark:border-violet-800 pt-3 flex items-start gap-2">
-            <span className="text-amber-500 text-sm shrink-0">⚠️</span>
-            <div className="text-sm">
-              <p className="font-medium text-amber-700 dark:text-amber-400">ยังไม่ได้เปิดใช้งาน Dreaming</p>
-              <p className="text-amber-600 dark:text-amber-500 text-xs mt-0.5">
-                เปิดใช้งานได้ที่หน้า{' '}
-                <Link href="/compaction" className="underline font-medium">Compaction</Link>
-                {' '}→ ส่วน Memory / Dreaming
-              </p>
-            </div>
-          </div>
-        )}
-
-        {anyDreamingEnabled && !anyActivityExists && (
-          <div className="border-t border-violet-200 dark:border-violet-800 pt-3 flex items-start gap-2">
-            <span className="text-blue-500 text-sm shrink-0">ℹ️</span>
-            <p className="text-sm text-blue-700 dark:text-blue-400">
-              Dreaming เปิดอยู่แล้ว — Memory จะสร้างหลังจาก AI เริ่มมีการสนทนา
-            </p>
-          </div>
-        )}
       </div>
 
-      {isLoading && <p className="text-sm text-zinc-400">กำลังโหลด...</p>}
+      <Tabs value={tab} onValueChange={value => setTab(value as MemoryTab)} className="gap-4">
+        <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="learning">Learning Review</TabsTrigger>
+          <TabsTrigger value="files">Memory Files</TabsTrigger>
+          <TabsTrigger value="backups">Backups</TabsTrigger>
+        </TabsList>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {agents.map(agent => (
-          <Card key={agent.agentId}>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-mono">{agent.agentId}</CardTitle>
-                <Badge
-                  variant={agent.dreaming.enabled ? 'default' : 'secondary'}
-                  className={`text-xs ${agent.dreaming.enabled ? 'bg-violet-600' : ''}`}
+        <TabsContent value="overview" className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-sm font-medium">ความจำที่ใช้ตอบจริง</p>
+                <p className="mt-2 text-2xl font-semibold">{summary.memoryCount}</p>
+                <p className="mt-1 text-xs text-muted-foreground">agent มี MEMORY.md ที่ถูก inject เข้า session ปกติเมื่อ runtime โหลด workspace</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-sm font-medium">Working notes</p>
+                <p className="mt-2 text-2xl font-semibold">{summary.dailyCount}</p>
+                <p className="mt-1 text-xs text-muted-foreground">ไฟล์ memory/YYYY-MM-DD.md ใช้ค้น/ทบทวน ไม่ควรยัดทั้งหมดเข้า prompt ทุก turn</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-sm font-medium">Dream diary</p>
+                <p className="mt-2 text-2xl font-semibold">{summary.dreamsCount}</p>
+                <p className="mt-1 text-xs text-muted-foreground">DREAMS.md ใช้ review insight ไม่ถือเป็น source of truth จนกว่า admin approve</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-3">
+            {isLoading ? (
+              <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด memory status...</div>
+            ) : null}
+            {agents.map(agent => (
+              <Card key={agent.agentId}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-base font-mono">{agent.agentId}</CardTitle>
+                    <Badge variant={agent.dreaming.enabled ? 'default' : 'secondary'}>
+                      {agent.dreaming.enabled ? 'Dreaming เปิด' : 'Dreaming ปิด'}
+                    </Badge>
+                  </div>
+                  <p className="break-all text-xs text-muted-foreground">{agent.workspace}</p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">MEMORY.md</p>
+                      <Badge variant={agent.memory.sizeWarning === 'ok' ? 'outline' : 'secondary'}>{agent.memory.injectedLikely || 'missing'}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {agent.memory.exists ? `${formatChars(agent.memory.sizeChars)} · ${formatTokens(agent.memory.estimatedTokens)}` : 'ยังไม่มีไฟล์'}
+                    </p>
+                    <p className="mt-2 text-xs">{sizeWarningText(agent)}</p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">{agent.dreams.canonicalName || 'DREAMS.md'}</p>
+                      <Badge variant={agent.dreams.exists ? 'outline' : 'secondary'}>{agent.dreams.exists ? 'มีไฟล์' : 'ยังว่าง'}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {agent.dreams.exists ? `${formatChars(agent.dreams.sizeChars)} · review diary` : 'สร้างหลัง dreaming phase มี output'}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="learning" className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Create Learning Candidate</CardTitle>
+                <p className="text-sm text-muted-foreground">บันทึกสิ่งที่ควร review จากบทสนทนา ก่อนให้ admin approve</p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">Agent</span>
+                  <Select value={candidateAgentId} onValueChange={value => setForm(f => ({ ...f, agentId: value || '' }))}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="เลือก agent" /></SelectTrigger>
+                    <SelectContent>
+                      {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">Target</span>
+                  <Select value={form.targetType} onValueChange={value => setForm(f => ({ ...f, targetType: (value || 'memory') as MemoryLearningTargetType }))}>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {targetOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">{targetOptions.find(option => option.value === form.targetType)?.description}</p>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">Summary</span>
+                  <Textarea
+                    rows={4}
+                    value={form.summary}
+                    onChange={event => setForm(f => ({ ...f, summary: event.target.value }))}
+                    placeholder="เช่น ลูกค้าร้านนี้มักถามอะไหล่ด้วยชื่ออะไหล่ + รุ่นรถ + ตำแหน่งซ้าย/ขวา"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">Evidence</span>
+                  <Textarea
+                    rows={3}
+                    value={form.evidenceText}
+                    onChange={event => setForm(f => ({ ...f, evidenceText: event.target.value }))}
+                    placeholder="หนึ่งบรรทัดต่อหลักฐาน เช่น keyword, issue tag, tool result"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">Source turn ids</span>
+                  <Input
+                    value={form.sourceTurnIdsText}
+                    onChange={event => setForm(f => ({ ...f, sourceTurnIdsText: event.target.value }))}
+                    placeholder="turn id คั่นด้วย comma หรือขึ้นบรรทัดใหม่"
+                  />
+                </label>
+                <Button
+                  className="w-full"
+                  disabled={!candidateAgentId || !form.summary.trim() || createMutation.isPending}
+                  onClick={() => createMutation.mutate()}
                 >
-                  {agent.dreaming.enabled ? '💤 Dreaming เปิด' : 'Dreaming ปิด'}
-                </Badge>
-              </div>
-              <p className="text-xs text-zinc-400 font-mono">{agent.workspace}</p>
-            </CardHeader>
-            <CardContent className="space-y-3">
+                  <Lightbulb className="size-4" />
+                  สร้าง Candidate
+                </Button>
+              </CardContent>
+            </Card>
 
-              {/* Daily Memory — primary system */}
-              <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">📅</span>
-                    <span className="text-sm font-medium">บันทึกรายวัน</span>
-                    <Badge variant={agent.dailyMemory.fileCount > 0 ? 'outline' : 'secondary'} className="text-xs">
-                      {agent.dailyMemory.fileCount > 0
-                        ? `${agent.dailyMemory.fileCount} ไฟล์ · ${formatChars(agent.dailyMemory.totalChars)}`
-                        : 'ยังว่าง'}
-                    </Badge>
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <CardTitle className="text-base">Learning Review Queue</CardTitle>
+                    <p className="text-sm text-muted-foreground">approve ก่อน apply เสมอ เพื่อกัน AI จำผิดหรือจำรก</p>
                   </div>
-                  {agent.dailyMemory.fileCount > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-6 px-2"
-                      onClick={() => setExpandedDailyAgent(
-                        expandedDailyAgent === agent.agentId ? null : agent.agentId
-                      )}
-                    >
-                      {expandedDailyAgent === agent.agentId ? 'ซ่อน' : 'ดูทั้งหมด'}
-                    </Button>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Select value={effectiveAgentId} onValueChange={value => setSelectedAgentId(value || '')}>
+                      <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Select value={candidateStatus} onValueChange={value => setCandidateStatus(value || 'pending')}>
+                      <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pending">pending</SelectItem>
+                        <SelectItem value="approved">approved</SelectItem>
+                        <SelectItem value="applied">applied</SelectItem>
+                        <SelectItem value="rejected">rejected</SelectItem>
+                        <SelectItem value="all">all</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-
-                {agent.dailyMemory.latestPreview ? (
-                  <pre className="text-xs text-zinc-600 dark:text-zinc-400 font-mono whitespace-pre-wrap line-clamp-3 bg-white dark:bg-zinc-800/50 rounded p-2">
-                    {agent.dailyMemory.latestPreview}
-                  </pre>
-                ) : (
-                  <p className="text-xs text-zinc-400 italic">
-                    AI ยังไม่ได้บันทึกอะไร — จะสร้างหลังจากมีการสนทนา
-                  </p>
-                )}
-
-                {/* File list */}
-                {expandedDailyAgent === agent.agentId && agent.dailyMemory.files.length > 0 && (
-                  <div className="space-y-1 pt-1 border-t border-emerald-200 dark:border-emerald-800">
-                    {agent.dailyMemory.files.map(f => (
-                      <div key={f} className="flex items-center justify-between">
-                        <span className="text-xs font-mono text-zinc-500">{f}</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-xs h-5 px-2 text-violet-600"
-                          onClick={() => openView(
-                            `${agent.agentId} — ${f}`,
-                            () => fetchDailyContent(agent.agentId, f)
-                          )}
-                        >
-                          อ่าน
-                        </Button>
+              </CardHeader>
+              <CardContent>
+                {candidateData && !candidateData.enabled ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    Learning Review ถูกปิดไว้ ตั้ง `MEMORY_LEARNING_REVIEW_ENABLED=1` หรืออย่าตั้งเป็น `0`
+                  </div>
+                ) : null}
+                {candidatesLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด candidates...</div> : null}
+                {!candidatesLoading && !candidates.length ? (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    ยังไม่มี candidate ในตัวกรองนี้ สร้างจากฟอร์มด้านซ้าย หรือจากหน้า Conversation Analysis
+                  </div>
+                ) : null}
+                <div className="space-y-3">
+                  {candidates.map(candidate => (
+                    <div key={candidate.id} className="rounded-lg border p-3">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={statusVariant(candidate.status)}>{candidate.status}</Badge>
+                            <Badge variant="outline">{candidate.agentId}</Badge>
+                            <Badge variant="secondary">{targetLabel(candidate.targetType)}</Badge>
+                            {candidate.confidence !== null ? <Badge variant="outline">{Math.round(candidate.confidence * 100)}%</Badge> : null}
+                          </div>
+                          <p className="mt-2 whitespace-pre-wrap text-sm font-medium">{candidate.summary}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {candidate.sourceTurnIds.length ? `source: ${candidate.sourceTurnIds.slice(0, 3).join(', ')}` : 'no source turn'} · updated {formatDateTime(candidate.updatedAt)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          {candidate.status === 'pending' ? (
+                            <Button size="sm" variant="outline" onClick={() => approveMutation.mutate(candidate.id)} disabled={approveMutation.isPending}>
+                              <CheckCircle2 className="size-4" />
+                              Approve
+                            </Button>
+                          ) : null}
+                          {candidate.status === 'approved' ? (
+                            <Button size="sm" onClick={() => setApplyCandidate(candidate)} disabled={candidate.targetType !== 'memory'}>
+                              <ShieldCheck className="size-4" />
+                              Apply
+                            </Button>
+                          ) : null}
+                          {candidate.status !== 'rejected' && candidate.status !== 'applied' ? (
+                            <Button size="sm" variant="ghost" onClick={() => rejectMutation.mutate(candidate.id)} disabled={rejectMutation.isPending}>
+                              <XCircle className="size-4" />
+                              Reject
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      {candidate.targetType !== 'memory' ? (
+                        <div className="mt-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">
+                          Target นี้เก็บไว้เพื่อ review และส่งต่อทีม ใน v1 ระบบ apply อัตโนมัติเฉพาะ MEMORY.md เท่านั้น
+                        </div>
+                      ) : null}
+                      {candidate.evidence.length ? (
+                        <details className="mt-3 rounded-md border bg-muted/20">
+                          <summary className="cursor-pointer px-3 py-2 text-xs font-medium">Evidence</summary>
+                          <pre className="max-h-56 overflow-auto border-t p-3 text-xs">{JSON.stringify(candidate.evidence, null, 2)}</pre>
+                        </details>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-              {/* MEMORY.md */}
-              <div className="rounded-lg border p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">🧠</span>
-                    <span className="text-sm font-medium">MEMORY.md</span>
-                    <Badge variant={agent.memory.exists ? 'outline' : 'secondary'} className="text-xs">
-                      {agent.memory.exists ? formatChars(agent.memory.sizeChars) : 'ยังว่าง'}
-                    </Badge>
+        <TabsContent value="files" className="space-y-4">
+          <div className="grid gap-3 xl:grid-cols-2">
+            {agents.map(agent => (
+              <Card key={agent.agentId}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base font-mono">{agent.agentId}</CardTitle>
+                  <p className="break-all text-xs text-muted-foreground">{agent.workspace}</p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">MEMORY.md</p>
+                        <p className="text-xs text-muted-foreground">{agent.memory.exists ? formatChars(agent.memory.sizeChars) : 'ยังไม่มีไฟล์'}</p>
+                      </div>
+                      {agent.memory.exists ? (
+                        <Button variant="outline" size="sm" onClick={() => openView(`${agent.agentId} — MEMORY.md`, () => getMemoryContent(agent.agentId))}>อ่าน</Button>
+                      ) : null}
+                    </div>
+                    {agent.memory.preview ? <pre className="mt-2 line-clamp-4 whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{agent.memory.preview}</pre> : null}
                   </div>
-                  {agent.memory.exists && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-6 px-2"
-                      onClick={() => openView(
-                        `${agent.agentId} — MEMORY.md`,
-                        () => fetchMemoryContent(agent.agentId, 'memory')
-                      )}
-                    >
-                      อ่าน
+
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">{agent.dreams.canonicalName || 'DREAMS.md'}</p>
+                        <p className="text-xs text-muted-foreground">{agent.dreams.exists ? formatChars(agent.dreams.sizeChars) : 'ยังไม่มีไฟล์'}</p>
+                      </div>
+                      {agent.dreams.exists ? (
+                        <Button variant="outline" size="sm" onClick={() => openView(`${agent.agentId} — ${agent.dreams.canonicalName || 'DREAMS.md'}`, () => getDreamsContent(agent.agentId))}>อ่าน</Button>
+                      ) : null}
+                    </div>
+                    {agent.dreams.preview ? <pre className="mt-2 line-clamp-3 whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{agent.dreams.preview}</pre> : null}
+                  </div>
+
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">memory/*.md</p>
+                        <p className="text-xs text-muted-foreground">{agent.dailyMemory?.fileCount || 0} files · {formatChars(agent.dailyMemory?.totalChars || 0)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 max-h-56 space-y-1 overflow-auto">
+                      {(agent.dailyMemory?.files || []).map(file => (
+                        <div key={file} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-muted">
+                          <span className="truncate font-mono text-xs">{file}</span>
+                          <Button variant="ghost" size="sm" onClick={() => openView(`${agent.agentId} — ${file}`, () => getDailyMemoryContent(agent.agentId, file))}>อ่าน</Button>
+                        </div>
+                      ))}
+                      {!agent.dailyMemory?.files?.length ? <p className="text-xs text-muted-foreground">ยังไม่มี daily memory</p> : null}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="backups" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle className="text-base">MEMORY.md Backups</CardTitle>
+                  <p className="text-sm text-muted-foreground">backup ถูกสร้างก่อน apply learning candidate หรือ rollback</p>
+                </div>
+                <Select value={effectiveAgentId} onValueChange={value => setSelectedAgentId(value || '')}>
+                  <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!backupData?.backups.length ? (
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                  ยังไม่มี backup จาก Learning Review สำหรับ agent นี้
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                {backupData?.backups.map(backup => (
+                  <div key={backup.backupId} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-mono text-sm">{backup.fileName}</p>
+                      <p className="text-xs text-muted-foreground">{formatDateTime(backup.createdAt)} · {formatBytes(backup.sizeBytes)}</p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setRollbackBackup(backup)}>
+                      <ArchiveRestore className="size-4" />
+                      Rollback
                     </Button>
-                  )}
-                </div>
-                {agent.memory.exists && agent.memory.preview ? (
-                  <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap line-clamp-3 bg-zinc-50 dark:bg-zinc-800/50 rounded p-2">
-                    {agent.memory.preview}
-                  </pre>
-                ) : (
-                  <p className="text-xs text-zinc-400 italic">
-                    AI จะสร้างไฟล์นี้เมื่อต้องการจำข้อมูลระยะยาว (main session)
-                  </p>
-                )}
-              </div>
-
-              {/* Dreams.md */}
-              <div className="rounded-lg border p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">💤</span>
-                    <span className="text-sm font-medium">Dreams.md</span>
-                    <Badge variant={agent.dreams.exists ? 'outline' : 'secondary'} className="text-xs">
-                      {agent.dreams.exists ? formatChars(agent.dreams.sizeChars) : 'ยังว่าง'}
-                    </Badge>
                   </div>
-                  {agent.dreams.exists && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-6 px-2"
-                      onClick={() => openView(
-                        `${agent.agentId} — Dreams.md`,
-                        () => fetchMemoryContent(agent.agentId, 'dreams')
-                      )}
-                    >
-                      อ่าน
-                    </Button>
-                  )}
-                </div>
-                {agent.dreams.exists && agent.dreams.preview ? (
-                  <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap line-clamp-2 bg-zinc-50 dark:bg-zinc-800/50 rounded p-2">
-                    {agent.dreams.preview}
-                  </pre>
-                ) : (
-                  <p className="text-xs text-zinc-400 italic">
-                    {agent.dreaming.enabled
-                      ? 'AI จะสร้างไฟล์นี้หลังจาก dreaming phase ทำงาน'
-                      : 'ต้องเปิด Dreaming ก่อน'}
-                  </p>
-                )}
+                ))}
               </div>
-
-              {!agent.dreaming.enabled && (
-                <div className="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 p-3 text-center">
-                  <p className="text-xs text-zinc-400">
-                    เปิด Dreaming ได้ที่{' '}
-                    <Link href="/compaction" className="text-violet-500 hover:underline font-medium">
-                      หน้า Compaction
-                    </Link>
-                  </p>
-                </div>
-              )}
             </CardContent>
           </Card>
-        ))}
-      </div>
+        </TabsContent>
+      </Tabs>
 
-      {/* View Dialog */}
-      <Dialog open={!!viewDialog} onOpenChange={v => !v && setViewDialog(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+      <Dialog open={!!viewDialog} onOpenChange={open => { if (!open) setViewDialog(null) }}>
+        <DialogContent className="max-h-[82vh] max-w-3xl sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle className="font-mono text-sm">{viewDialog?.title}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-sm">
+              <FileText className="size-4" />
+              {viewDialog?.title}
+            </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto">
-            {viewLoading ? (
-              <p className="text-sm text-zinc-400 py-4 text-center">กำลังโหลด...</p>
+          <div className="min-h-0 overflow-auto rounded-lg border bg-muted p-3">
+            {viewDialog?.loading ? (
+              <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
             ) : (
-              <pre className="text-xs font-mono whitespace-pre-wrap text-zinc-700 dark:text-zinc-300 p-1">
-                {viewContent || '(ไฟล์ว่างเปล่า)'}
-              </pre>
+              <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed">{viewDialog?.content || '(ไฟล์ว่างเปล่า)'}</pre>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!applyCandidate} onOpenChange={open => { if (!open) setApplyCandidate(null) }}>
+        <DialogContent className="max-w-xl sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Apply เข้า MEMORY.md</DialogTitle>
+          </DialogHeader>
+          {applyCandidate ? (
+            <div className="space-y-3 text-sm">
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-xs font-medium text-muted-foreground">จะเพิ่มใน managed section</p>
+                <p className="mt-2 whitespace-pre-wrap">{applyCandidate.summary}</p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                ระบบจะสร้าง backup ก่อนเขียน และจะไม่ทับ section ที่ admin/user เขียนเอง
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setApplyCandidate(null)}>ยกเลิก</Button>
+            <Button onClick={() => applyCandidate && applyMutation.mutate(applyCandidate)} disabled={applyMutation.isPending}>
+              <ShieldCheck className="size-4" />
+              Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!rollbackBackup} onOpenChange={open => { if (!open) setRollbackBackup(null) }}>
+        <DialogContent className="max-w-xl sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Rollback MEMORY.md</DialogTitle>
+          </DialogHeader>
+          {rollbackBackup ? (
+            <div className="space-y-3 text-sm">
+              <p>ต้องการ restore backup นี้ให้ agent <strong>{effectiveAgentId}</strong> ใช่ไหม?</p>
+              <div className="rounded-lg border bg-muted p-3 font-mono text-xs">{rollbackBackup.fileName}</div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                ระบบจะ backup ไฟล์ปัจจุบันอีกชุดก่อน rollback
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRollbackBackup(null)}>ยกเลิก</Button>
+            <Button onClick={() => rollbackBackup && rollbackMutation.mutate(rollbackBackup)} disabled={rollbackMutation.isPending}>
+              <RotateCcw className="size-4" />
+              Rollback
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

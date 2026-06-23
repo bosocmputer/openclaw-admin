@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Archive, CalendarClock, ChevronRight, Download, FileText, Image as ImageIcon, RefreshCw, Search, SlidersHorizontal, Tags, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, CalendarClock, ChevronRight, Download, FileText, Image as ImageIcon, Lightbulb, RefreshCw, Search, SlidersHorizontal, Tags, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
   backfillConversations,
+  createMemoryLearningCandidate,
   exportConversationAnalysis,
   getAgents,
   getConversationAnalysis,
@@ -16,6 +17,7 @@ import {
   type ConversationAnalysisParams,
   type ConversationIssue,
   type ConversationAnalysisTurn,
+  type MemoryLearningTargetType,
   type MonitorMedia,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -25,6 +27,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 
 const timeZone = 'Asia/Bangkok'
 
@@ -177,6 +180,50 @@ function conversationMediaUrl(media: MonitorMedia) {
   return ''
 }
 
+const learningTargetOptions: Array<{ value: MemoryLearningTargetType; label: string; description: string }> = [
+  { value: 'memory', label: 'MEMORY.md', description: 'ความจำเฉพาะ agent หรือร้านที่ admin ยืนยันแล้ว' },
+  { value: 'business_profile', label: 'Business Profile', description: 'pattern ธุรกิจทั่วไปของร้าน' },
+  { value: 'soul', label: 'SOUL', description: 'กติกาการตอบและ safety/tool contract' },
+  { value: 'mcp_search', label: 'MCP/Search', description: 'คำพ้อง, normalization หรือ search behavior' },
+]
+
+function defaultLearningTarget(issues: ConversationIssue[]): MemoryLearningTargetType {
+  const targets = new Set(issues.map(issue => issue.reviewTarget))
+  if (targets.has('MCP/search')) return 'mcp_search'
+  if (targets.has('SOUL')) return 'soul'
+  if (targets.has('business capability')) return 'business_profile'
+  return 'memory'
+}
+
+function defaultLearningSummary(turn: ConversationAnalysisTurn, issues: ConversationIssue[]) {
+  const primaryIssue = issues[0]?.tag || turn.primaryIssueTag || 'conversation_review'
+  const question = shortText(turn.userText || '(empty question)', 120)
+  return `${primaryIssue}: ตรวจบทสนทนา "${question}" และบันทึกเป็น learning candidate ถ้าควรปรับความจำ, profile, SOUL หรือ search behavior`
+}
+
+function learningEvidence(turn: ConversationAnalysisTurn, issues: ConversationIssue[]) {
+  const evidence: Array<Record<string, unknown>> = [
+    {
+      kind: 'turn_preview',
+      userText: shortText(turn.userText || '', 500),
+      finalText: shortText(turn.finalText || '', 500),
+      status: turn.status,
+      route: turn.route,
+      latencyMs: turn.durationMs,
+      mediaCount: turn.mediaCount || 0,
+    },
+  ]
+  for (const issue of issues.slice(0, 8)) {
+    evidence.push({
+      kind: 'issue',
+      tag: issue.tag,
+      reviewTarget: issue.reviewTarget,
+      evidence: issue.evidence,
+    })
+  }
+  return evidence
+}
+
 function MediaPreviewCard({ media, onOpen }: { media: MonitorMedia; onOpen: () => void }) {
   const [imageFailed, setImageFailed] = useState(false)
   const src = conversationMediaUrl(media)
@@ -315,6 +362,9 @@ export default function ConversationAnalysisPage() {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [triageTab, setTriageTab] = useState<TriageTab>('all')
   const [selectedMedia, setSelectedMedia] = useState<MonitorMedia | null>(null)
+  const [learningDialogOpen, setLearningDialogOpen] = useState(false)
+  const [learningTargetType, setLearningTargetType] = useState<MemoryLearningTargetType>('memory')
+  const [learningSummary, setLearningSummary] = useState('')
 
   const params: ConversationAnalysisParams = {
     from: fromLocalInput(from),
@@ -388,6 +438,24 @@ export default function ConversationAnalysisPage() {
   const hasTrace = events.some(event => event.type === 'trace')
   const selectedIssues = detail?.turn?.issues ?? selectedTurn?.issues ?? []
   const selectedMediaItems = detail?.turn?.media ?? selectedTurn?.media ?? []
+  const createLearningMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedTurn) throw new Error('ยังไม่ได้เลือก conversation')
+      return createMemoryLearningCandidate({
+        agentId: selectedTurn.agentId || 'unknown',
+        targetType: learningTargetType,
+        summary: learningSummary.trim(),
+        evidence: learningEvidence(selectedTurn, selectedIssues),
+        sourceTurnIds: [selectedTurn.id],
+        confidence: 0.75,
+      })
+    },
+    onSuccess: candidate => {
+      toast.success(candidate.deduped ? 'Learning candidate นี้มีอยู่แล้ว' : 'สร้าง Learning candidate แล้ว')
+      setLearningDialogOpen(false)
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'สร้าง Learning candidate ไม่สำเร็จ'),
+  })
   const groupedTurns = useMemo(() => {
     const groups: Array<{ day: string; turns: ConversationAnalysisTurn[] }> = []
     for (const turn of data?.turns ?? []) {
@@ -429,6 +497,14 @@ export default function ConversationAnalysisPage() {
     if (next === 'slow') setSlowOnly(true)
     if (next === 'price') setIssueTag('unverified_price_guess')
     if (next === 'media') setHasMedia(true)
+  }
+
+  function openLearningDialog() {
+    if (!selectedTurn) return
+    const target = defaultLearningTarget(selectedIssues)
+    setLearningTargetType(target)
+    setLearningSummary(defaultLearningSummary(selectedTurn, selectedIssues))
+    setLearningDialogOpen(true)
   }
 
   return (
@@ -727,10 +803,16 @@ export default function ConversationAnalysisPage() {
                   <h2 className="mt-2 text-base font-semibold">Turn detail</h2>
                   <p className="mt-1 break-all text-xs text-muted-foreground">{selectedTurn.id}</p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-right text-xs">
-                  <div><p className="text-muted-foreground">Latency</p><p className="font-medium">{formatMs(selectedTurn.durationMs)}</p></div>
-                  <div><p className="text-muted-foreground">Cost</p><p className="font-medium">{formatMoney(selectedTurn.cost)}</p></div>
-                  <div><p className="text-muted-foreground">Tools</p><p className="font-medium">{selectedTurn.toolCount}</p></div>
+                <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                  <Button type="button" variant="outline" size="sm" onClick={openLearningDialog}>
+                    <Lightbulb className="size-4" />
+                    Create Learning Candidate
+                  </Button>
+                  <div className="grid grid-cols-3 gap-2 text-right text-xs">
+                    <div><p className="text-muted-foreground">Latency</p><p className="font-medium">{formatMs(selectedTurn.durationMs)}</p></div>
+                    <div><p className="text-muted-foreground">Cost</p><p className="font-medium">{formatMoney(selectedTurn.cost)}</p></div>
+                    <div><p className="text-muted-foreground">Tools</p><p className="font-medium">{selectedTurn.toolCount}</p></div>
+                  </div>
                 </div>
               </div>
 
@@ -843,6 +925,80 @@ export default function ConversationAnalysisPage() {
           )}
         </section>
       </div>
+
+      <Dialog open={learningDialogOpen} onOpenChange={setLearningDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create Learning Candidate</DialogTitle>
+          </DialogHeader>
+          {selectedTurn ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{selectedTurn.agentId || 'unknown'}</Badge>
+                  <Badge variant="outline">{selectedTurn.channel}</Badge>
+                  {selectedIssues.slice(0, 3).map(issue => (
+                    <Badge key={issue.tag} variant={issueVariant(issue.tag)}>{issue.tag}</Badge>
+                  ))}
+                </div>
+                <p className="mt-2 line-clamp-3 text-muted-foreground">{selectedTurn.userText || '(empty question)'}</p>
+              </div>
+
+              <label className="space-y-1.5">
+                <span className="text-sm font-medium">ควรนำไปปรับส่วนไหน</span>
+                <Select value={learningTargetType} onValueChange={value => setLearningTargetType(value as MemoryLearningTargetType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {learningTargetOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {learningTargetOptions.find(option => option.value === learningTargetType)?.description}
+                </p>
+              </label>
+
+              <label className="space-y-1.5">
+                <span className="text-sm font-medium">Summary สำหรับ review</span>
+                <Textarea
+                  value={learningSummary}
+                  onChange={event => setLearningSummary(event.target.value)}
+                  rows={5}
+                  maxLength={1200}
+                  placeholder="สรุปสิ่งที่ควรเรียนรู้จากบทสนทนานี้"
+                />
+                <p className="text-xs text-muted-foreground">{learningSummary.length}/1200 ตัวอักษร</p>
+              </label>
+
+              <details className="rounded-lg border">
+                <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium">
+                  Evidence ที่จะส่งเข้า queue
+                </summary>
+                <pre className="max-h-64 overflow-auto border-t bg-muted/30 p-3 text-xs leading-relaxed">
+                  {JSON.stringify(learningEvidence(selectedTurn, selectedIssues), null, 2)}
+                </pre>
+              </details>
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setLearningDialogOpen(false)}>
+                  ยกเลิก
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!learningSummary.trim() || createLearningMutation.isPending}
+                  onClick={() => createLearningMutation.mutate()}
+                >
+                  <Lightbulb className="size-4" />
+                  {createLearningMutation.isPending ? 'กำลังสร้าง...' : 'สร้าง Candidate'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(selectedMedia)} onOpenChange={open => { if (!open) setSelectedMedia(null) }}>
         <DialogContent className="max-w-5xl sm:max-w-5xl">

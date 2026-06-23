@@ -1585,9 +1585,24 @@ export async function restoreCheckpoint(agentId: string, filename: string): Prom
 export interface MemoryAgentStatus {
   agentId: string
   workspace: string
-  memory: { exists: boolean; sizeChars: number; preview: string }
-  dreams: { exists: boolean; sizeChars: number; preview: string }
-  dreaming: { enabled: boolean; config: Record<string, unknown> | null }
+  memory: {
+    exists: boolean
+    sizeChars: number
+    preview: string
+    estimatedTokens?: number
+    sizeWarning?: 'ok' | 'warn' | 'block' | string
+    injectedLikely?: 'missing' | 'full' | 'truncated' | string
+    bootstrapMaxChars?: number
+  }
+  dreams: { exists: boolean; sizeChars: number; preview: string; path?: string | null; canonicalName?: string }
+  dailyMemory?: {
+    fileCount: number
+    totalChars: number
+    latestDate: string | null
+    latestPreview: string
+    files: string[]
+  }
+  dreaming: { enabled: boolean; config: Record<string, unknown> | null; source?: string }
 }
 
 export async function getMemoryStatus(): Promise<MemoryAgentStatus[]> {
@@ -1603,6 +1618,94 @@ export async function getMemoryContent(agentId: string): Promise<string> {
 export async function getDreamsContent(agentId: string): Promise<string> {
   const { data } = await api.get(`/api/memory/${agentId}/dreams`)
   return data.content ?? ''
+}
+
+export async function getDailyMemoryContent(agentId: string, filename: string): Promise<string> {
+  const { data } = await api.get(`/api/memory/${encodeURIComponent(agentId)}/daily/${encodeURIComponent(filename)}`)
+  return data.content ?? ''
+}
+
+export type MemoryLearningTargetType = 'memory' | 'business_profile' | 'soul' | 'mcp_search'
+export type MemoryLearningStatus = 'pending' | 'approved' | 'applied' | 'rejected'
+
+export interface MemoryLearningCandidate {
+  id: string
+  agentId: string
+  targetType: MemoryLearningTargetType
+  summary: string
+  evidence: unknown[]
+  sourceTurnIds: string[]
+  status: MemoryLearningStatus
+  confidence: number | null
+  sourceHash: string
+  createdBy?: string | null
+  updatedBy?: string | null
+  createdAt: string
+  updatedAt: string
+  approvedAt?: string | null
+  appliedAt?: string | null
+  rejectedAt?: string | null
+  appliedResult?: Record<string, unknown> | null
+  deduped?: boolean
+}
+
+export interface MemoryLearningCandidatesResponse {
+  enabled: boolean
+  candidates: MemoryLearningCandidate[]
+}
+
+export interface MemoryBackup {
+  backupId: string
+  fileName: string
+  sizeBytes: number
+  createdAt: string
+}
+
+export async function getMemoryLearningCandidates(params: {
+  agentId?: string
+  status?: string
+  targetType?: string
+  limit?: number
+} = {}): Promise<MemoryLearningCandidatesResponse> {
+  const { data } = await api.get('/api/memory/learning-candidates', { params })
+  return data
+}
+
+export async function createMemoryLearningCandidate(body: {
+  agentId: string
+  targetType: MemoryLearningTargetType
+  summary: string
+  evidence?: unknown[]
+  sourceTurnIds?: string[]
+  confidence?: number | null
+}): Promise<MemoryLearningCandidate> {
+  const { data } = await api.post('/api/memory/learning-candidates', body)
+  return data
+}
+
+export async function approveMemoryLearningCandidate(id: string): Promise<MemoryLearningCandidate> {
+  const { data } = await api.post(`/api/memory/learning-candidates/${encodeURIComponent(id)}/approve`)
+  return data
+}
+
+export async function rejectMemoryLearningCandidate(id: string): Promise<MemoryLearningCandidate> {
+  const { data } = await api.post(`/api/memory/learning-candidates/${encodeURIComponent(id)}/reject`)
+  return data
+}
+
+export async function applyMemoryLearningCandidate(id: string, force = false): Promise<{ candidate: MemoryLearningCandidate; result: Record<string, unknown> }> {
+  const { data } = await api.post(`/api/memory/learning-candidates/${encodeURIComponent(id)}/apply`, force ? { force: true } : {})
+  return data
+}
+
+export async function getMemoryBackups(agentId: string): Promise<{ backups: MemoryBackup[] }> {
+  const { data } = await api.get(`/api/memory/${encodeURIComponent(agentId)}/backups`)
+  return data
+}
+
+export async function rollbackMemoryBackup(agentId: string, backupId: string): Promise<{ ok: boolean; agentId: string; backupId: string; rollbackBackupId: string; restoredBytes: number }> {
+  const { data } = await api.post(`/api/memory/${encodeURIComponent(agentId)}/rollback`, { backupId })
+  return data
 }
 
 // ─── Alerting ─────────────────────────────────────────────────────────────────
