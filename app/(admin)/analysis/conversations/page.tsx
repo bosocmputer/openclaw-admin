@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Archive, BarChart3, CalendarClock, ChevronRight, Download, FileText, Image as ImageIcon, RefreshCw, Search, SlidersHorizontal, Tags, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, CalendarClock, ChevronRight, Download, FileText, Image as ImageIcon, RefreshCw, Search, SlidersHorizontal, Tags, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const timeZone = 'Asia/Bangkok'
@@ -168,12 +168,32 @@ function daysBetween(from: string, to: string) {
   return Math.max(0, (end - start) / (24 * 60 * 60 * 1000))
 }
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function MetricPill({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-lg border bg-card px-3 py-2">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
+    <div className="min-w-[128px] rounded-lg border bg-background px-3 py-2">
+      <div className="flex items-baseline gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        <p className="text-sm font-semibold tabular-nums">{value}</p>
+      </div>
       {hint ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{hint}</p> : null}
+    </div>
+  )
+}
+
+function TurnListSkeleton() {
+  return (
+    <div className="divide-y">
+      {Array.from({ length: 7 }).map((_, index) => (
+        <div key={index} className="space-y-2 px-3 py-3">
+          <div className="flex items-center gap-2">
+            <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+            <div className="h-5 w-12 animate-pulse rounded-full bg-muted" />
+            <div className="h-5 w-28 animate-pulse rounded-full bg-muted" />
+          </div>
+          <div className="h-4 w-11/12 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+        </div>
+      ))}
     </div>
   )
 }
@@ -186,6 +206,7 @@ function TurnRow({ turn, selected, onSelect }: { turn: ConversationAnalysisTurn;
     <button
       type="button"
       onClick={onSelect}
+      aria-current={selected ? 'true' : undefined}
       className={cn(
         'w-full border-b px-3 py-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected && 'bg-zinc-950 text-white hover:bg-zinc-950 dark:bg-white dark:text-zinc-950'
@@ -335,6 +356,11 @@ export default function ConversationAnalysisPage() {
     void queryClient.invalidateQueries({ queryKey: ['conversation-insights'] })
   }
 
+  function resetListState() {
+    setCursor(null)
+    setSelectedId(null)
+  }
+
   function applyTriageTab(next: TriageTab) {
     setTriageTab(next)
     setCursor(null)
@@ -353,8 +379,8 @@ export default function ConversationAnalysisPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <div className="flex min-h-[calc(100vh-96px)] flex-col gap-4 xl:h-[calc(100vh-96px)] xl:min-h-0 xl:overflow-hidden">
+      <div className="shrink-0 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Conversation Analysis</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -373,22 +399,22 @@ export default function ConversationAnalysisPage() {
         </div>
       </div>
 
-      <Card>
-        <CardContent className="space-y-4 pt-4">
+      <Card className="shrink-0">
+        <CardContent className="space-y-3 p-3 sm:p-4">
           <div className="grid gap-3 xl:grid-cols-[180px_180px_minmax(260px,1fr)_auto]">
             <label className="space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">เริ่ม</span>
-              <Input type="datetime-local" value={from} onChange={e => { setFrom(e.target.value); setCursor(null) }} />
+              <Input type="datetime-local" value={from} onChange={e => { setFrom(e.target.value); resetListState() }} />
             </label>
             <label className="space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">สิ้นสุด</span>
-              <Input type="datetime-local" value={to} onChange={e => { setTo(e.target.value); setCursor(null) }} />
+              <Input type="datetime-local" value={to} onChange={e => { setTo(e.target.value); resetListState() }} />
             </label>
             <label className="space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">ค้นหา</span>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
-                <Input className="pl-8" value={keyword} onChange={e => { setKeyword(e.target.value); setCursor(null) }} placeholder="ค้นคำถาม, คำตอบ, tool หรือ turn id" />
+                <Input className="pl-8" value={keyword} onChange={e => { setKeyword(e.target.value); resetListState() }} placeholder="ค้นคำถาม, คำตอบ, tool หรือ turn id" />
               </div>
             </label>
             <div className="flex items-end gap-2">
@@ -419,7 +445,7 @@ export default function ConversationAnalysisPage() {
             <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 xl:grid-cols-[repeat(6,minmax(0,1fr))]">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Agent</span>
-                <Select value={agent} onValueChange={v => { setAgent(v || 'all'); setCursor(null) }}>
+                <Select value={agent} onValueChange={v => { setAgent(v || 'all'); resetListState() }}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">ทั้งหมด</SelectItem>
@@ -429,7 +455,7 @@ export default function ConversationAnalysisPage() {
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Channel</span>
-                <Select value={channel} onValueChange={v => { setChannel(v || 'all'); setCursor(null) }}>
+                <Select value={channel} onValueChange={v => { setChannel(v || 'all'); resetListState() }}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">ทั้งหมด</SelectItem>
@@ -441,7 +467,7 @@ export default function ConversationAnalysisPage() {
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Status</span>
-                <Select value={status} onValueChange={v => { setStatus(v || 'all'); setCursor(null) }}>
+                <Select value={status} onValueChange={v => { setStatus(v || 'all'); resetListState() }}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">ทั้งหมด</SelectItem>
@@ -454,7 +480,7 @@ export default function ConversationAnalysisPage() {
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Route</span>
-                <Select value={route} onValueChange={v => { setRoute(v || 'all'); setCursor(null) }}>
+                <Select value={route} onValueChange={v => { setRoute(v || 'all'); resetListState() }}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">ทั้งหมด</SelectItem>
@@ -467,7 +493,7 @@ export default function ConversationAnalysisPage() {
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Issue tag</span>
-                <Select value={issueTag} onValueChange={v => { setIssueTag(v || 'all'); setCursor(null); setTriageTab('all') }}>
+                <Select value={issueTag} onValueChange={v => { setIssueTag(v || 'all'); resetListState(); setTriageTab('all') }}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">ทั้งหมด</SelectItem>
@@ -477,7 +503,7 @@ export default function ConversationAnalysisPage() {
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Review target</span>
-                <Select value={reviewTarget} onValueChange={v => { setReviewTarget(v || 'all'); setCursor(null); setTriageTab('all') }}>
+                <Select value={reviewTarget} onValueChange={v => { setReviewTarget(v || 'all'); resetListState(); setTriageTab('all') }}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">ทั้งหมด</SelectItem>
@@ -486,13 +512,13 @@ export default function ConversationAnalysisPage() {
                 </Select>
               </label>
               <div className="flex flex-wrap items-end gap-2 xl:col-span-6">
-                <Button type="button" variant={hasToolError ? 'default' : 'outline'} onClick={() => { setHasToolError(v => !v); setCursor(null); setTriageTab('all') }}>
+                <Button type="button" variant={hasToolError ? 'default' : 'outline'} onClick={() => { setHasToolError(v => !v); resetListState(); setTriageTab('all') }}>
                   Tool error
                 </Button>
-                <Button type="button" variant={slowOnly ? 'default' : 'outline'} onClick={() => { setSlowOnly(v => !v); setCursor(null); setTriageTab('all') }}>
+                <Button type="button" variant={slowOnly ? 'default' : 'outline'} onClick={() => { setSlowOnly(v => !v); resetListState(); setTriageTab('all') }}>
                   Slow only
                 </Button>
-                <Button type="button" variant={hasMedia ? 'default' : 'outline'} onClick={() => { setHasMedia(v => !v); setCursor(null); setTriageTab('all') }}>
+                <Button type="button" variant={hasMedia ? 'default' : 'outline'} onClick={() => { setHasMedia(v => !v); resetListState(); setTriageTab('all') }}>
                   <ImageIcon className="size-4" />
                   มีรูป
                 </Button>
@@ -533,52 +559,54 @@ export default function ConversationAnalysisPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <StatCard label="Turns" value={String(summary?.count ?? 0)} hint={`${summary?.uniqueUsers ?? 0} users`} />
-        <StatCard label="Flagged" value={String(insightSummary?.issueTurns ?? 0)} hint={`${formatPercent(insightSummary?.issueRate)} issue rate`} />
-        <StatCard label="No result" value={String(insightSummary?.noResultTurns ?? 0)} hint="search no result" />
-        <StatCard label="Slow p95" value={formatMs(insightSummary?.slowP95Ms ?? summary?.p95DurationMs)} hint={`${insightSummary?.slowTurns ?? 0} slow turns`} />
-        <StatCard label="Tool errors" value={String(insightSummary?.toolErrorTurns ?? 0)} hint="MCP/runtime evidence" />
-        <StatCard label="Agents review" value={String(insightSummary?.agentsNeedingReview ?? 0)} hint={`cost ${formatMoney(summary?.totalCost)}`} />
+      <div className="shrink-0 rounded-xl border bg-card p-2">
+        <div className="flex flex-wrap items-stretch gap-2">
+          <MetricPill label="Turns" value={String(summary?.count ?? 0)} hint={`${summary?.uniqueUsers ?? 0} users`} />
+          <MetricPill label="Flagged" value={String(insightSummary?.issueTurns ?? 0)} hint={`${formatPercent(insightSummary?.issueRate)} issue rate`} />
+          <MetricPill label="No result" value={String(insightSummary?.noResultTurns ?? 0)} hint="search no result" />
+          <MetricPill label="Slow p95" value={formatMs(insightSummary?.slowP95Ms ?? summary?.p95DurationMs)} hint={`${insightSummary?.slowTurns ?? 0} slow turns`} />
+          <MetricPill label="Tool errors" value={String(insightSummary?.toolErrorTurns ?? 0)} hint="MCP/runtime evidence" />
+          <MetricPill label="Agents review" value={String(insightSummary?.agentsNeedingReview ?? 0)} hint={`cost ${formatMoney(summary?.totalCost)}`} />
+          <details className="min-w-[260px] flex-1 rounded-lg border bg-background px-3 py-2">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+              <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <Tags className="size-4 text-muted-foreground" />
+                Insight สำหรับปรับ SOUL/MCP
+              </span>
+              <Badge variant="outline">{insights?.topIssueTags.length ?? 0} tags</Badge>
+            </summary>
+            <div className="mt-3 grid gap-3 border-t pt-3 lg:grid-cols-3">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Top issue tags</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {insights?.topIssueTags.length ? insights.topIssueTags.slice(0, 8).map(item => (
+                    <Badge key={item.key} variant={issueVariant(item.key)}>{item.key} · {item.count}</Badge>
+                  )) : <span className="text-sm text-muted-foreground">ยังไม่มี issue ที่ถูก flag</span>}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Top failed keywords</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {insights?.topFailedKeywords.length ? insights.topFailedKeywords.slice(0, 8).map(item => (
+                    <Badge key={item.key} variant="outline" className="max-w-full truncate">{item.key} · {item.count}</Badge>
+                  )) : <span className="text-sm text-muted-foreground">ยังไม่พบ keyword ที่ล้มเหลวซ้ำ</span>}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Review target</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {insights?.reviewTargets.length ? insights.reviewTargets.slice(0, 8).map(item => (
+                    <Badge key={item.key} variant="secondary">{item.key} · {item.count}</Badge>
+                  )) : <span className="text-sm text-muted-foreground">ยังไม่มี target ที่ต้อง review</span>}
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="border-b pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <BarChart3 className="size-4" />
-            Insight สำหรับปรับ SOUL/MCP
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 pt-4 lg:grid-cols-3">
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">Top issue tags</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {insights?.topIssueTags.length ? insights.topIssueTags.slice(0, 8).map(item => (
-                <Badge key={item.key} variant={issueVariant(item.key)}>{item.key} · {item.count}</Badge>
-              )) : <span className="text-sm text-muted-foreground">ยังไม่มี issue ที่ถูก flag</span>}
-            </div>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">Top failed keywords</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {insights?.topFailedKeywords.length ? insights.topFailedKeywords.slice(0, 8).map(item => (
-                <Badge key={item.key} variant="outline" className="max-w-full truncate">{item.key} · {item.count}</Badge>
-              )) : <span className="text-sm text-muted-foreground">ยังไม่พบ keyword ที่ล้มเหลวซ้ำ</span>}
-            </div>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">Review target</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {insights?.reviewTargets.length ? insights.reviewTargets.slice(0, 8).map(item => (
-                <Badge key={item.key} variant="secondary">{item.key} · {item.count}</Badge>
-              )) : <span className="text-sm text-muted-foreground">ยังไม่มี target ที่ต้อง review</span>}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid min-h-[620px] max-h-[calc(100vh-320px)] items-stretch overflow-hidden rounded-xl border bg-card xl:grid-cols-[minmax(520px,0.42fr)_minmax(0,1fr)]">
-        <section className="flex min-h-[420px] flex-col border-b xl:min-h-0 xl:border-b-0 xl:border-r">
+      <div className="grid min-h-[720px] flex-1 overflow-hidden rounded-xl border bg-card xl:min-h-0 xl:grid-cols-[minmax(520px,0.42fr)_minmax(0,1fr)]">
+        <section className="flex min-h-[420px] flex-col overflow-hidden border-b xl:min-h-0 xl:border-b-0 xl:border-r">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <div>
               <p className="text-sm font-medium">Conversation turns</p>
@@ -593,14 +621,15 @@ export default function ConversationAnalysisPage() {
               </Badge>
             ) : null}
           </div>
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            {isLoading ? <TurnListSkeleton /> : null}
             {!isLoading && data?.turns.length === 0 ? (
               <div className="p-5 text-sm text-muted-foreground">
                 <p className="font-medium text-foreground">ยังไม่มีข้อมูลย้อนหลังในช่วงนี้</p>
                 <p className="mt-1">ลองขยายช่วงวันที่ หรือกด Backfill 7 วันเพื่อนำ log ที่ยังมีอยู่เข้า database</p>
               </div>
             ) : null}
-            {groupedTurns.map(group => (
+            {!isLoading && groupedTurns.map(group => (
               <div key={group.day}>
                 <div className="sticky top-0 z-10 border-b bg-muted/95 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
                   {group.day}
@@ -610,7 +639,7 @@ export default function ConversationAnalysisPage() {
                 ))}
               </div>
             ))}
-            {data?.hasMore ? (
+            {!isLoading && data?.hasMore ? (
               <div className="p-3">
                 <Button className="w-full" variant="outline" onClick={() => setCursor(data.nextCursor)}>
                   โหลดหน้าถัดไป
@@ -620,14 +649,14 @@ export default function ConversationAnalysisPage() {
           </div>
         </section>
 
-        <section className="min-w-0 overflow-auto">
+        <section className="min-h-[520px] min-w-0 overflow-y-auto overscroll-contain xl:min-h-0">
           {!selectedTurn ? (
             <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
               เลือก conversation เพื่อดู transcript
             </div>
           ) : (
             <div className="space-y-4 p-4">
-              <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="sticky top-0 z-20 -mx-4 -mt-4 flex flex-col gap-3 border-b bg-card/95 px-4 py-3 backdrop-blur lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={statusVariant(selectedTurn.status)}>{selectedTurn.status}</Badge>
