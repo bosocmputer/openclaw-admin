@@ -1403,6 +1403,15 @@ export async function markTelegramRegressionPassed(note = 'dashboard-confirmed')
   return data
 }
 
+export async function acknowledgeTelegramBindingIntent(body: {
+  accountId: string
+  agentId: string
+  note?: string
+}): Promise<{ ok: boolean; acknowledgement?: { accountId: string; agentId: string; note?: string; acknowledgedAt?: string } }> {
+  const { data } = await api.post('/api/system/telegram-binding-intent/ack', body)
+  return data
+}
+
 // ─── System Health ───────────────────────────────────────────────────────────
 
 export type SystemCheckStatus = 'ok' | 'warn' | 'fail' | 'info'
@@ -1422,6 +1431,16 @@ export interface SystemHealthCheck {
     summary?: string
     ref?: string
     capability?: string | null
+    accountId?: string
+    agentId?: string
+    key?: string
+  }>
+  accepted?: Array<{
+    accountId?: string
+    agentId?: string
+    key?: string
+    acknowledgedAt?: string
+    note?: string
   }>
 }
 

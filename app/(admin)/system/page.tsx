@@ -17,6 +17,7 @@ import {
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  SlidersHorizontal,
   Wrench,
   XCircle,
 } from 'lucide-react'
@@ -42,6 +43,7 @@ import {
   type SystemCheckStatus,
   type SystemHealth,
   type SystemHealthCheck,
+  acknowledgeTelegramBindingIntent,
 } from '@/lib/api'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
@@ -123,7 +125,7 @@ interface RuntimeProgress {
   cancelled?: boolean
 }
 
-type ConfirmKind = 'restart-gateway' | 'clean-sessions' | 'telegram-regression' | 'apply-soul' | 'doctor-fix'
+type ConfirmKind = 'restart-gateway' | 'clean-sessions' | 'telegram-regression' | 'telegram-binding-intent' | 'apply-soul' | 'doctor-fix'
 
 interface ConfirmRequest {
   kind: ConfirmKind
@@ -131,6 +133,7 @@ interface ConfirmRequest {
   description: string
   confirmLabel: string
   agentId?: string
+  accountId?: string
   destructive?: boolean
 }
 
@@ -215,6 +218,12 @@ function actionSummary(check: SystemHealthCheck) {
     return {
       cause: 'ยังไม่มี Telegram latency marker ใน log window ล่าสุด',
       impact: 'Dashboard อาจยังไม่สะท้อน latency ของข้อความ Telegram ล่าสุด',
+    }
+  }
+  if (check.id === 'telegram.binding.intent') {
+    return {
+      cause: 'ชื่อ Telegram bot ดูเหมือน bot เฉพาะงาน แต่ถูก route ไป agent กว้าง เช่น admin/general',
+      impact: 'ถ้าตั้งใจให้ทดลองถามกว้าง ๆ สามารถยืนยัน decision นี้ได้ ถ้าไม่ตั้งใจควรเปลี่ยน route ไป agent เฉพาะงาน',
     }
   }
   if (check.id === 'gateway.process') {
@@ -826,6 +835,19 @@ export default function SystemPage() {
           summary: 'บันทึกว่า Telegram regression test ผ่านแล้ว',
           durationMs: performance.now() - startedAt,
         })
+      } else if (request.kind === 'telegram-binding-intent' && request.accountId && request.agentId) {
+        await acknowledgeTelegramBindingIntent({
+          accountId: request.accountId,
+          agentId: request.agentId,
+          note: 'system-confirmed-intentional-broad-agent-route',
+        })
+        addActionResult({
+          id: `telegram-binding-intent:${request.accountId}:${request.agentId}`,
+          label: 'ยืนยัน Telegram route',
+          status: 'ok',
+          summary: `บันทึกว่า ${request.accountId} -> ${request.agentId} เป็น route ที่ตั้งใจแล้ว`,
+          durationMs: performance.now() - startedAt,
+        })
       } else if (request.kind === 'doctor-fix') {
         await runDoctorFix()
         addActionResult({
@@ -937,6 +959,34 @@ export default function SystemPage() {
           </Button>
         )
       }
+    } else if (check.id === 'telegram.binding.intent') {
+      const bindingWarnings = (check.warnings || []).filter(item => item.accountId && item.agentId)
+      for (const warning of bindingWarnings) {
+        actions.push(
+          <Button
+            key={`ack-binding:${warning.accountId}:${warning.agentId}`}
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirmRequest({
+              kind: 'telegram-binding-intent',
+              accountId: warning.accountId,
+              agentId: warning.agentId,
+              title: 'ยืนยัน Telegram route นี้ตั้งใจแล้ว?',
+              description: `${warning.accountId} ถูก route ไป agent ${warning.agentId}. ใช้ปุ่มนี้เฉพาะเมื่อคุณตั้งใจให้ bot นี้ตอบแบบ agent กว้าง เช่นช่วงทดลองลูกค้า`,
+              confirmLabel: 'ยืนยัน route นี้',
+            })}
+            disabled={disabled}
+          >
+            <SlidersHorizontal />
+            ยืนยัน {warning.accountId} → {warning.agentId}
+          </Button>
+        )
+      }
+      if (!bindingWarnings.length && check.accepted?.length) {
+        actions.push(<Badge key="binding-accepted" variant="secondary">ยืนยัน route แล้ว</Badge>)
+      }
+      pushLink('/telegram', 'Open Telegram')
     } else if ((check.id === 'gateway.process' && mustFix) || (mustFix && check.summary.toLowerCase().includes('gateway'))) {
       actions.push(
         <Button
