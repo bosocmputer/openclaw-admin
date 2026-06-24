@@ -2,9 +2,27 @@
 
 > สำหรับทีมติดตั้งระบบที่ร้านใหม่ — ใช้เวลาประมาณ 30–60 นาที
 >
-> อัปเดตล่าสุด: ใช้ **OpenClaw ERP Runtime Artifact** เป็น runtime หลักของ gateway เพื่อให้ behavior เหมือน dev server ทุกเครื่อง
+> อัปเดตล่าสุด: ใช้ **OpenClaw ERP Runtime Artifact** เป็น runtime หลักของ gateway เพื่อให้ behavior เหมือน dev server ทุกเครื่อง และรองรับ LINE image/text burst coalescing
 
 ---
+
+## สถานะ Production Release ล่าสุด
+
+| ส่วน | Version / commit | สถานะ |
+| ---- | ---------------- | ------ |
+| OpenClaw ERP runtime | `OpenClaw 2026.6.8 (1c81b77)` | ใช้งานจริงบน dev แล้ว |
+| Runtime artifact | `2026.6.8-erp-20260624-line-burst-coalescing` | ใช้สำหรับ server ลูกค้า |
+| Runtime SHA256 | `1f4ca1e96d6ea84b7e26da1091f323a50c39e023c18c1e36a100966d55e291e7` | ต้องตรวจทุกครั้งก่อนติดตั้ง |
+| openclaw-api | `main` หลัง commit `645f116` | parse LINE burst telemetry และ Conversation Analysis tags |
+| openclaw-admin | `main` หลัง commit `bbfe324` | `/monitor` แสดง `LINE grouped` และ docs URL ล่าสุด |
+
+พฤติกรรมสำคัญใน release นี้:
+
+- LINE: ถ้า user ส่งรูป แล้วพิมพ์ข้อความตามมาภายในช่วงสั้น ๆ runtime จะรวมเป็น turn เดียวแบบ generic ไม่ hardcode คำถามหรือ keyword ธุรกิจ
+- LINE: ข้อความธรรมดาเดี่ยว ๆ ยัง dispatch ทันที ไม่ถูก delay
+- LINE: `/reset`, `/new` และ command ควบคุมจะ bypass/cancel burst เพื่อไม่ให้ session ค้าง
+- Telegram: behavior เดิมยังคงเดิม ต้องทดสอบ regression หลังเปลี่ยน runtime
+- Rollback เร็วสำหรับ LINE coalescing: ตั้ง `OPENCLAW_LINE_COALESCING=0` แล้ว restart gateway
 
 ## ข้อมูลที่ต้องเตรียมก่อนเริ่ม
 
@@ -220,12 +238,14 @@ pm2 save
 
 ```bash
 ps -ef | grep -E "openclaw-runtime-2026.6.8-erp|openclaw.*gateway" | grep -v grep
+node /root/openclaw-runtime-2026.6.8-erp/dist/index.js --version
 ```
 
 ต้องเห็นประมาณนี้:
 
 ```text
 node /root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789
+OpenClaw 2026.6.8 (1c81b77)
 ```
 
 > **สำคัญ**: ห้าม start gateway ด้วย `openclaw gateway run` ใน production เพราะจะกลับไปใช้ official runtime ที่อาจไม่เหมือน dev
@@ -587,6 +607,15 @@ https://<tunnel-url>/line/webhook/<accountId>
 1. [LINE Developers Console](https://developers.line.biz/console/) → เลือก Channel
 2. Messaging API → Webhook settings → ใส่ URL → **Verify** → ต้องได้ Success
 3. เปิด **Use webhook**
+
+**ทดสอบ LINE หลังตั้งค่า:**
+
+1. ส่ง `สวัสดี` ต้องตอบกลับปกติ
+2. ส่งรูป แล้วพิมพ์ข้อความตามมาเร็ว ๆ เช่น `มีสินค้านี้ไหม` หรือคำถามใดก็ได้
+3. เปิด `/monitor` ต้องเห็น event/badge ประมาณ `LINE grouped`
+4. ถ้าไม่มี `LINE grouped` ให้ตรวจว่า runtime เป็น `OpenClaw 2026.6.8 (1c81b77)` และ API/Admin เป็น `main` ล่าสุด
+
+> LINE loading animation แสดงบน LINE mobile เป็นหลัก บน desktop หรือบาง client อาจไม่เห็น แม้ runtime จะเรียก loading API แล้ว
 
 > **สำคัญ — ป้องกัน webchat ตอบซ้ำใน LINE**:
 > Session key ของ webchat มีรูปแบบ `hook:webchat:uid:{username}` — prefix `uid:` ป้องกัน
@@ -993,7 +1022,28 @@ docker compose ps
 ขอเช็คยอดคงเหลือ โช๊ค jazz
 ```
 
-5. ทำหัวข้อ **11.1 Post-deploy Health Gate** เพื่อบันทึก regression, runtime-test model และยืนยันว่า Dashboard/System Check เป็น `health = ok`
+5. Smoke test LINE:
+
+```text
+สวัสดี
+ส่งรูป 1 รูป
+พิมพ์ข้อความตามมาเร็ว ๆ 1-3 ข้อความ
+```
+
+6. เปิด `/monitor` ต้องเห็น `LINE grouped` สำหรับเคสรูป+ข้อความเร็ว ๆ
+7. ทำหัวข้อ **11.1 Post-deploy Health Gate** เพื่อบันทึก regression, runtime-test model และยืนยันว่า Dashboard/System Check เป็น `health = ok`
+
+ถ้า LINE coalescing ทำให้ behavior แปลก ให้ rollback เฉพาะ feature ก่อน:
+
+```bash
+grep -q '^export OPENCLAW_LINE_COALESCING=' /root/start-openclaw-gateway.sh \
+  || sed -i '/export PATH=/a export OPENCLAW_LINE_COALESCING=0' /root/start-openclaw-gateway.sh
+
+pm2 restart openclaw-gateway --update-env
+pm2 save
+```
+
+เมื่อต้องการเปิดกลับ ให้ลบบรรทัด `OPENCLAW_LINE_COALESCING=0` ออกจาก `/root/start-openclaw-gateway.sh` แล้ว restart gateway ใหม่
 
 ---
 
