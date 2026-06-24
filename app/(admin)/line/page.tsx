@@ -322,8 +322,8 @@ function ChannelApplyResultPanel({ result }: { result: ChannelBindingApplyResult
       </div>
       {result.ok && (
         <div className="mt-3 rounded-md bg-white/70 p-2 text-xs text-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-300">
-          <p className="font-medium">Next test</p>
-          <p>ส่ง /reset แล้วถาม: คุณคือ agent อะไร มี tools อะไรบ้าง</p>
+          <p className="font-medium">พร้อมใช้ทันที</p>
+          <p>ข้อความถัดไปใน LINE จะใช้ agent ใหม่แล้ว ถ้าต้องการตรวจเองให้ถาม: คุณคือ agent อะไร มี tools อะไรบ้าง</p>
         </div>
       )}
     </div>
