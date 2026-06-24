@@ -940,6 +940,9 @@ export interface MonitorEvent {
   modelSource?: 'actual' | 'configured' | string | null
   finishReason?: string | null
   toolName?: string
+  toolNamespace?: string | null
+  toolBaseName?: string | null
+  toolDisplayName?: string | null
   toolInput?: string
   toolResult?: string
   cleanKeyword?: string

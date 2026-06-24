@@ -71,6 +71,9 @@ interface FlatEvent {
   modelSource?: 'actual' | 'configured' | string | null
   finishReason?: string | null
   toolName?: string
+  toolNamespace?: string | null
+  toolBaseName?: string | null
+  toolDisplayName?: string | null
   toolInput?: string
   toolResult?: string
   cleanKeyword?: string
@@ -150,10 +153,14 @@ function durationColor(sec: number) {
 }
 
 function isNoiseEvent(e: FlatEvent) {
-  const text = `${e.type} ${e.text} ${e.toolName ?? ''}`.toLowerCase()
+  const text = `${e.type} ${e.text} ${e.toolName ?? ''} ${e.toolDisplayName ?? ''}`.toLowerCase()
   return text.includes('delivery-mirror') ||
     text.includes('tool-policy removed') ||
     text.includes('allowlist contains unknown entries')
+}
+
+function displayToolName(e: Pick<FlatEvent, 'toolDisplayName' | 'toolBaseName' | 'toolName'>) {
+  return e.toolDisplayName || e.toolBaseName || e.toolName || ''
 }
 
 function typeBadge(type: string) {
@@ -293,6 +300,9 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             modelSource: (e as MonitorEvent).modelSource,
             finishReason: (e as MonitorEvent).finishReason,
             toolName: (e as MonitorEvent).toolName,
+            toolNamespace: (e as MonitorEvent).toolNamespace,
+            toolBaseName: (e as MonitorEvent).toolBaseName,
+            toolDisplayName: (e as MonitorEvent).toolDisplayName,
             toolInput: (e as MonitorEvent).toolInput,
             toolResult: (e as MonitorEvent).toolResult,
             cleanKeyword: (e as MonitorEvent).cleanKeyword,
@@ -493,7 +503,12 @@ export default function MonitorPage() {
     }
     if (q) {
       const mediaText = (e.media ?? []).map(media => `${media.fileName ?? ''} ${media.caption ?? ''} ${media.mimeType ?? ''}`).join(' ')
-      return e.text.toLowerCase().includes(q) || e.agentId.includes(q) || e.user.includes(q) || mediaText.toLowerCase().includes(q)
+      const toolText = [e.toolName, e.toolDisplayName, e.toolBaseName, e.toolNamespace].filter(Boolean).join(' ')
+      return e.text.toLowerCase().includes(q)
+        || e.agentId.includes(q)
+        || e.user.includes(q)
+        || mediaText.toLowerCase().includes(q)
+        || toolText.toLowerCase().includes(q)
     }
     return true
   })
@@ -740,6 +755,11 @@ export default function MonitorPage() {
           filtered.map((e, i) => {
             const badge = typeBadge(e.type)
             const isExp = expandedIdxSet.has(i)
+            const toolDisplayName = displayToolName(e)
+            const rawToolName = e.toolName || ''
+            const toolTextRemainder = rawToolName && e.text.startsWith(rawToolName)
+              ? e.text.slice(rawToolName.length)
+              : e.text
             let rowCls = 'hover:bg-zinc-900'
             if (e.isLive)                   rowCls = 'row-live'
             else if (e.type === 'thinking') rowCls = isExp ? 'bg-yellow-950/30' : 'bg-yellow-950/15 hover:bg-yellow-950/25'
@@ -758,12 +778,19 @@ export default function MonitorPage() {
               if (colonIdx !== -1) {
                 try {
                   const parsed = JSON.parse(e.text.slice(colonIdx + 2))
-                  expandText = e.text.slice(0, colonIdx) + ':\n' + JSON.stringify(parsed, null, 2)
+                  expandText = `${toolDisplayName || e.text.slice(0, colonIdx)}:\n${JSON.stringify(parsed, null, 2)}`
                 } catch { /* keep original */ }
+              } else if (toolDisplayName && rawToolName && e.text.startsWith(rawToolName)) {
+                expandText = `${toolDisplayName}${toolTextRemainder}`
               }
             }
             const toolMetaText = e.type === 'tool'
               ? [
+                  `Agent ที่ตอบ: ${e.agentId}`,
+                  toolDisplayName ? `MCP tool: ${toolDisplayName}` : null,
+                  e.toolNamespace ? `Tool namespace: ${e.toolNamespace}` : null,
+                  e.toolName ? `Raw tool name: ${e.toolName}` : null,
+                  e.toolNamespace && e.toolNamespace !== e.agentId ? 'หมายเหตุ: Tool namespace เป็นชื่อ MCP/server namespace ไม่ใช่ agent ที่รับข้อความ' : null,
                   e.route ? `route: ${e.route}` : null,
                   e.intent ? `intent: ${e.intent}` : null,
                   e.cleanKeyword ? `cleanKeyword: ${e.cleanKeyword}` : null,
@@ -825,7 +852,17 @@ export default function MonitorPage() {
                   <span className={`flex-1 text-zinc-300 min-w-0 ${isExp ? '' : 'truncate'}`} title={isExp ? undefined : e.text}>
                     {isExp ? null : (
                       e.type === 'tool' && e.toolName
-                        ? <><span className="text-purple-300 font-medium">{e.toolName}</span>{e.text && e.text !== 'exec' ? <span className="text-zinc-500 ml-1 text-xs">{e.text}</span> : null}</>
+                        ? <>
+                            <span className="text-purple-300 font-medium">{toolDisplayName}</span>
+                            {e.toolNamespace ? (
+                              <span className="ml-1 rounded border border-purple-900/70 px-1.5 py-0.5 text-[11px] text-purple-200">
+                                namespace: {e.toolNamespace}
+                              </span>
+                            ) : null}
+                            {toolTextRemainder && toolTextRemainder !== 'exec' ? (
+                              <span className="text-zinc-500 ml-1 text-xs">{toolTextRemainder}</span>
+                            ) : null}
+                          </>
                         : e.text
                     )}
                     {e.isLive && <span className="thinking-dots ml-0.5 text-yellow-400" />}
