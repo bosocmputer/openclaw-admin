@@ -90,8 +90,12 @@ interface FlatEvent {
   durationMs?: number | null
   replyTokenAgeMs?: number | null
   fallbackReason?: string | null
+  flushReason?: string | null
   loadingSeconds?: number | null
   eventCount?: number | null
+  mediaCount?: number | null
+  textCount?: number | null
+  waitMs?: number | null
 }
 
 function eventTimeMs(e: Pick<FlatEvent, 'timeMs' | 'timestamp' | 'ts'>): number | null {
@@ -163,6 +167,7 @@ function typeBadge(type: string) {
     case 'line_delivery': return { icon: 'LINE', cls: 'text-emerald-400' }
     case 'line_loading':  return { icon: '⏳', cls: 'text-cyan-300' }
     case 'line_fallback': return { icon: '↪', cls: 'text-amber-300' }
+    case 'line_burst':    return { icon: 'LINE+', cls: 'text-sky-300' }
     default:         return { icon: '·',  cls: 'text-zinc-600' }
   }
 }
@@ -303,8 +308,12 @@ function buildGroups(data: MonitorData): SessionGroup[] {
             durationMs: (e as MonitorEvent).durationMs,
             replyTokenAgeMs: (e as MonitorEvent).replyTokenAgeMs,
             fallbackReason: (e as MonitorEvent).fallbackReason,
+            flushReason: (e as MonitorEvent).flushReason,
             loadingSeconds: (e as MonitorEvent).loadingSeconds,
             eventCount: (e as MonitorEvent).eventCount,
+            mediaCount: (e as MonitorEvent).mediaCount,
+            textCount: (e as MonitorEvent).textCount,
+            waitMs: (e as MonitorEvent).waitMs,
             turnTotalCost: e.type === 'reply' && turnModelCalls > 0 ? turnCost : undefined,
             turnModelCalls: e.type === 'reply' && turnModelCalls > 0 ? turnModelCalls : undefined,
             turnInputTokens: e.type === 'reply' && turnModelCalls > 0 ? turnInputTokens : undefined,
@@ -347,8 +356,12 @@ function buildGroups(data: MonitorData): SessionGroup[] {
       durationMs: event.durationMs,
       replyTokenAgeMs: event.replyTokenAgeMs,
       fallbackReason: event.fallbackReason,
+      flushReason: event.flushReason,
       loadingSeconds: event.loadingSeconds,
       eventCount: event.eventCount,
+      mediaCount: event.mediaCount,
+      textCount: event.textCount,
+      waitMs: event.waitMs,
     }))
 
   if (lineTelemetryEvents.length > 0) {
@@ -736,6 +749,7 @@ export default function MonitorPage() {
             else if (e.type === 'line_delivery') rowCls = isExp ? 'bg-emerald-950/25' : 'bg-emerald-950/10 hover:bg-emerald-950/20'
             else if (e.type === 'line_loading') rowCls = isExp ? 'bg-cyan-950/25' : 'bg-cyan-950/10 hover:bg-cyan-950/20'
             else if (e.type === 'line_fallback') rowCls = isExp ? 'bg-amber-950/35' : 'bg-amber-950/20 hover:bg-amber-950/30'
+            else if (e.type === 'line_burst') rowCls = isExp ? 'bg-sky-950/25' : 'bg-sky-950/10 hover:bg-sky-950/20'
             else if (isExp)                 rowCls = 'bg-zinc-800'
 
             let expandText = e.text
@@ -774,10 +788,14 @@ export default function MonitorPage() {
                   e.chatType ? `Chat type: ${e.chatType}` : null,
                   e.messageCount != null ? `Message objects: ${e.messageCount}` : null,
                   e.eventCount != null ? `Webhook events: ${e.eventCount}` : null,
+                  e.mediaCount != null ? `Media events: ${e.mediaCount}` : null,
+                  e.textCount != null ? `Text events: ${e.textCount}` : null,
                   e.loadingSeconds != null ? `Loading seconds: ${e.loadingSeconds}` : null,
+                  e.waitMs != null ? `Grouped wait: ${e.waitMs}ms` : null,
                   e.durationMs != null ? `Duration: ${e.durationMs}ms` : null,
                   e.replyTokenAgeMs != null ? `Reply token age: ${e.replyTokenAgeMs}ms` : null,
                   e.fallbackReason ? `Fallback reason: ${e.fallbackReason}` : null,
+                  e.flushReason ? `Flush reason: ${e.flushReason}` : null,
                   e.marker ? `Marker: ${e.marker}` : null,
                 ].filter(Boolean).join('\n')
               : ''
@@ -818,9 +836,9 @@ export default function MonitorPage() {
                       รูป {e.media.length}
                     </span>
                   ) : null}
-                  {e.type.startsWith('line_') && e.method ? (
-                    <span className={`ml-1 hidden shrink-0 rounded border px-1.5 py-0.5 text-[11px] sm:inline ${e.type === 'line_fallback' ? 'border-amber-800 text-amber-300' : e.method === 'loading' ? 'border-cyan-800 text-cyan-300' : 'border-emerald-800 text-emerald-300'}`}>
-                      LINE {e.method}{e.type === 'line_fallback' ? ' fallback' : ''}
+                  {e.type.startsWith('line_') && (e.method || e.type === 'line_burst') ? (
+                    <span className={`ml-1 hidden shrink-0 rounded border px-1.5 py-0.5 text-[11px] sm:inline ${e.type === 'line_fallback' ? 'border-amber-800 text-amber-300' : e.type === 'line_burst' ? 'border-sky-800 text-sky-300' : e.method === 'loading' ? 'border-cyan-800 text-cyan-300' : 'border-emerald-800 text-emerald-300'}`}>
+                      {e.type === 'line_burst' ? `LINE grouped${e.eventCount ? ` ${e.eventCount}` : ''}` : `LINE ${e.method}${e.type === 'line_fallback' ? ' fallback' : ''}`}
                     </span>
                   ) : null}
                   {e.model && e.type !== 'message' && (

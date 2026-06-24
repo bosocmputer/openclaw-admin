@@ -922,8 +922,12 @@ export interface MonitorEvent {
   durationMs?: number | null
   replyTokenAgeMs?: number | null
   fallbackReason?: string | null
+  flushReason?: string | null
   loadingSeconds?: number | null
   eventCount?: number | null
+  mediaCount?: number | null
+  textCount?: number | null
+  waitMs?: number | null
 }
 
 export interface MonitorMedia {
