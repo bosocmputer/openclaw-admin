@@ -5,6 +5,8 @@ import {
   getLineConfig, getLineBotInfo, getLineBindings, getLinePending, getAgents,
   addLineAccount, deleteLineAccount, updateLineAccount, setLineBinding, approveLinePairing, restartGateway,
   getLineDeliveryStats,
+  applyChannelBinding,
+  type ChannelBindingApplyResult,
   type LineBotInfo,
   type LineDeliveryStats,
 } from '@/lib/api'
@@ -25,24 +27,34 @@ function AccountCard({
   boundAgentId,
   webhookPath,
   agents,
-  onBindAgent,
   bindingSaving,
   onEdit,
   editing,
   onDelete,
   deleting,
+  selectedAgentId,
+  pendingRestart,
+  onSelectAgent,
+  onSaveApply,
+  onSaveOnly,
+  onCancelBindingChange,
 }: {
   accountId: string
   botInfo: LineBotInfo | null
   boundAgentId: string
   webhookPath?: string
   agents: { id: string }[]
-  onBindAgent: (agentId: string) => void
   bindingSaving: boolean
   onEdit: () => void
   editing: boolean
   onDelete: () => void
   deleting: boolean
+  selectedAgentId: string
+  pendingRestart: boolean
+  onSelectAgent: (agentId: string) => void
+  onSaveApply: () => void
+  onSaveOnly: () => void
+  onCancelBindingChange: () => void
 }) {
   const qrUrl = botInfo?.basicId
     ? `https://qr-official.line.me/gs/M_${botInfo.basicId}_GW.png`
@@ -50,6 +62,7 @@ function AccountCard({
   const addFriendUrl = botInfo?.basicId
     ? `https://line.me/R/ti/p/${botInfo.basicId}`
     : null
+  const hasBindingChange = selectedAgentId !== (boundAgentId || '')
 
   return (
     <Card>
@@ -67,6 +80,16 @@ function AccountCard({
           )}
           {boundAgentId && (
             <Badge variant="secondary" className="text-xs">→ agent: {boundAgentId}</Badge>
+          )}
+          {hasBindingChange && (
+            <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-200">
+              รอ apply: {selectedAgentId || 'ไม่ผูก agent'}
+            </Badge>
+          )}
+          {!hasBindingChange && pendingRestart && (
+            <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-200">
+              รอ Restart
+            </Badge>
           )}
           <div className="ml-auto flex gap-2">
             <Button variant="outline" size="sm" className="text-xs" disabled={editing} onClick={onEdit}>
@@ -91,8 +114,8 @@ function AccountCard({
           <p className="text-xs text-zinc-500">ข้อความ DM จะถูก route ไปยัง agent ที่เลือก</p>
           <div className="flex gap-2 items-center">
             <Select
-              value={boundAgentId || '__none__'}
-              onValueChange={v => onBindAgent(v === '__none__' ? '' : (v ?? ''))}
+              value={selectedAgentId || '__none__'}
+              onValueChange={v => onSelectAgent(v === '__none__' ? '' : (v ?? ''))}
             >
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="ไม่ได้ผูก agent" />
@@ -106,6 +129,37 @@ function AccountCard({
             </Select>
             {bindingSaving && <span className="text-xs text-zinc-400">Saving...</span>}
           </div>
+          {hasBindingChange && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+                  เปลี่ยน Agent แล้ว ต้อง Apply เพื่อให้ runtime ใช้ route ใหม่
+                </p>
+                <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-300">
+                  Save + Apply จะ reset session ของ LINE นี้ และ restart gateway ให้พร้อมทดสอบ
+                </p>
+              </div>
+              <Button size="sm" disabled={bindingSaving || !selectedAgentId} onClick={onSaveApply}>
+                Save + Apply
+              </Button>
+              <Button size="sm" variant="outline" disabled={bindingSaving || !selectedAgentId} onClick={onSaveOnly}>
+                Save only
+              </Button>
+              <Button size="sm" variant="ghost" disabled={bindingSaving} onClick={onCancelBindingChange}>
+                Cancel
+              </Button>
+            </div>
+          )}
+          {!hasBindingChange && pendingRestart && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+              <p className="min-w-0 flex-1 text-xs text-amber-800 dark:text-amber-200">
+                Binding ถูก save แล้ว แต่ยังไม่ได้ apply กับ gateway
+              </p>
+              <Button size="sm" disabled={bindingSaving || !selectedAgentId} onClick={onSaveApply}>
+                Apply now
+              </Button>
+            </div>
+          )}
           {!boundAgentId && (
             <p className="text-xs text-amber-600 dark:text-amber-400">⚠ ยังไม่ได้ผูก Agent</p>
           )}
@@ -254,6 +308,28 @@ function DeliveryQuotaPanel({ accountIds }: { accountIds: string[] }) {
   )
 }
 
+function ChannelApplyResultPanel({ result }: { result: ChannelBindingApplyResult }) {
+  const resetTotal = (result.reset || []).reduce((sum, item) => sum + (item.removed || 0), 0)
+  return (
+    <div className={`rounded-lg border p-3 text-sm ${result.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100' : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100'}`}>
+      <p className="font-medium">{result.ok ? 'พร้อมทดสอบแล้ว' : 'Apply สำเร็จบางส่วน'}</p>
+      <p className="mt-1">{result.safeMessage || result.error || 'No detail'}</p>
+      <div className="mt-2 grid gap-1 text-xs">
+        <span>Agent: {result.oldAgentId || '-'} → {result.newAgentId || '-'}</span>
+        <span>Reset sessions: {resetTotal} session(s)</span>
+        <span>Restart: {result.restart?.ok === false ? 'failed' : result.restart ? 'ok' : 'skipped'}</span>
+        {typeof result.durationMs === 'number' && <span>Duration: {result.durationMs}ms</span>}
+      </div>
+      {result.ok && (
+        <div className="mt-3 rounded-md bg-white/70 p-2 text-xs text-zinc-700 dark:bg-zinc-950/40 dark:text-zinc-300">
+          <p className="font-medium">Next test</p>
+          <p>ส่ง /reset แล้วถาม: คุณคือ agent อะไร มี tools อะไรบ้าง</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function LinePage() {
   const qc = useQueryClient()
   const [newAccountId, setNewAccountId] = useState('')
@@ -269,6 +345,11 @@ export default function LinePage() {
   const [editWebhookPath, setEditWebhookPath] = useState('')
   const [showEditToken, setShowEditToken] = useState(false)
   const [showEditSecret, setShowEditSecret] = useState(false)
+  const [draftBindings, setDraftBindings] = useState<Record<string, string>>({})
+  const [savedOnlyBindings, setSavedOnlyBindings] = useState<Record<string, boolean>>({})
+  const [applyDialog, setApplyDialog] = useState<{ accountId: string; oldAgentId: string | null; newAgentId: string } | null>(null)
+  const [applyResetSessions, setApplyResetSessions] = useState(true)
+  const [applyResult, setApplyResult] = useState<ChannelBindingApplyResult | null>(null)
 
   const { data: lineConfig, isLoading } = useQuery({ queryKey: ['line-config'], queryFn: getLineConfig })
   const { data: botInfoMap = {} } = useQuery({
@@ -342,11 +423,44 @@ export default function LinePage() {
   const bindMutation = useMutation({
     mutationFn: ({ accountId, agentId }: { accountId: string; agentId: string }) =>
       setLineBinding(accountId, agentId),
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['line-bindings'] })
-      toast.success('Agent binding saved')
+      setDraftBindings(prev => {
+        const next = { ...prev }
+        delete next[vars.accountId]
+        return next
+      })
+      setSavedOnlyBindings(prev => ({ ...prev, [vars.accountId]: true }))
+      toast.success('Agent binding saved — restart required')
     },
     onError: () => toast.error('Failed to save binding'),
+  })
+
+  const applyBindingMutation = useMutation({
+    mutationFn: ({ accountId, agentId, resetSessions }: { accountId: string; agentId: string; resetSessions: boolean }) =>
+      applyChannelBinding({ channel: 'line', accountId, agentId, resetSessions, restartGateway: true }),
+    onSuccess: result => {
+      setApplyResult(result)
+      if (result.accountId) {
+        setDraftBindings(prev => {
+          const next = { ...prev }
+          delete next[result.accountId!]
+          return next
+        })
+        setSavedOnlyBindings(prev => {
+          const next = { ...prev }
+          delete next[result.accountId!]
+          return next
+        })
+      }
+      qc.invalidateQueries({ queryKey: ['line-bindings'] })
+      toast.success('Agent binding applied')
+    },
+    onError: (e: unknown) => {
+      const data = (e as { response?: { data?: ChannelBindingApplyResult } })?.response?.data
+      if (data) setApplyResult(data)
+      toast.error(data?.safeMessage || 'Failed to apply binding')
+    },
   })
 
   const updateMutation = useMutation({
@@ -378,6 +492,16 @@ export default function LinePage() {
   const addIdError = newAccountId.trim() && accountIds.includes(newAccountId.trim())
     ? `Account ID "${newAccountId.trim()}" มีอยู่แล้ว`
     : ''
+
+  function openApplyBinding(accountId: string, newAgentId: string, oldAgentId: string | null) {
+    if (!newAgentId) {
+      toast.error('เลือก Agent ก่อน Apply')
+      return
+    }
+    setApplyDialog({ accountId, oldAgentId, newAgentId })
+    setApplyResetSessions(true)
+    setApplyResult(null)
+  }
 
   if (isLoading) return <p className="text-sm text-zinc-400">Loading...</p>
 
@@ -465,27 +589,40 @@ export default function LinePage() {
 
       {/* Account cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {accountIds.map(id => (
-          <AccountCard
-            key={id}
-            accountId={id}
-            botInfo={botInfoMap[id] ?? null}
-            boundAgentId={bindings.find(b => b.accountId === id)?.agentId ?? ''}
-            webhookPath={webhookPaths[id]}
-            agents={agents}
-            onBindAgent={agentId => bindMutation.mutate({ accountId: id, agentId })}
-            bindingSaving={bindMutation.isPending}
-            onEdit={() => {
-              setEditToken('')
-              setEditSecret('')
-              setEditWebhookPath(webhookPaths[id] ?? '')
-              setEditDialog(id)
-            }}
-            editing={updateMutation.isPending && editDialog === id}
-            onDelete={() => setDeleteDialog(id)}
-            deleting={deleteMutation.isPending && deleteDialog === id}
-          />
-        ))}
+        {accountIds.map(id => {
+          const boundAgentId = bindings.find(b => b.accountId === id)?.agentId ?? ''
+          const selectedAgentId = draftBindings[id] ?? boundAgentId
+          return (
+            <AccountCard
+              key={id}
+              accountId={id}
+              botInfo={botInfoMap[id] ?? null}
+              boundAgentId={boundAgentId}
+              webhookPath={webhookPaths[id]}
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+              pendingRestart={Boolean(savedOnlyBindings[id])}
+              onSelectAgent={agentId => setDraftBindings(prev => ({ ...prev, [id]: agentId }))}
+              onSaveApply={() => openApplyBinding(id, selectedAgentId, boundAgentId || null)}
+              onSaveOnly={() => bindMutation.mutate({ accountId: id, agentId: selectedAgentId })}
+              onCancelBindingChange={() => setDraftBindings(prev => {
+                const next = { ...prev }
+                delete next[id]
+                return next
+              })}
+              bindingSaving={bindMutation.isPending || applyBindingMutation.isPending}
+              onEdit={() => {
+                setEditToken('')
+                setEditSecret('')
+                setEditWebhookPath(webhookPaths[id] ?? '')
+                setEditDialog(id)
+              }}
+              editing={updateMutation.isPending && editDialog === id}
+              onDelete={() => setDeleteDialog(id)}
+              deleting={deleteMutation.isPending && deleteDialog === id}
+            />
+          )
+        })}
       </div>
 
       {/* Pending Pairing */}
@@ -519,6 +656,100 @@ export default function LinePage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Apply Binding Dialog */}
+      <Dialog open={!!applyDialog} onOpenChange={open => {
+        if (!open && !applyBindingMutation.isPending) {
+          setApplyDialog(null)
+          setApplyResult(null)
+        }
+      }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Save + Apply Agent</DialogTitle>
+          </DialogHeader>
+          {applyDialog && (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-zinc-50 p-3 text-sm dark:bg-zinc-900">
+                <p className="text-xs text-zinc-500">LINE OA</p>
+                <p className="font-mono text-sm">{applyDialog.accountId}</p>
+                <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
+                  <div className="rounded-md border bg-white p-2 dark:bg-zinc-950">
+                    <p className="text-xs text-zinc-500">เดิม</p>
+                    <p className="font-medium">{applyDialog.oldAgentId || 'ไม่ได้ผูก'}</p>
+                  </div>
+                  <span className="text-zinc-400">→</span>
+                  <div className="rounded-md border bg-white p-2 dark:bg-zinc-950">
+                    <p className="text-xs text-zinc-500">ใหม่</p>
+                    <p className="font-medium">{applyDialog.newAgentId}</p>
+                  </div>
+                </div>
+              </div>
+
+              {!applyResult && (
+                <>
+                  <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={applyResetSessions}
+                      disabled={applyBindingMutation.isPending}
+                      onChange={event => setApplyResetSessions(event.target.checked)}
+                    />
+                    <span>
+                      <span className="font-medium">Reset session ของ LINE นี้</span>
+                      <span className="mt-0.5 block text-xs text-zinc-500">
+                        ล้างเฉพาะ session ของ channel นี้ใน agent เดิมและ agent ใหม่ ไม่แตะ webchat หรือ channel อื่น
+                      </span>
+                    </span>
+                  </label>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                    Gateway จะ restart เพื่อให้ route ใหม่มีผล อาจหยุดตอบไม่กี่วินาที
+                  </div>
+                </>
+              )}
+
+              {applyBindingMutation.isPending && (
+                <div className="rounded-lg border p-3 text-sm">
+                  <p className="font-medium">กำลัง Apply...</p>
+                  <ol className="mt-2 space-y-1 text-xs text-zinc-500">
+                    <li>1. Saving binding</li>
+                    <li>2. Resetting sessions</li>
+                    <li>3. Restarting gateway</li>
+                    <li>4. Ready to test</li>
+                  </ol>
+                </div>
+              )}
+
+              {applyResult && <ChannelApplyResultPanel result={applyResult} />}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={applyBindingMutation.isPending}
+              onClick={() => {
+                setApplyDialog(null)
+                setApplyResult(null)
+              }}
+            >
+              {applyResult ? 'Close' : 'Cancel'}
+            </Button>
+            {applyDialog && !applyResult && (
+              <Button
+                disabled={applyBindingMutation.isPending}
+                onClick={() => applyBindingMutation.mutate({
+                  accountId: applyDialog.accountId,
+                  agentId: applyDialog.newAgentId,
+                  resetSessions: applyResetSessions,
+                })}
+              >
+                {applyBindingMutation.isPending ? 'Applying...' : 'Save + Apply'}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Dialog */}
       <Dialog open={!!editDialog} onOpenChange={open => { if (!open) setEditDialog(null) }}>

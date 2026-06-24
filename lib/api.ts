@@ -434,6 +434,39 @@ export async function cleanSessions(): Promise<void> {
   await api.post('/api/gateway/clean-sessions')
 }
 
+export interface ChannelBindingApplyResult {
+  ok: boolean
+  stage?: 'validate' | 'resetSessions' | 'restartGateway' | 'ready'
+  channel?: 'line' | 'telegram'
+  accountId?: string
+  oldAgentId?: string | null
+  newAgentId?: string
+  changed?: boolean
+  config?: { ok?: boolean; backupPath?: string | null }
+  reset?: { agentId: string; removed: number; backupPath?: string | null }[]
+  restart?: {
+    ok?: boolean
+    method?: string
+    stdout?: string
+    stderr?: string
+    error?: string
+  } | null
+  durationMs?: number
+  safeMessage?: string
+  error?: string
+}
+
+export async function applyChannelBinding(payload: {
+  channel: 'line' | 'telegram'
+  accountId: string
+  agentId: string
+  resetSessions?: boolean
+  restartGateway?: boolean
+}): Promise<ChannelBindingApplyResult> {
+  const { data } = await api.post('/api/channel-bindings/apply', payload)
+  return data
+}
+
 export async function getTelegramBotInfo(): Promise<Record<string, string>> {
   const { data } = await api.get('/api/telegram/botinfo')
   return data
