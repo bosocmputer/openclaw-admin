@@ -375,7 +375,7 @@ function TurnRow({
             {learningCount > 0 ? (
               <Badge variant="outline" className={cn('gap-1', selected ? 'border-white/30 text-white' : '')}>
                 <Lightbulb className="size-3" />
-                ส่งเข้า Learning แล้ว
+                มีคิวตรวจทีหลัง
               </Badge>
             ) : null}
           </div>
@@ -526,9 +526,9 @@ export default function ConversationAnalysisPage() {
       })
     },
     onSuccess: candidate => {
-      toast.success(candidate.deduped ? 'Learning candidate นี้มีอยู่แล้ว' : 'ส่งเข้า Learning Review แล้ว', {
+      toast.success(candidate.deduped ? 'รายการตรวจทีหลังนี้มีอยู่แล้ว' : 'ส่งเข้าคิวตรวจทีหลังแล้ว', {
         action: {
-          label: 'เปิด Learning Review',
+          label: 'เปิด Memory',
           onClick: () => openLearningReview(),
         },
       })
@@ -589,7 +589,7 @@ export default function ConversationAnalysisPage() {
       })
     },
     onSuccess: () => {
-      toast.success('บันทึกเป็น Blocked memory แล้ว')
+      toast.success('บันทึกเป็นเรื่องห้ามจำแล้ว')
       queryClient.invalidateQueries({ queryKey: ['agent-memories'] })
       queryClient.invalidateQueries({ queryKey: ['memory-status'] })
     },
@@ -988,7 +988,7 @@ export default function ConversationAnalysisPage() {
                     {selectedLearningCandidates.length ? (
                       <Badge variant="default" className="gap-1">
                         <Lightbulb className="size-3" />
-                        ส่งเข้า Learning แล้ว
+                        มีคิวตรวจทีหลัง
                       </Badge>
                     ) : null}
                     {(selectedTurn.reviewTargets ?? []).map(target => <Badge key={target} variant="secondary">{target}</Badge>)}
@@ -1001,12 +1001,12 @@ export default function ConversationAnalysisPage() {
                   {selectedLearningCandidates.length ? (
                     <Button type="button" variant="outline" size="sm" onClick={openLearningReview}>
                       <Lightbulb className="size-4" />
-                      เปิด Learning Review
+                      ดูคิวตรวจทีหลัง
                     </Button>
                   ) : (
                     <Button type="button" variant="outline" size="sm" onClick={openLearningDialog}>
                       <Lightbulb className="size-4" />
-                      ส่งเรื่องนี้ให้ Admin Review
+                      เพิ่มเป็นงานตรวจทีหลัง
                     </Button>
                   )}
                   <div className="grid grid-cols-3 gap-2 text-right text-xs">
@@ -1139,7 +1139,7 @@ export default function ConversationAnalysisPage() {
                               onClick={() => promoteObservationMutation.mutate(signal)}
                             >
                               {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
-                              {highRisk ? 'บันทึกเป็น Blocked' : 'Promote เป็น Soft'}
+                              {highRisk ? 'ห้ามจำเรื่องนี้' : 'บันทึกเป็น Soft memory'}
                             </Button>
                           </div>
                         </div>
@@ -1215,7 +1215,7 @@ export default function ConversationAnalysisPage() {
       <Dialog open={learningDialogOpen} onOpenChange={setLearningDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>ส่งเรื่องนี้ให้ Admin Review</DialogTitle>
+            <DialogTitle>เพิ่มเป็นงานตรวจทีหลัง</DialogTitle>
           </DialogHeader>
           {selectedTurn ? (
             <div className="space-y-4">
@@ -1231,7 +1231,7 @@ export default function ConversationAnalysisPage() {
               </div>
 
               <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-sm text-sky-950 dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-sky-100">
-                รายการนี้จะเข้า Learning Review ก่อนเท่านั้น ระบบยังไม่แก้ MEMORY, SOUL, Business Profile หรือ MCP/Search จนกว่า admin จะอนุมัติในหน้า Memory Learning
+                ใช้เฉพาะกรณีที่ต้องให้ทีมกลับมาตรวจเองภายหลัง ระบบ Safe Auto ยังเรียนรู้และบล็อกเรื่องเสี่ยงตาม policy ได้เองตามปกติ
               </div>
 
               <label className="space-y-1.5">
@@ -1252,7 +1252,7 @@ export default function ConversationAnalysisPage() {
               </label>
 
               <label className="space-y-1.5">
-                <span className="text-sm font-medium">Summary สำหรับ review</span>
+                <span className="text-sm font-medium">Summary สำหรับตรวจทีหลัง</span>
                 <Textarea
                   value={learningSummary}
                   onChange={event => setLearningSummary(event.target.value)}
@@ -1265,7 +1265,7 @@ export default function ConversationAnalysisPage() {
 
               <details className="rounded-lg border">
                 <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium">
-                  Evidence ที่จะส่งเข้า queue
+                  Evidence ที่จะส่งเข้าคิว
                 </summary>
                 <pre className="max-h-64 overflow-auto border-t bg-muted/30 p-3 text-xs leading-relaxed">
                   {JSON.stringify(learningEvidence(selectedTurn, selectedIssues), null, 2)}
@@ -1282,7 +1282,7 @@ export default function ConversationAnalysisPage() {
                   onClick={() => createLearningMutation.mutate()}
                 >
                   <Lightbulb className="size-4" />
-                  {createLearningMutation.isPending ? 'กำลังส่ง...' : 'ส่งเข้า Learning Review'}
+                  {createLearningMutation.isPending ? 'กำลังส่ง...' : 'ส่งเข้าคิวตรวจทีหลัง'}
                 </Button>
               </div>
             </div>

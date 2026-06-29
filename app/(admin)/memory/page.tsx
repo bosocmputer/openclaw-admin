@@ -320,7 +320,7 @@ export default function MemoryPage() {
       confidence: observation.confidence,
     }),
     onSuccess: (_result, observation) => {
-      toast.success(isHighRiskObservation(observation) ? 'บันทึกเป็น Blocked memory แล้ว' : 'Promote observation เป็น Soft memory แล้ว')
+      toast.success(isHighRiskObservation(observation) ? 'บันทึกเป็นเรื่องห้ามจำแล้ว' : 'บันทึกเป็น Soft memory แล้ว')
       invalidateMemory()
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'Promote ไม่สำเร็จ'),
@@ -656,7 +656,7 @@ export default function MemoryPage() {
           <TabsContent value="backups" className="p-4">
             {!backupData?.backups.length ? (
               <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-                ยังไม่มี backup จาก Learning Review หรือ rollback สำหรับ agent นี้
+                ยังไม่มี backup จากการแก้ memory หรือ rollback สำหรับ agent นี้
               </div>
             ) : null}
             <div className="space-y-2">
@@ -979,7 +979,7 @@ function ObservationRow({ observation, onPromote, busy }: { observation: MemoryO
         </div>
         <Button variant={highRisk ? 'destructive' : 'outline'} size="sm" onClick={onPromote} disabled={actionDisabled}>
           {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
-          {highRisk ? 'บันทึกเป็น Blocked' : 'Promote เป็น Soft'}
+          {highRisk ? 'ห้ามจำเรื่องนี้' : 'บันทึกเป็น Soft memory'}
         </Button>
       </div>
       {Object.keys(observation.evidence || {}).length ? (
