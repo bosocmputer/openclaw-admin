@@ -196,6 +196,10 @@ function learningDecisionVariant(decision?: string) {
   return 'secondary'
 }
 
+function isHighRiskSignal(signal: MemoryObservation) {
+  return signal.risk === 'high' || signal.type === 'blocked_fact' || signal.recommendedAction === 'block_truth'
+}
+
 function conversationMediaUrl(media: MonitorMedia) {
   if (!media.hasPreview) return ''
   if (media.previewUrl?.startsWith('/api/')) return `/api/proxy${media.previewUrl}`
@@ -496,6 +500,7 @@ export default function ConversationAnalysisPage() {
   const learningSignals = detail?.learningSignals ?? []
   const memoryUsage = detail?.memoryUsage ?? []
   const memoryDecisions = detail?.memoryDecisions ?? []
+  const hasHighRiskLearning = learningSignals.some(isHighRiskSignal)
   const learningCandidatesByTurnId = useMemo(() => {
     const map = new Map<string, MemoryLearningCandidate[]>()
     for (const candidate of activeLearningCandidates(learningCandidateData?.candidates)) {
@@ -536,6 +541,9 @@ export default function ConversationAnalysisPage() {
     mutationFn: () => {
       if (!selectedTurn) throw new Error('ยังไม่ได้เลือก conversation')
       const firstSignal = learningSignals[0]
+      if (firstSignal && isHighRiskSignal(firstSignal)) {
+        throw new Error('ข้อมูลนี้เป็น high-risk ต้องบันทึกเป็นเรื่องที่ห้ามจำเท่านั้น')
+      }
       return createAgentMemory({
         agentId: selectedTurn.agentId || 'unknown',
         status: firstSignal?.risk === 'high' ? 'blocked' : 'soft',
@@ -595,8 +603,8 @@ export default function ConversationAnalysisPage() {
       content: signal.summary,
       confidence: signal.confidence,
     }),
-    onSuccess: () => {
-      toast.success('Promote signal เป็น memory แล้ว')
+    onSuccess: (_result, signal) => {
+      toast.success(isHighRiskSignal(signal) ? 'บันทึก signal เป็น Blocked memory แล้ว' : 'Promote signal เป็น Soft memory แล้ว')
       queryClient.invalidateQueries({ queryKey: ['conversation-detail'] })
       queryClient.invalidateQueries({ queryKey: ['agent-memories'] })
       queryClient.invalidateQueries({ queryKey: ['memory-observations'] })
@@ -1065,13 +1073,15 @@ export default function ConversationAnalysisPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => createTurnMemoryMutation.mutate()} disabled={!selectedTurn || createTurnMemoryMutation.isPending}>
-                      <Database className="size-4" />
-                      จำเรื่องนี้
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => blockTurnMemoryMutation.mutate()} disabled={!selectedTurn || blockTurnMemoryMutation.isPending}>
+                    {!hasHighRiskLearning ? (
+                      <Button size="sm" variant="outline" onClick={() => createTurnMemoryMutation.mutate()} disabled={!selectedTurn || createTurnMemoryMutation.isPending}>
+                        <Database className="size-4" />
+                        จำเรื่องนี้
+                      </Button>
+                    ) : null}
+                    <Button size="sm" variant={hasHighRiskLearning ? 'destructive' : 'outline'} onClick={() => blockTurnMemoryMutation.mutate()} disabled={!selectedTurn || blockTurnMemoryMutation.isPending}>
                       <Ban className="size-4" />
-                      ห้ามจำเรื่องนี้
+                      {hasHighRiskLearning ? 'บันทึกเป็นเรื่องห้ามจำ' : 'ห้ามจำเรื่องนี้'}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => { window.location.href = '/memory?tab=sources' }}>
                       เปิด Memory
@@ -1083,6 +1093,8 @@ export default function ConversationAnalysisPage() {
                   <div className="mt-3 grid gap-2 lg:grid-cols-2">
                     {learningSignals.map(signal => {
                       const decision = memoryDecisions.find(item => item.observationId === signal.id)
+                      const highRisk = isHighRiskSignal(signal)
+                      const actionDisabled = signal.status === 'promoted' || signal.status === 'blocked' || promoteObservationMutation.isPending
                       return (
                         <div key={signal.id} className="rounded-md border bg-muted/20 p-3">
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -1093,15 +1105,20 @@ export default function ConversationAnalysisPage() {
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm">{signal.summary}</p>
                           {decision?.reason ? <p className="mt-2 text-xs text-muted-foreground">{decision.reason}</p> : null}
+                          {highRisk ? (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              ข้อมูล ERP เช่น ราคา สต็อก ต้นทุน หรือสิทธิ์ราคา ต้องดึงสดจาก MCP/SML ทุกครั้ง ไม่ควรกลายเป็นความจำที่ใช้ตอบจริง
+                            </p>
+                          ) : null}
                           <div className="mt-3 flex flex-wrap gap-2">
                             <Button
                               size="sm"
-                              variant="outline"
-                              disabled={signal.status === 'promoted' || promoteObservationMutation.isPending}
+                              variant={highRisk ? 'destructive' : 'outline'}
+                              disabled={actionDisabled}
                               onClick={() => promoteObservationMutation.mutate(signal)}
                             >
-                              <Database className="size-4" />
-                              Promote
+                              {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
+                              {highRisk ? 'บันทึกเป็น Blocked' : 'Promote เป็น Soft'}
                             </Button>
                           </div>
                         </div>

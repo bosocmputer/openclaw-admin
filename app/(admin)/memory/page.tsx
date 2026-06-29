@@ -105,6 +105,10 @@ function statusVariant(status: string) {
   return 'outline'
 }
 
+function isHighRiskObservation(observation: MemoryObservation) {
+  return observation.risk === 'high' || observation.type === 'blocked_fact' || observation.recommendedAction === 'block_truth'
+}
+
 function typeLabel(type: string) {
   return memoryTypeOptions.find(option => option.value === type)?.label || type
 }
@@ -308,8 +312,8 @@ export default function MemoryPage() {
       content: observation.summary,
       confidence: observation.confidence,
     }),
-    onSuccess: () => {
-      toast.success('Promote observation เป็น memory แล้ว')
+    onSuccess: (_result, observation) => {
+      toast.success(isHighRiskObservation(observation) ? 'บันทึกเป็น Blocked memory แล้ว' : 'Promote observation เป็น Soft memory แล้ว')
       invalidateMemory()
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'Promote ไม่สำเร็จ'),
@@ -808,6 +812,8 @@ function MemoryCard({
 }
 
 function ObservationRow({ observation, onPromote, busy }: { observation: MemoryObservation; onPromote: () => void; busy: boolean }) {
+  const highRisk = isHighRiskObservation(observation)
+  const actionDisabled = busy || observation.status === 'promoted' || observation.status === 'blocked'
   return (
     <div className="rounded-lg border p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -822,10 +828,15 @@ function ObservationRow({ observation, onPromote, busy }: { observation: MemoryO
           <p className="mt-2 text-xs text-muted-foreground">
             turn: {observation.sourceTurnId || '-'} · updated {formatDateTime(observation.updatedAt)}
           </p>
+          {highRisk ? (
+            <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
+              ข้อมูลราคา สต็อก ต้นทุน หรือสถานะจาก ERP ต้องดึงสดจาก MCP/SML ทุกครั้ง จึงบันทึกได้เฉพาะเป็นเรื่องที่ห้ามจำ
+            </p>
+          ) : null}
         </div>
-        <Button variant="outline" size="sm" onClick={onPromote} disabled={busy || observation.status === 'promoted'}>
-          <Database className="size-4" />
-          Promote
+        <Button variant={highRisk ? 'destructive' : 'outline'} size="sm" onClick={onPromote} disabled={actionDisabled}>
+          {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
+          {highRisk ? 'บันทึกเป็น Blocked' : 'Promote เป็น Soft'}
         </Button>
       </div>
       {Object.keys(observation.evidence || {}).length ? (
