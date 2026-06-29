@@ -1785,6 +1785,18 @@ export interface MemoryPolicy {
   updatedBy?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  autoApplyResult?: MemoryAutoApplyResult
+}
+
+export interface MemoryAutoApplyResult {
+  ok: boolean
+  agentId: string
+  mode: MemoryPolicyMode | string
+  scanned: number
+  promoted: number
+  blocked: number
+  skipped: number
+  error?: string
 }
 
 export interface MemoryUsageEvent {
@@ -1871,6 +1883,11 @@ export async function getMemoryPolicies(): Promise<{ policies: MemoryPolicy[] }>
 
 export async function putMemoryPolicy(agentId: string, body: Partial<MemoryPolicy>): Promise<MemoryPolicy> {
   const { data } = await api.put(`/api/memory/policies/${encodeURIComponent(agentId)}`, body)
+  return data
+}
+
+export async function applyMemoryAutoLearn(agentId: string, limit = 200): Promise<MemoryAutoApplyResult> {
+  const { data } = await api.post(`/api/memory/policies/${encodeURIComponent(agentId)}/apply-auto-learn`, { limit })
   return data
 }
 

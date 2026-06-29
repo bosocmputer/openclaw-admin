@@ -664,19 +664,23 @@ export default function ConversationAnalysisPage() {
   }
 
   function openLearningReview() {
-    window.location.href = '/memory?tab=learning'
+    window.location.href = '/memory?tab=sources'
   }
 
   return (
     <div className="flex min-h-[calc(100vh-96px)] flex-col gap-4 xl:h-[calc(100vh-96px)] xl:min-h-0 xl:overflow-hidden">
       <div className="shrink-0 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Conversation Analysis</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Conversation Learning Workbench</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            ดูประวัติการคุยย้อนหลัง วิเคราะห์คำถาม, tool, คำตอบ, latency และ export ให้ทีมปรับปรุง agent
+            หน้านี้ใช้ดูบทสนทนาและหลักฐานว่าควรเรียนรู้อะไร ส่วนความจำที่ใช้ตอบจริงให้คุมที่หน้า Memory
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => { window.location.href = '/memory' }}>
+            <Brain className="size-4" />
+            เปิด Memory
+          </Button>
           <Button variant="outline" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={cn('size-4', isFetching && 'animate-spin')} />
             โหลดใหม่
@@ -685,6 +689,23 @@ export default function ConversationAnalysisPage() {
             <Archive className="size-4" />
             Backfill 7 วัน
           </Button>
+        </div>
+      </div>
+
+      <div className="shrink-0 rounded-xl border bg-card p-3">
+        <div className="grid gap-2 text-sm lg:grid-cols-3">
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <p className="font-medium">1. ดูบทสนทนาจริง</p>
+            <p className="mt-1 text-xs text-muted-foreground">เลือก turn เพื่อดูคำถาม คำตอบ tool และปัญหาที่ flag</p>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <p className="font-medium">2. ตรวจ Learning signals</p>
+            <p className="mt-1 text-xs text-muted-foreground">Safe Auto จะเรียน low-risk และ block ราคา/สต็อกเองตาม policy</p>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <p className="font-medium">3. Export for Codex</p>
+            <p className="mt-1 text-xs text-muted-foreground">ส่งข้อมูล 1-3 วันมาให้วิเคราะห์ SOUL, MCP/Search และ memory tuning</p>
+          </div>
         </div>
       </div>
 
@@ -1069,14 +1090,14 @@ export default function ConversationAnalysisPage() {
                       <p className="text-sm font-medium">Learning signals</p>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      แสดงสิ่งที่ระบบสังเกตได้จาก turn นี้ ยังไม่ใช่ความจำที่ใช้ตอบจริงจนกว่าจะถูก promote หรือ policy อนุญาต
+                      แสดงสิ่งที่ระบบสังเกตได้จาก turn นี้ ถ้า Safe Auto เปิด ระบบจะจัดการ low-risk/block ให้เองโดยไม่ต้อง approve ทีละรายการ
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {!hasHighRiskLearning ? (
                       <Button size="sm" variant="outline" onClick={() => createTurnMemoryMutation.mutate()} disabled={!selectedTurn || createTurnMemoryMutation.isPending}>
                         <Database className="size-4" />
-                        จำเรื่องนี้
+                        เพิ่มเป็น memory เอง
                       </Button>
                     ) : null}
                     <Button size="sm" variant={hasHighRiskLearning ? 'destructive' : 'outline'} onClick={() => blockTurnMemoryMutation.mutate()} disabled={!selectedTurn || blockTurnMemoryMutation.isPending}>

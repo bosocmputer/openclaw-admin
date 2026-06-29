@@ -5,19 +5,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveRestore,
   Ban,
+  CheckCircle2,
   Clock3,
   Database,
+  Eye,
   FileText,
   Plus,
   RotateCcw,
   Search,
   Settings2,
   ShieldCheck,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
+  applyMemoryAutoLearn,
   blockMemoryRelearn,
   createAgentMemory,
   deleteAgentMemory,
@@ -40,6 +44,7 @@ import {
   type MemoryPolicyMode,
   type MemoryScope,
   type MemoryType,
+  type MemoryAutoApplyResult,
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -76,6 +81,8 @@ const policyModes: Array<{ value: MemoryPolicyMode; label: string; help: string 
   { value: 'safe_auto', label: 'Safe auto', help: 'ใช้ memory low-risk ตาม policy' },
   { value: 'manual_review', label: 'Manual review', help: 'ใช้เฉพาะ memory ที่ admin สร้างหรือ promote' },
 ]
+
+const safeAutoTypes: MemoryType[] = ['terminology', 'preference', 'workflow_hint', 'faq_pattern', 'entity_alias', 'staff_instruction']
 
 function formatDateTime(value?: string | null) {
   if (!value) return '-'
@@ -324,13 +331,39 @@ export default function MemoryPage() {
       mode: policyForm.mode,
       maxContextChars: Number(policyForm.maxContextChars),
       allowChatTeaching: policyForm.allowChatTeaching,
-      safeTypes: ['terminology', 'preference', 'workflow_hint', 'faq_pattern', 'entity_alias'],
+      safeTypes: policyForm.allowChatTeaching ? safeAutoTypes : safeAutoTypes.filter(type => type !== 'staff_instruction'),
     }),
     onSuccess: () => {
       toast.success('บันทึก Auto-Learn policy แล้ว')
       invalidateMemory()
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'บันทึก policy ไม่สำเร็จ'),
+  })
+
+  const enableSafeAutoMutation = useMutation({
+    mutationFn: () => putMemoryPolicy(effectiveAgentId, {
+      mode: 'safe_auto',
+      maxContextChars: Number(policyForm.maxContextChars) || 1200,
+      allowChatTeaching: true,
+      safeTypes: safeAutoTypes,
+    }),
+    onSuccess: policy => {
+      const result = policy.autoApplyResult
+      toast.success(result
+        ? `Safe Auto เปิดแล้ว: learned ${result.promoted}, blocked ${result.blocked}`
+        : 'Safe Auto เปิดแล้ว')
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'เปิด Safe Auto ไม่สำเร็จ'),
+  })
+
+  const applyAutoMutation = useMutation({
+    mutationFn: () => applyMemoryAutoLearn(effectiveAgentId),
+    onSuccess: result => {
+      toast.success(`Auto-Learn applied: learned ${result.promoted}, blocked ${result.blocked}, skipped ${result.skipped}`)
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Apply Auto-Learn ไม่สำเร็จ'),
   })
 
   const rollbackMutation = useMutation({
@@ -362,7 +395,7 @@ export default function MemoryPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Memory Control Center</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            คุมสิ่งที่ OpenClaw จำได้จริง แยกข้อมูลที่ใช้ตอบจริง ข้อมูลชั่วคราว เรื่องที่ถูก block และแหล่งที่มาจากบทสนทนา
+            หน้านี้ใช้เปิด Auto-Learn และคุม “ความจำที่ใช้ตอบจริง” ส่วน Conversation Analysis ใช้ดูหลักฐานจากบทสนทนา
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -379,12 +412,26 @@ export default function MemoryPage() {
         </div>
       </div>
 
+      <LearningControlPanel
+        agentId={effectiveAgentId}
+        mode={summary.autoLearnMode}
+        activeCount={summary.activeMemoryCount}
+        softCount={summary.softMemoryCount}
+        blockedCount={summary.blockedCount}
+        estimatedChars={summary.estimatedInjectedChars}
+        maxChars={summary.maxContextChars}
+        busy={enableSafeAutoMutation.isPending || applyAutoMutation.isPending}
+        lastResult={enableSafeAutoMutation.data?.autoApplyResult || applyAutoMutation.data}
+        onEnable={() => enableSafeAutoMutation.mutate()}
+        onApply={() => applyAutoMutation.mutate()}
+      />
+
       <section className="grid gap-3 lg:grid-cols-4">
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">โหมด Auto-Learn</p>
             <p className="mt-2 text-xl font-semibold">{modeLabel(summary.autoLearnMode)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">ค่าเริ่มต้นคือ observe-only เพื่อไม่ให้จำผิดเอง</p>
+            <p className="mt-1 text-xs text-muted-foreground">Safe Auto จะจำเฉพาะ low-risk และ block เรื่อง ERP truth</p>
           </CardContent>
         </Card>
         <Card>
@@ -416,7 +463,7 @@ export default function MemoryPage() {
             <div className="min-w-0">
               <h2 className="text-base font-semibold">ค้นหาและจัดการความจำ</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Admin ไม่ต้อง approve ทุกเรื่อง แต่ต้องค้นหา ลบ และกันการเรียนซ้ำได้เมื่อ chatbot จำผิด
+                ค้นหา/ลบ/ปิดความจำที่ใช้ตอบจริง และดูสัญญาณจากบทสนทนาที่ระบบเรียนรู้ได้
               </p>
             </div>
             <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_150px_150px]">
@@ -445,12 +492,12 @@ export default function MemoryPage() {
         <Tabs value={tab} onValueChange={value => setTab(value as MemoryTab)} className="gap-0">
           <div className="border-b px-4 py-3">
             <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
-              <TabsTrigger value="active">Active</TabsTrigger>
-              <TabsTrigger value="soft">Soft</TabsTrigger>
-              <TabsTrigger value="blocked">Blocked</TabsTrigger>
-              <TabsTrigger value="deleted">Deleted</TabsTrigger>
-              <TabsTrigger value="sources">Sources</TabsTrigger>
-              <TabsTrigger value="settings">Settings</TabsTrigger>
+              <TabsTrigger value="active">ใช้ตอบจริง</TabsTrigger>
+              <TabsTrigger value="soft">พักไว้</TabsTrigger>
+              <TabsTrigger value="blocked">ห้ามจำ</TabsTrigger>
+              <TabsTrigger value="deleted">ลบแล้ว</TabsTrigger>
+              <TabsTrigger value="sources">สัญญาณจากแชท</TabsTrigger>
+              <TabsTrigger value="settings">ตั้งค่า Auto-Learn</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
               <TabsTrigger value="backups">Backups</TabsTrigger>
             </TabsList>
@@ -481,7 +528,7 @@ export default function MemoryPage() {
 
           <TabsContent value="sources" className="p-4">
             <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-              Sources คือสิ่งที่ระบบสังเกตจากบทสนทนา ยังไม่ใช่ความจำที่ใช้ตอบจริง จนกว่าจะ promote ตาม policy
+              สัญญาณจากแชทมาจาก Conversation Analysis ถ้า Safe Auto เปิด ระบบจะเรียนรู้ low-risk ให้เอง และ block เรื่องราคา/สต็อก/ต้นทุนไม่ให้เข้า prompt
             </div>
             {observationsLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด learning signals...</div> : null}
             {!observationsLoading && !observations.length ? (
@@ -510,7 +557,7 @@ export default function MemoryPage() {
                     Auto-Learn Policy
                   </CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    เปลี่ยนโหมดต่อ agent ได้ โดยค่าแนะนำสำหรับ production คือเริ่มจาก Observe only
+                    เปลี่ยนโหมดต่อ agent ได้ โหมดใช้งานจริงคือ Safe Auto พร้อม guardrails ราคา/สต็อก/ต้นทุน
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -753,6 +800,102 @@ export default function MemoryPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function LearningControlPanel({
+  agentId,
+  mode,
+  activeCount,
+  softCount,
+  blockedCount,
+  estimatedChars,
+  maxChars,
+  busy,
+  lastResult,
+  onEnable,
+  onApply,
+}: {
+  agentId: string
+  mode?: MemoryPolicyMode | string
+  activeCount: number
+  softCount: number
+  blockedCount: number
+  estimatedChars: number
+  maxChars: number
+  busy: boolean
+  lastResult?: MemoryAutoApplyResult
+  onEnable: () => void
+  onApply: () => void
+}) {
+  const safeAuto = mode === 'safe_auto'
+  const off = mode === 'off'
+  return (
+    <section className="rounded-xl border bg-card p-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={safeAuto ? 'default' : off ? 'destructive' : 'secondary'}>
+              {safeAuto ? 'Safe Auto เปิดอยู่' : off ? 'Auto-Learn ปิดอยู่' : modeLabel(mode)}
+            </Badge>
+            <Badge variant="outline">agent: {agentId || '-'}</Badge>
+            <Badge variant="outline">{formatChars(estimatedChars)} / {formatChars(maxChars)}</Badge>
+          </div>
+          <h2 className="mt-3 text-base font-semibold">Auto-Learn ใช้งานจริงแบบปลอดภัย</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            ระบบจะเรียนรู้เฉพาะคำศัพท์, alias, workflow และคำสอนที่ปลอดภัย ส่วนราคา สต็อก ต้นทุน สินค้ามี/ไม่มี และราคาพิเศษจะถูกบันทึกเป็นเรื่องห้ามจำ ต้องดึงสดจาก MCP/SML ทุกครั้ง
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">ใช้ตอบจริง</p>
+              <p className="mt-1 text-lg font-semibold">{activeCount}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">พักไว้</p>
+              <p className="mt-1 text-lg font-semibold">{softCount}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">ห้ามจำ</p>
+              <p className="mt-1 text-lg font-semibold">{blockedCount}</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-background p-3">
+          <p className="text-sm font-medium">สิ่งที่ควรทำตอนนี้</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {safeAuto
+              ? 'กด apply เพื่อประมวลผล signal ที่รออยู่ แล้วให้ลูกค้าทดลองคุย 1-3 วัน'
+              : 'เปิด Safe Auto ก่อน เพื่อให้ระบบเรียนรู้ low-risk โดยไม่ต้อง approve ทีละเรื่อง'}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {safeAuto ? (
+              <Button onClick={onApply} disabled={!agentId || busy}>
+                <Sparkles className="size-4" />
+                Apply Auto-Learn now
+              </Button>
+            ) : (
+              <Button onClick={onEnable} disabled={!agentId || busy}>
+                <ShieldCheck className="size-4" />
+                เปิด Safe Auto
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => { window.location.href = '/analysis/conversations' }}>
+              <Eye className="size-4" />
+              ดู Conversation
+            </Button>
+          </div>
+          {lastResult ? (
+            <div className="mt-3 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 font-medium text-foreground">
+                <CheckCircle2 className="size-3.5" />
+                ผลล่าสุด
+              </div>
+              <p className="mt-1">scanned {lastResult.scanned} · learned {lastResult.promoted} · blocked {lastResult.blocked} · skipped {lastResult.skipped}</p>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
   )
 }
 
