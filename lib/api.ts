@@ -1257,6 +1257,15 @@ export interface ConversationAnalysisData {
 export interface ConversationAnalysisDetail {
   turn: ConversationAnalysisTurn
   events: ConversationAnalysisEvent[]
+  learningSignals?: MemoryObservation[]
+  memoryUsage?: MemoryUsageEvent[]
+  memoryDecisions?: Array<{
+    observationId: string
+    type: MemoryType
+    risk: string
+    decision: string
+    reason: string
+  }>
 }
 
 export interface ConversationInsightItem {
@@ -1364,7 +1373,7 @@ export async function backfillConversations(body: { days?: number; from?: string
   return data
 }
 
-export async function exportConversationAnalysis(params: ConversationAnalysisParams & { format?: 'csv' | 'jsonl' | 'markdown'; mode?: 'raw' | 'codex_review_pack' | 'issues_csv' | 'events_jsonl' }): Promise<Blob> {
+export async function exportConversationAnalysis(params: ConversationAnalysisParams & { format?: 'csv' | 'jsonl' | 'markdown'; mode?: 'raw' | 'codex_review_pack' | 'learning_review_pack' | 'issues_csv' | 'events_jsonl' }): Promise<Blob> {
   const { data } = await api.get('/api/analysis/conversations/export', { params, responseType: 'blob' })
   return data
 }
@@ -1692,6 +1701,15 @@ export interface MemoryAgentStatus {
     files: string[]
   }
   dreaming: { enabled: boolean; config: Record<string, unknown> | null; source?: string }
+  autoLearn?: {
+    autoLearnMode: MemoryPolicyMode
+    activeMemoryCount: number
+    softMemoryCount: number
+    blockedCount: number
+    deletedCount: number
+    estimatedInjectedChars: number
+    maxContextChars: number
+  }
 }
 
 export async function getMemoryStatus(): Promise<MemoryAgentStatus[]> {
@@ -1712,6 +1730,153 @@ export async function getDreamsContent(agentId: string): Promise<string> {
 export async function getDailyMemoryContent(agentId: string, filename: string): Promise<string> {
   const { data } = await api.get(`/api/memory/${encodeURIComponent(agentId)}/daily/${encodeURIComponent(filename)}`)
   return data.content ?? ''
+}
+
+export type MemoryType = 'terminology' | 'preference' | 'workflow_hint' | 'faq_pattern' | 'entity_alias' | 'staff_instruction' | 'blocked_fact'
+export type MemoryScope = 'session' | 'contact' | 'agent' | 'business' | 'global'
+export type AgentMemoryStatus = 'active' | 'soft' | 'blocked' | 'deleted'
+export type MemoryPolicyMode = 'off' | 'observe_only' | 'safe_auto' | 'manual_review'
+export type MemoryObservationStatus = 'observed' | 'promoted' | 'blocked' | 'ignored'
+
+export interface AgentMemory {
+  id: string
+  agentId: string
+  status: AgentMemoryStatus
+  type: MemoryType
+  scope: MemoryScope
+  content: string
+  sourceAuthority: string
+  confidence: number | null
+  evidence: Record<string, unknown>
+  sourceTurnIds: string[]
+  ttlExpiresAt?: string | null
+  lastUsedAt?: string | null
+  usageCount: number
+  createdBy?: string | null
+  updatedBy?: string | null
+  deletedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MemoryObservation {
+  id: string
+  agentId: string
+  type: MemoryType
+  scope: MemoryScope
+  summary: string
+  evidence: Record<string, unknown>
+  sourceTurnId?: string | null
+  risk: 'low' | 'medium' | 'high' | string
+  recommendedAction: string
+  status: MemoryObservationStatus
+  confidence: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MemoryPolicy {
+  agentId: string
+  mode: MemoryPolicyMode
+  maxContextChars: number
+  safeTypes: MemoryType[]
+  allowChatTeaching: boolean
+  retentionDays: number | null
+  updatedBy?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface MemoryUsageEvent {
+  id: number
+  turnId?: string | null
+  memoryId?: string | null
+  agentId?: string | null
+  injectedChars: number
+  relevanceScore: number | null
+  outcome?: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
+}
+
+export async function getAgentMemories(params: {
+  agentId?: string
+  status?: AgentMemoryStatus | string
+  type?: MemoryType | string
+  scope?: MemoryScope | string
+  q?: string
+  limit?: number
+} = {}): Promise<{ memories: AgentMemory[] }> {
+  const { data } = await api.get('/api/memory/memories', { params })
+  return data
+}
+
+export async function createAgentMemory(body: {
+  agentId: string
+  status?: AgentMemoryStatus
+  type: MemoryType
+  scope: MemoryScope
+  content: string
+  sourceAuthority?: string
+  confidence?: number | null
+  evidence?: Record<string, unknown>
+  sourceTurnIds?: string[]
+}): Promise<AgentMemory> {
+  const { data } = await api.post('/api/memory/memories', body)
+  return data
+}
+
+export async function updateAgentMemory(id: string, body: Partial<Pick<AgentMemory, 'status' | 'type' | 'scope' | 'content' | 'confidence' | 'evidence'>>): Promise<AgentMemory> {
+  const { data } = await api.patch(`/api/memory/memories/${encodeURIComponent(id)}`, body)
+  return data
+}
+
+export async function deleteAgentMemory(id: string, blockRelearn = true): Promise<{ memory: AgentMemory; tombstone?: Record<string, unknown> | null }> {
+  const { data } = await api.delete(`/api/memory/memories/${encodeURIComponent(id)}`, { params: { blockRelearn } })
+  return data
+}
+
+export async function blockMemoryRelearn(id: string, reason?: string): Promise<{ memory: AgentMemory; tombstone: Record<string, unknown> }> {
+  const { data } = await api.post(`/api/memory/memories/${encodeURIComponent(id)}/block-relearn`, { reason })
+  return data
+}
+
+export async function getMemoryObservations(params: {
+  agentId?: string
+  status?: MemoryObservationStatus | string
+  type?: MemoryType | string
+  q?: string
+  sourceTurnId?: string
+  limit?: number
+} = {}): Promise<{ observations: MemoryObservation[] }> {
+  const { data } = await api.get('/api/memory/observations', { params })
+  return data
+}
+
+export async function promoteMemoryObservation(id: string, body: {
+  status?: AgentMemoryStatus
+  type?: MemoryType
+  scope?: MemoryScope
+  content?: string
+  confidence?: number | null
+} = {}): Promise<{ observation: MemoryObservation; memory: AgentMemory }> {
+  const { data } = await api.post(`/api/memory/observations/${encodeURIComponent(id)}/promote`, body)
+  return data
+}
+
+export async function getMemoryPolicies(): Promise<{ policies: MemoryPolicy[] }> {
+  const { data } = await api.get('/api/memory/policies')
+  return data
+}
+
+export async function putMemoryPolicy(agentId: string, body: Partial<MemoryPolicy>): Promise<MemoryPolicy> {
+  const { data } = await api.put(`/api/memory/policies/${encodeURIComponent(agentId)}`, body)
+  return data
+}
+
+export async function getMemoryUsage(params: { turnId?: string; agentId?: string; limit?: number } = {}): Promise<{ usage: MemoryUsageEvent[] }> {
+  const { data } = await api.get('/api/memory/usage', { params })
+  return data
 }
 
 export type MemoryLearningTargetType = 'memory' | 'business_profile' | 'soul' | 'mcp_search' | 'model_runtime'

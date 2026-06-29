@@ -1,26 +1,45 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArchiveRestore, CheckCircle2, FileText, Lightbulb, RotateCcw, ShieldCheck, XCircle } from 'lucide-react'
+import {
+  ArchiveRestore,
+  Ban,
+  Clock3,
+  Database,
+  FileText,
+  Plus,
+  RotateCcw,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
-  applyMemoryLearningCandidate,
-  approveMemoryLearningCandidate,
-  createMemoryLearningCandidate,
+  blockMemoryRelearn,
+  createAgentMemory,
+  deleteAgentMemory,
+  getAgentMemories,
   getDailyMemoryContent,
   getDreamsContent,
   getMemoryBackups,
   getMemoryContent,
-  getMemoryLearningCandidates,
+  getMemoryObservations,
+  getMemoryPolicies,
   getMemoryStatus,
-  rejectMemoryLearningCandidate,
+  promoteMemoryObservation,
+  putMemoryPolicy,
   rollbackMemoryBackup,
-  type MemoryAgentStatus,
+  updateAgentMemory,
+  type AgentMemory,
+  type AgentMemoryStatus,
   type MemoryBackup,
-  type MemoryLearningCandidate,
-  type MemoryLearningTargetType,
+  type MemoryObservation,
+  type MemoryPolicyMode,
+  type MemoryScope,
+  type MemoryType,
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,41 +50,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 
-type MemoryTab = 'overview' | 'learning' | 'files' | 'backups'
+type MemoryTab = 'active' | 'soft' | 'blocked' | 'deleted' | 'sources' | 'settings' | 'files' | 'backups'
 
-const targetOptions: Array<{ value: MemoryLearningTargetType; label: string; description: string }> = [
-  { value: 'memory', label: 'MEMORY.md', description: 'ความจำเฉพาะ agent หรือร้านที่ admin ยืนยันแล้ว' },
-  { value: 'business_profile', label: 'Business Profile', description: 'บริบทธุรกิจและ pattern ของร้าน' },
-  { value: 'soul', label: 'SOUL', description: 'กติกาการตอบและ safety/tool contract' },
-  { value: 'mcp_search', label: 'MCP/Search', description: 'คำพ้อง, normalization, หรือ search behavior' },
-  { value: 'model_runtime', label: 'Model/Runtime', description: 'model timeout, latency, fallback หรือ runtime behavior' },
+const memoryTypeOptions: Array<{ value: MemoryType; label: string; help: string }> = [
+  { value: 'terminology', label: 'คำศัพท์/คำพ้อง', help: 'คำเรียก, spelling, alias ที่ช่วยเข้าใจคำถาม' },
+  { value: 'preference', label: 'Preference', help: 'ความชอบหรือรูปแบบที่ลูกค้าหรือ agent ใช้ซ้ำ' },
+  { value: 'workflow_hint', label: 'Workflow hint', help: 'ข้อสังเกตที่ช่วยให้ flow ตอบดีขึ้น' },
+  { value: 'faq_pattern', label: 'FAQ pattern', help: 'รูปแบบคำถามที่เจอบ่อย' },
+  { value: 'entity_alias', label: 'Entity alias', help: 'ชื่อเรียกสินค้า/หมวด/ลูกค้าแบบกลาง ๆ' },
+  { value: 'staff_instruction', label: 'Staff instruction', help: 'สิ่งที่ staff/admin สอนอย่างชัดเจน' },
+  { value: 'blocked_fact', label: 'Blocked fact', help: 'เรื่องที่ห้ามจำหรือยังไม่ปลอดภัย' },
 ]
 
-const learningSteps = [
-  {
-    title: '1. ดูสิ่งที่เกิดขึ้นจริง',
-    body: 'ใช้บทสนทนา, issue tags, MEMORY.md และ DREAMS.md เป็นหลักฐาน ไม่ให้ AI เดาเอง',
-  },
-  {
-    title: '2. สร้างรายการให้ตรวจ',
-    body: 'สิ่งที่น่าจำหรือควรปรับจะเข้า Learning Review ก่อนเสมอ',
-  },
-  {
-    title: '3. Admin เลือกว่าจะลงชั้นไหน',
-    body: 'MEMORY.md ใช้ตอบจริง ส่วน Business Profile, SOUL, MCP/Search และ Model/Runtime เป็นงาน review ต่อ',
-  },
+const scopeOptions: Array<{ value: MemoryScope; label: string }> = [
+  { value: 'session', label: 'เฉพาะ session' },
+  { value: 'contact', label: 'เฉพาะ contact' },
+  { value: 'agent', label: 'เฉพาะ agent' },
+  { value: 'business', label: 'ทั้งธุรกิจ' },
+  { value: 'global', label: 'ทุก agent' },
 ]
 
-function formatChars(n = 0) {
-  if (n > 1000) return `${(n / 1000).toFixed(1)}k ตัวอักษร`
-  return `${n} ตัวอักษร`
-}
-
-function formatTokens(n?: number) {
-  if (!n) return '~0 tokens'
-  if (n > 1000) return `~${(n / 1000).toFixed(1)}k tokens`
-  return `~${n} tokens`
-}
+const policyModes: Array<{ value: MemoryPolicyMode; label: string; help: string }> = [
+  { value: 'off', label: 'ปิด', help: 'ไม่เก็บ observation และไม่ใช้ memory ใหม่' },
+  { value: 'observe_only', label: 'Observe only', help: 'เก็บ signal ให้ดู แต่ยังไม่ใช้ตอบจริง' },
+  { value: 'safe_auto', label: 'Safe auto', help: 'ใช้ memory low-risk ตาม policy' },
+  { value: 'manual_review', label: 'Manual review', help: 'ใช้เฉพาะ memory ที่ admin สร้างหรือ promote' },
+]
 
 function formatDateTime(value?: string | null) {
   if (!value) return '-'
@@ -76,6 +86,11 @@ function formatDateTime(value?: string | null) {
   }).format(new Date(value))
 }
 
+function formatChars(value = 0) {
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k chars`
+  return `${value} chars`
+}
+
 function formatBytes(value?: number) {
   if (!value) return '0 B'
   if (value < 1024) return `${value} B`
@@ -83,111 +98,151 @@ function formatBytes(value?: number) {
   return `${Math.round(value / (1024 * 102.4)) / 10} MB`
 }
 
-function targetLabel(target: string) {
-  return targetOptions.find(option => option.value === target)?.label || target
-}
-
 function statusVariant(status: string) {
-  if (status === 'applied') return 'default'
-  if (status === 'approved') return 'secondary'
-  if (status === 'rejected') return 'destructive'
+  if (status === 'active' || status === 'promoted') return 'default'
+  if (status === 'soft' || status === 'observed') return 'secondary'
+  if (status === 'blocked' || status === 'deleted') return 'destructive'
   return 'outline'
 }
 
-function shortPreview(value?: string, max = 520) {
+function typeLabel(type: string) {
+  return memoryTypeOptions.find(option => option.value === type)?.label || type
+}
+
+function scopeLabel(scope: string) {
+  return scopeOptions.find(option => option.value === scope)?.label || scope
+}
+
+function modeLabel(mode?: string) {
+  return policyModes.find(option => option.value === mode)?.label || mode || 'Observe only'
+}
+
+function shortText(value?: string, max = 520) {
   const text = String(value || '').trim()
   if (!text) return ''
-  const lines = text.split('\n').slice(0, 8).join('\n')
-  return lines.length > max ? `${lines.slice(0, max)}…` : lines
+  return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
-function sizeWarningText(agent: MemoryAgentStatus) {
-  if (agent.memory.sizeWarning === 'block') return 'MEMORY.md ใหญ่มาก ควรสรุปก่อนเพิ่ม'
-  if (agent.memory.sizeWarning === 'warn') return 'MEMORY.md ใกล้ใหญ่เกิน budget'
-  if (agent.memory.injectedLikely === 'truncated') return 'อาจถูกตัดบางส่วนตอนส่งเข้า model'
-  return 'ขนาดยังอยู่ในช่วงปลอดภัย'
+function tabStatus(tab: MemoryTab): AgentMemoryStatus | undefined {
+  if (tab === 'active' || tab === 'soft' || tab === 'blocked' || tab === 'deleted') return tab
+  return undefined
 }
 
-function evidenceFromText(text: string) {
-  return text
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .slice(0, 12)
-    .map(line => ({ note: line }))
-}
-
-function sourceIdsFromText(text: string) {
-  return text
-    .split(/[\n,]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-    .slice(0, 50)
-}
-
-function memoryTabFromSearch(): MemoryTab | null {
-  const tabParam = new URLSearchParams(window.location.search).get('tab')
-  if (tabParam === 'overview' || tabParam === 'learning' || tabParam === 'files' || tabParam === 'backups') return tabParam
+function tabFromSearch(): MemoryTab | null {
+  if (typeof window === 'undefined') return null
+  const value = new URLSearchParams(window.location.search).get('tab')
+  if (value === 'active' || value === 'soft' || value === 'blocked' || value === 'deleted' || value === 'sources' || value === 'settings' || value === 'files' || value === 'backups') return value
   return null
 }
 
 export default function MemoryPage() {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<MemoryTab>('overview')
-  const [selectedAgentId, setSelectedAgentId] = useState('')
-  const [candidateStatus, setCandidateStatus] = useState('pending')
+  const [tab, setTab] = useState<MemoryTab>(() => tabFromSearch() || 'active')
+  const [agentId, setAgentId] = useState('')
+  const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [scopeFilter, setScopeFilter] = useState('all')
   const [viewDialog, setViewDialog] = useState<{ title: string; content: string; loading?: boolean } | null>(null)
-  const [applyCandidate, setApplyCandidate] = useState<MemoryLearningCandidate | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<AgentMemory | null>(null)
   const [rollbackBackup, setRollbackBackup] = useState<MemoryBackup | null>(null)
-  const [form, setForm] = useState({
+  const [memoryForm, setMemoryForm] = useState({
+    type: 'workflow_hint' as MemoryType,
+    scope: 'agent' as MemoryScope,
+    status: 'active' as AgentMemoryStatus,
+    content: '',
+  })
+  const [policyDraft, setPolicyDraft] = useState({
     agentId: '',
-    targetType: 'memory' as MemoryLearningTargetType,
-    summary: '',
-    evidenceText: '',
-    sourceTurnIdsText: '',
-    confidence: '0.8',
+    mode: 'observe_only' as MemoryPolicyMode,
+    maxContextChars: '1200',
+    allowChatTeaching: false,
   })
 
-  useEffect(() => {
-    const nextTab = memoryTabFromSearch()
-    if (!nextTab) return undefined
-    const timeout = window.setTimeout(() => setTab(nextTab), 0)
-    return () => window.clearTimeout(timeout)
-  }, [])
-
-  const { data: agents = [], isLoading } = useQuery({
+  const { data: agents = [] } = useQuery({
     queryKey: ['memory-status'],
     queryFn: getMemoryStatus,
     refetchInterval: 30000,
   })
 
-  const effectiveAgentId = selectedAgentId || agents[0]?.agentId || ''
-  const candidateAgentId = form.agentId || effectiveAgentId
+  const effectiveAgentId = agentId || agents[0]?.agentId || ''
+  const currentAgent = agents.find(agent => agent.agentId === effectiveAgentId)
 
-  const { data: candidateData, isLoading: candidatesLoading } = useQuery({
-    queryKey: ['memory-learning-candidates', candidateStatus, effectiveAgentId],
-    queryFn: () => getMemoryLearningCandidates({
-      status: candidateStatus === 'all' ? undefined : candidateStatus,
+  const { data: memoriesData, isLoading: memoriesLoading } = useQuery({
+    queryKey: ['agent-memories', effectiveAgentId, tab, query, typeFilter, scopeFilter],
+    queryFn: () => getAgentMemories({
       agentId: effectiveAgentId || undefined,
-      limit: 200,
+      status: tabStatus(tab),
+      q: query || undefined,
+      type: typeFilter === 'all' ? undefined : typeFilter,
+      scope: scopeFilter === 'all' ? undefined : scopeFilter,
+      limit: 300,
     }),
+    enabled: Boolean(effectiveAgentId && tabStatus(tab)),
+    retry: false,
+  })
+
+  const { data: observationsData, isLoading: observationsLoading } = useQuery({
+    queryKey: ['memory-observations', effectiveAgentId, query, typeFilter, tab],
+    queryFn: () => getMemoryObservations({
+      agentId: effectiveAgentId || undefined,
+      q: query || undefined,
+      type: typeFilter === 'all' ? undefined : typeFilter,
+      limit: 300,
+    }),
+    enabled: Boolean(effectiveAgentId && tab === 'sources'),
+    retry: false,
+  })
+
+  const { data: policyData } = useQuery({
+    queryKey: ['memory-policies'],
+    queryFn: getMemoryPolicies,
     retry: false,
   })
 
   const { data: backupData } = useQuery({
     queryKey: ['memory-backups', effectiveAgentId],
     queryFn: () => getMemoryBackups(effectiveAgentId),
-    enabled: Boolean(effectiveAgentId),
+    enabled: Boolean(effectiveAgentId && tab === 'backups'),
     retry: false,
   })
 
-  const summary = useMemo(() => {
-    const memoryCount = agents.filter(agent => agent.memory.exists).length
-    const dreamsCount = agents.filter(agent => agent.dreams.exists).length
-    const dailyCount = agents.reduce((sum, agent) => sum + (agent.dailyMemory?.fileCount || 0), 0)
-    const warningCount = agents.filter(agent => agent.memory.sizeWarning === 'warn' || agent.memory.sizeWarning === 'block' || agent.memory.injectedLikely === 'truncated').length
-    return { memoryCount, dreamsCount, dailyCount, warningCount }
-  }, [agents])
+  const selectedPolicy = useMemo(() => {
+    return policyData?.policies.find(policy => policy.agentId === effectiveAgentId) || {
+      agentId: effectiveAgentId,
+      mode: currentAgent?.autoLearn?.autoLearnMode || 'observe_only',
+      maxContextChars: currentAgent?.autoLearn?.maxContextChars || 1200,
+      safeTypes: ['terminology', 'preference', 'workflow_hint', 'faq_pattern', 'entity_alias'] as MemoryType[],
+      allowChatTeaching: false,
+      retentionDays: null,
+    }
+  }, [currentAgent?.autoLearn?.autoLearnMode, currentAgent?.autoLearn?.maxContextChars, effectiveAgentId, policyData?.policies])
+
+  const policyForm = useMemo(() => {
+    if (policyDraft.agentId === selectedPolicy.agentId) return policyDraft
+    return {
+      agentId: selectedPolicy.agentId,
+      mode: selectedPolicy.mode,
+      maxContextChars: String(selectedPolicy.maxContextChars || 1200),
+      allowChatTeaching: Boolean(selectedPolicy.allowChatTeaching),
+    }
+  }, [policyDraft, selectedPolicy.agentId, selectedPolicy.allowChatTeaching, selectedPolicy.maxContextChars, selectedPolicy.mode])
+
+  function updatePolicyDraft(patch: Partial<typeof policyForm>) {
+    setPolicyDraft(prev => ({
+      ...(prev.agentId === selectedPolicy.agentId ? prev : policyForm),
+      ...patch,
+      agentId: selectedPolicy.agentId,
+    }))
+  }
+
+  function invalidateMemory() {
+    queryClient.invalidateQueries({ queryKey: ['memory-status'] })
+    queryClient.invalidateQueries({ queryKey: ['agent-memories'] })
+    queryClient.invalidateQueries({ queryKey: ['memory-observations'] })
+    queryClient.invalidateQueries({ queryKey: ['memory-policies'] })
+    queryClient.invalidateQueries({ queryKey: ['memory-backups'] })
+  }
 
   async function openView(title: string, loader: () => Promise<string>) {
     setViewDialog({ title, content: '', loading: true })
@@ -199,60 +254,79 @@ export default function MemoryPage() {
     }
   }
 
-  function invalidateMemory() {
-    queryClient.invalidateQueries({ queryKey: ['memory-status'] })
-    queryClient.invalidateQueries({ queryKey: ['memory-learning-candidates'] })
-    queryClient.invalidateQueries({ queryKey: ['memory-backups'] })
-  }
-
   const createMutation = useMutation({
-    mutationFn: () => createMemoryLearningCandidate({
-      agentId: candidateAgentId,
-      targetType: form.targetType,
-      summary: form.summary.trim(),
-      evidence: evidenceFromText(form.evidenceText),
-      sourceTurnIds: sourceIdsFromText(form.sourceTurnIdsText),
-      confidence: Number(form.confidence),
+    mutationFn: () => createAgentMemory({
+      agentId: effectiveAgentId,
+      type: memoryForm.type,
+      scope: memoryForm.scope,
+      status: memoryForm.status,
+      content: memoryForm.content.trim(),
+      sourceAuthority: 'admin_config',
     }),
-    onSuccess: candidate => {
-      toast.success(candidate.deduped ? 'มี candidate นี้อยู่แล้ว' : 'สร้าง Learning Candidate แล้ว')
-      setForm(f => ({ ...f, summary: '', evidenceText: '', sourceTurnIdsText: '' }))
-      invalidateMemory()
-      setTab('learning')
-    },
-    onError: err => toast.error(err instanceof Error ? err.message : 'สร้าง candidate ไม่สำเร็จ'),
-  })
-
-  const approveMutation = useMutation({
-    mutationFn: approveMemoryLearningCandidate,
     onSuccess: () => {
-      toast.success('อนุมัติ candidate แล้ว')
+      toast.success('เพิ่ม memory แล้ว')
+      setAddOpen(false)
+      setMemoryForm(f => ({ ...f, content: '' }))
       invalidateMemory()
     },
-    onError: err => toast.error(err instanceof Error ? err.message : 'อนุมัติไม่สำเร็จ'),
+    onError: err => toast.error(err instanceof Error ? err.message : 'เพิ่ม memory ไม่สำเร็จ'),
   })
 
-  const rejectMutation = useMutation({
-    mutationFn: rejectMemoryLearningCandidate,
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<Pick<AgentMemory, 'status' | 'type' | 'scope' | 'content' | 'confidence' | 'evidence'>> }) => updateAgentMemory(id, body),
     onSuccess: () => {
-      toast.success('Reject candidate แล้ว')
+      toast.success('อัปเดต memory แล้ว')
       invalidateMemory()
     },
-    onError: err => toast.error(err instanceof Error ? err.message : 'Reject ไม่สำเร็จ'),
+    onError: err => toast.error(err instanceof Error ? err.message : 'อัปเดต memory ไม่สำเร็จ'),
   })
 
-  const applyMutation = useMutation({
-    mutationFn: (candidate: MemoryLearningCandidate) => applyMemoryLearningCandidate(candidate.id),
-    onSuccess: result => {
-      toast.success('Apply เข้า MEMORY.md แล้ว')
-      setApplyCandidate(null)
-      setViewDialog({
-        title: 'Apply result',
-        content: JSON.stringify(result.result, null, 2),
-      })
+  const deleteMutation = useMutation({
+    mutationFn: (memory: AgentMemory) => deleteAgentMemory(memory.id, true),
+    onSuccess: () => {
+      toast.success('ลบ memory และกันไม่ให้เรียนซ้ำแล้ว')
+      setDeleteTarget(null)
       invalidateMemory()
     },
-    onError: err => toast.error(err instanceof Error ? err.message : 'Apply ไม่สำเร็จ'),
+    onError: err => toast.error(err instanceof Error ? err.message : 'ลบ memory ไม่สำเร็จ'),
+  })
+
+  const blockMutation = useMutation({
+    mutationFn: (memory: AgentMemory) => blockMemoryRelearn(memory.id, 'Blocked from Memory Control Center'),
+    onSuccess: () => {
+      toast.success('ย้ายไป Blocked และสร้าง tombstone แล้ว')
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Block relearn ไม่สำเร็จ'),
+  })
+
+  const promoteMutation = useMutation({
+    mutationFn: (observation: MemoryObservation) => promoteMemoryObservation(observation.id, {
+      status: observation.risk === 'high' ? 'blocked' : 'soft',
+      type: observation.type,
+      scope: observation.scope,
+      content: observation.summary,
+      confidence: observation.confidence,
+    }),
+    onSuccess: () => {
+      toast.success('Promote observation เป็น memory แล้ว')
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Promote ไม่สำเร็จ'),
+  })
+
+  const policyMutation = useMutation({
+    mutationFn: () => putMemoryPolicy(effectiveAgentId, {
+      mode: policyForm.mode,
+      maxContextChars: Number(policyForm.maxContextChars),
+      allowChatTeaching: policyForm.allowChatTeaching,
+      safeTypes: ['terminology', 'preference', 'workflow_hint', 'faq_pattern', 'entity_alias'],
+    }),
+    onSuccess: () => {
+      toast.success('บันทึก Auto-Learn policy แล้ว')
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'บันทึก policy ไม่สำเร็จ'),
   })
 
   const rollbackMutation = useMutation({
@@ -266,427 +340,375 @@ export default function MemoryPage() {
     onError: err => toast.error(err instanceof Error ? err.message : 'Rollback ไม่สำเร็จ'),
   })
 
-  const candidates = candidateData?.candidates ?? []
+  const memories = memoriesData?.memories ?? []
+  const observations = observationsData?.observations ?? []
+  const summary = currentAgent?.autoLearn || {
+    autoLearnMode: 'observe_only',
+    activeMemoryCount: 0,
+    softMemoryCount: 0,
+    blockedCount: 0,
+    deletedCount: 0,
+    estimatedInjectedChars: 0,
+    maxContextChars: 1200,
+  }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Memory Learning</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Memory Control Center</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            เลือกสิ่งที่ chatbot ควรเรียนรู้จากบทสนทนาจริง แล้วให้ admin ตรวจทานก่อนนำไปใช้กับ agent
+            คุมสิ่งที่ OpenClaw จำได้จริง แยกข้อมูลที่ใช้ตอบจริง ข้อมูลชั่วคราว เรื่องที่ถูก block และแหล่งที่มาจากบทสนทนา
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={summary.warningCount ? 'secondary' : 'outline'}>{summary.warningCount} size warnings</Badge>
-          <Badge variant="outline">{summary.memoryCount} MEMORY.md</Badge>
-          <Badge variant="outline">{summary.dreamsCount} DREAMS.md</Badge>
+        <div className="flex flex-wrap gap-2">
+          <Select value={effectiveAgentId} onValueChange={value => setAgentId(value || '')}>
+            <SelectTrigger className="w-[180px]" aria-label="เลือก agent"><SelectValue placeholder="เลือก agent" /></SelectTrigger>
+            <SelectContent>
+              {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button onClick={() => setAddOpen(true)} disabled={!effectiveAgentId}>
+            <Plus className="size-4" />
+            เพิ่ม Memory
+          </Button>
         </div>
       </div>
 
-      <section className="rounded-xl border bg-card">
-        <div className="border-b p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h2 className="text-base font-semibold">Learning Loop ทำงานอย่างไร</h2>
-              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                ระบบนี้ไม่ train model และไม่เขียนความจำให้อัตโนมัติ ทุกอย่างต้องผ่านคิวตรวจของ admin ก่อน
-              </p>
-            </div>
-            <Button type="button" variant="outline" onClick={() => setTab('learning')}>
-              <Lightbulb className="size-4" />
-              เปิด Learning Review
-            </Button>
-          </div>
-        </div>
-        <div className="grid gap-0 divide-y lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-          {learningSteps.map(step => (
-            <div key={step.title} className="p-4">
-              <p className="text-sm font-medium">{step.title}</p>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
-            </div>
-          ))}
-        </div>
+      <section className="grid gap-3 lg:grid-cols-4">
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">โหมด Auto-Learn</p>
+            <p className="mt-2 text-xl font-semibold">{modeLabel(summary.autoLearnMode)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">ค่าเริ่มต้นคือ observe-only เพื่อไม่ให้จำผิดเอง</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">ใช้ตอบจริง</p>
+            <p className="mt-2 text-xl font-semibold">{summary.activeMemoryCount}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Active memory ที่ runtime สามารถใช้ได้เมื่อ policy เปิด</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">ชั่วคราว</p>
+            <p className="mt-2 text-xl font-semibold">{summary.softMemoryCount}</p>
+            <p className="mt-1 text-xs text-muted-foreground">ใช้กับ session/contact หรือข้อมูลที่ยังไม่ควรเป็น truth</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">งบ prompt</p>
+            <p className="mt-2 text-xl font-semibold">{formatChars(summary.estimatedInjectedChars)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">สูงสุดต่อ turn {formatChars(summary.maxContextChars)}</p>
+          </CardContent>
+        </Card>
       </section>
 
-      <Tabs value={tab} onValueChange={value => setTab(value as MemoryTab)} className="gap-4">
-        <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="learning">Learning Review</TabsTrigger>
-          <TabsTrigger value="files">Memory Files</TabsTrigger>
-          <TabsTrigger value="backups">Backups</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-3">
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm font-medium">ใช้ตอบจริง</p>
-                <p className="mt-2 text-2xl font-semibold">{summary.memoryCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">MEMORY.md คือความจำที่ runtime อ่านเข้า context ของ agent</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm font-medium">บันทึกระหว่างวัน</p>
-                <p className="mt-2 text-2xl font-semibold">{summary.dailyCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">memory/*.md ใช้ทบทวนและหา insight ไม่ควรใส่ทั้งหมดเข้า prompt</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm font-medium">ไดอารี่สำหรับ review</p>
-                <p className="mt-2 text-2xl font-semibold">{summary.dreamsCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">DREAMS.md เป็นข้อสังเกตหลังบ้าน ยังไม่ใช่ความจริงที่ chatbot ควรจำ</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid gap-3 xl:grid-cols-3">
-            {isLoading ? (
-              <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด memory status...</div>
-            ) : null}
-            {agents.map(agent => (
-              <Card key={agent.agentId}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="text-base font-mono">{agent.agentId}</CardTitle>
-                    <Badge variant={agent.dreaming.enabled ? 'default' : 'secondary'}>
-                      {agent.dreaming.enabled ? 'Dreaming เปิด' : 'Dreaming ปิด'}
-                    </Badge>
-                  </div>
-                  <p className="break-all text-xs text-muted-foreground">{agent.workspace}</p>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">MEMORY.md</p>
-                      <Badge variant={agent.memory.sizeWarning === 'ok' ? 'outline' : 'secondary'}>{agent.memory.injectedLikely || 'missing'}</Badge>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {agent.memory.exists ? `${formatChars(agent.memory.sizeChars)} · ${formatTokens(agent.memory.estimatedTokens)}` : 'ยังไม่มีไฟล์'}
-                    </p>
-                    <p className="mt-2 text-xs">{sizeWarningText(agent)}</p>
-                  </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">{agent.dreams.canonicalName || 'DREAMS.md'}</p>
-                      <Badge variant={agent.dreams.exists ? 'outline' : 'secondary'}>{agent.dreams.exists ? 'มีไฟล์' : 'ยังว่าง'}</Badge>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {agent.dreams.exists ? `${formatChars(agent.dreams.sizeChars)} · review diary` : 'สร้างหลัง dreaming phase มี output'}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="learning" className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">เพิ่มรายการให้ตรวจ</CardTitle>
-                <p className="text-sm text-muted-foreground">ใช้เมื่อเจอ pattern จากบทสนทนาที่ควรจำหรือควรส่งต่อทีมปรับระบบ</p>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">Agent</span>
-                  <Select value={candidateAgentId} onValueChange={value => setForm(f => ({ ...f, agentId: value || '' }))}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="เลือก agent" /></SelectTrigger>
-                    <SelectContent>
-                      {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">ควรนำไปปรับส่วนไหน</span>
-                  <Select value={form.targetType} onValueChange={value => setForm(f => ({ ...f, targetType: (value || 'memory') as MemoryLearningTargetType }))}>
-                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {targetOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">{targetOptions.find(option => option.value === form.targetType)?.description}</p>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">สิ่งที่ควรเรียนรู้</span>
-                  <Textarea
-                    rows={4}
-                    value={form.summary}
-                    onChange={event => setForm(f => ({ ...f, summary: event.target.value }))}
-                    placeholder="เช่น ลูกค้าร้านนี้มักถามอะไหล่ด้วยชื่ออะไหล่ + รุ่นรถ + ตำแหน่งซ้าย/ขวา"
-                  />
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">หลักฐาน</span>
-                  <Textarea
-                    rows={3}
-                    value={form.evidenceText}
-                    onChange={event => setForm(f => ({ ...f, evidenceText: event.target.value }))}
-                    placeholder="หนึ่งบรรทัดต่อหลักฐาน เช่น keyword, issue tag, tool result"
-                  />
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">Source turn ids</span>
-                  <Input
-                    value={form.sourceTurnIdsText}
-                    onChange={event => setForm(f => ({ ...f, sourceTurnIdsText: event.target.value }))}
-                    placeholder="turn id คั่นด้วย comma หรือขึ้นบรรทัดใหม่"
-                  />
-                </label>
-                <Button
-                  className="w-full"
-                  disabled={!candidateAgentId || !form.summary.trim() || createMutation.isPending}
-                  onClick={() => createMutation.mutate()}
-                >
-                  <Lightbulb className="size-4" />
-                  สร้างรายการตรวจ
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <CardTitle className="text-base">รายการที่รอ admin ตรวจ</CardTitle>
-                    <p className="text-sm text-muted-foreground">อนุมัติก่อนเสมอ เฉพาะ MEMORY.md เท่านั้นที่ระบบเขียนให้อัตโนมัติใน v1</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Select value={effectiveAgentId} onValueChange={value => setSelectedAgentId(value || '')}>
-                      <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <Select value={candidateStatus} onValueChange={value => setCandidateStatus(value || 'pending')}>
-                      <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pending">pending</SelectItem>
-                        <SelectItem value="approved">approved</SelectItem>
-                        <SelectItem value="applied">applied</SelectItem>
-                        <SelectItem value="rejected">rejected</SelectItem>
-                        <SelectItem value="all">all</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {candidateData && !candidateData.enabled ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                    Learning Review ถูกปิดไว้ ตั้ง `MEMORY_LEARNING_REVIEW_ENABLED=1` ใน openclaw-api ก่อนใช้งาน
-                  </div>
-                ) : null}
-                {candidatesLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด candidates...</div> : null}
-                {!candidatesLoading && !candidates.length ? (
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    ยังไม่มีรายการในตัวกรองนี้ สร้างจากฟอร์มด้านซ้าย หรือจากหน้า Conversation Analysis
-                  </div>
-                ) : null}
-                <div className="space-y-3">
-                  {candidates.map(candidate => (
-                    <div key={candidate.id} className="rounded-lg border p-3">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={statusVariant(candidate.status)}>{candidate.status}</Badge>
-                            <Badge variant="outline">{candidate.agentId}</Badge>
-                            <Badge variant="secondary">{targetLabel(candidate.targetType)}</Badge>
-                            {candidate.confidence !== null ? <Badge variant="outline">{Math.round(candidate.confidence * 100)}%</Badge> : null}
-                          </div>
-                          <p className="mt-2 whitespace-pre-wrap text-sm font-medium">{candidate.summary}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {candidate.sourceTurnIds.length ? `source: ${candidate.sourceTurnIds.slice(0, 3).join(', ')}` : 'no source turn'} · updated {formatDateTime(candidate.updatedAt)}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 flex-wrap gap-2">
-                          {candidate.status === 'pending' ? (
-                            <Button size="sm" variant="outline" onClick={() => approveMutation.mutate(candidate.id)} disabled={approveMutation.isPending}>
-                              <CheckCircle2 className="size-4" />
-                              Approve
-                            </Button>
-                          ) : null}
-                          {candidate.status === 'approved' ? (
-                            <Button size="sm" onClick={() => setApplyCandidate(candidate)} disabled={candidate.targetType !== 'memory'}>
-                              <ShieldCheck className="size-4" />
-                              Apply
-                            </Button>
-                          ) : null}
-                          {candidate.status !== 'rejected' && candidate.status !== 'applied' ? (
-                            <Button size="sm" variant="ghost" onClick={() => rejectMutation.mutate(candidate.id)} disabled={rejectMutation.isPending}>
-                              <XCircle className="size-4" />
-                              Reject
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                      {candidate.targetType !== 'memory' ? (
-                        <div className="mt-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">
-                          Target นี้เป็นรายการให้ทีม review ต่อ ยังไม่เขียนเข้า agent อัตโนมัติ เพื่อกันจำผิดชั้นหรือแก้ระบบผิดจุด
-                        </div>
-                      ) : null}
-                      {candidate.evidence.length ? (
-                        <details className="mt-3 rounded-md border bg-muted/20">
-                          <summary className="cursor-pointer px-3 py-2 text-xs font-medium">Evidence</summary>
-                          <pre className="max-h-56 overflow-auto border-t p-3 text-xs">{JSON.stringify(candidate.evidence, null, 2)}</pre>
-                        </details>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="files" className="space-y-4">
-          <div className="grid gap-3 xl:grid-cols-2">
-            {agents.map(agent => (
-              <Card key={agent.agentId}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base font-mono">{agent.agentId}</CardTitle>
-                  <p className="break-all text-xs text-muted-foreground">{agent.workspace}</p>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-medium">MEMORY.md</p>
-                        <p className="text-xs text-muted-foreground">{agent.memory.exists ? formatChars(agent.memory.sizeChars) : 'ยังไม่มีไฟล์'}</p>
-                      </div>
-                      {agent.memory.exists ? (
-                        <Button variant="outline" size="sm" onClick={() => openView(`${agent.agentId} — MEMORY.md`, () => getMemoryContent(agent.agentId))}>อ่าน</Button>
-                      ) : null}
-                    </div>
-                    {agent.memory.preview ? <pre className="mt-2 max-h-28 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-relaxed">{shortPreview(agent.memory.preview)}</pre> : null}
-                  </div>
-
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-medium">{agent.dreams.canonicalName || 'DREAMS.md'}</p>
-                        <p className="text-xs text-muted-foreground">{agent.dreams.exists ? formatChars(agent.dreams.sizeChars) : 'ยังไม่มีไฟล์'}</p>
-                      </div>
-                      {agent.dreams.exists ? (
-                        <Button variant="outline" size="sm" onClick={() => openView(`${agent.agentId} — ${agent.dreams.canonicalName || 'DREAMS.md'}`, () => getDreamsContent(agent.agentId))}>อ่าน</Button>
-                      ) : null}
-                    </div>
-                    {agent.dreams.preview ? <pre className="mt-2 max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-relaxed">{shortPreview(agent.dreams.preview, 360)}</pre> : null}
-                  </div>
-
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-medium">memory/*.md</p>
-                        <p className="text-xs text-muted-foreground">{agent.dailyMemory?.fileCount || 0} files · {formatChars(agent.dailyMemory?.totalChars || 0)}</p>
-                      </div>
-                    </div>
-                    <div className="mt-2 max-h-56 space-y-1 overflow-auto">
-                      {(agent.dailyMemory?.files || []).map(file => (
-                        <div key={file} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-muted">
-                          <span className="truncate font-mono text-xs">{file}</span>
-                          <Button variant="ghost" size="sm" onClick={() => openView(`${agent.agentId} — ${file}`, () => getDailyMemoryContent(agent.agentId, file))}>อ่าน</Button>
-                        </div>
-                      ))}
-                      {!agent.dailyMemory?.files?.length ? <p className="text-xs text-muted-foreground">ยังไม่มี daily memory</p> : null}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="backups" className="space-y-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <CardTitle className="text-base">MEMORY.md Backups</CardTitle>
-                  <p className="text-sm text-muted-foreground">backup ถูกสร้างก่อน apply learning candidate หรือ rollback</p>
-                </div>
-                <Select value={effectiveAgentId} onValueChange={value => setSelectedAgentId(value || '')}>
-                  <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+      <div className="rounded-xl border bg-card">
+        <div className="border-b p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold">ค้นหาและจัดการความจำ</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Admin ไม่ต้อง approve ทุกเรื่อง แต่ต้องค้นหา ลบ และกันการเรียนซ้ำได้เมื่อ chatbot จำผิด
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_150px_150px]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={query} onChange={event => setQuery(event.target.value)} className="pl-8" placeholder="ค้นหา memory หรือ observation..." />
               </div>
-            </CardHeader>
-            <CardContent>
-              {!backupData?.backups.length ? (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  ยังไม่มี backup จาก Learning Review สำหรับ agent นี้
+              <Select value={typeFilter} onValueChange={value => setTypeFilter(value || 'all')}>
+                <SelectTrigger aria-label="กรองประเภท memory"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">ทุกประเภท</SelectItem>
+                  {memoryTypeOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={scopeFilter} onValueChange={value => setScopeFilter(value || 'all')}>
+                <SelectTrigger aria-label="กรอง scope memory"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">ทุก scope</SelectItem>
+                  {scopeOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        <Tabs value={tab} onValueChange={value => setTab(value as MemoryTab)} className="gap-0">
+          <div className="border-b px-4 py-3">
+            <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
+              <TabsTrigger value="active">Active</TabsTrigger>
+              <TabsTrigger value="soft">Soft</TabsTrigger>
+              <TabsTrigger value="blocked">Blocked</TabsTrigger>
+              <TabsTrigger value="deleted">Deleted</TabsTrigger>
+              <TabsTrigger value="sources">Sources</TabsTrigger>
+              <TabsTrigger value="settings">Settings</TabsTrigger>
+              <TabsTrigger value="files">Files</TabsTrigger>
+              <TabsTrigger value="backups">Backups</TabsTrigger>
+            </TabsList>
+          </div>
+
+          {(['active', 'soft', 'blocked', 'deleted'] as MemoryTab[]).map(statusTab => (
+            <TabsContent key={statusTab} value={statusTab} className="p-4">
+              {memoriesLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด memory...</div> : null}
+              {!memoriesLoading && !memories.length ? (
+                <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
+                  ยังไม่มี memory ในหมวดนี้ ใช้ปุ่ม “เพิ่ม Memory” หรือ promote จาก Sources เมื่อพร้อมใช้งาน
                 </div>
               ) : null}
-              <div className="space-y-2">
-                {backupData?.backups.map(backup => (
-                  <div key={backup.backupId} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="font-mono text-sm">{backup.fileName}</p>
-                      <p className="text-xs text-muted-foreground">{formatDateTime(backup.createdAt)} · {formatBytes(backup.sizeBytes)}</p>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => setRollbackBackup(backup)}>
-                      <ArchiveRestore className="size-4" />
-                      Rollback
-                    </Button>
-                  </div>
+              <div className="grid gap-3 xl:grid-cols-2">
+                {memories.map(memory => (
+                  <MemoryCard
+                    key={memory.id}
+                    memory={memory}
+                    onDisable={() => updateMutation.mutate({ id: memory.id, body: { status: memory.status === 'active' ? 'soft' : 'active' } })}
+                    onBlock={() => blockMutation.mutate(memory)}
+                    onDelete={() => setDeleteTarget(memory)}
+                    busy={updateMutation.isPending || blockMutation.isPending}
+                  />
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </TabsContent>
+          ))}
 
-      <Dialog open={!!viewDialog} onOpenChange={open => { if (!open) setViewDialog(null) }}>
-        <DialogContent className="grid max-h-[86vh] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden sm:max-w-4xl">
+          <TabsContent value="sources" className="p-4">
+            <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+              Sources คือสิ่งที่ระบบสังเกตจากบทสนทนา ยังไม่ใช่ความจำที่ใช้ตอบจริง จนกว่าจะ promote ตาม policy
+            </div>
+            {observationsLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด learning signals...</div> : null}
+            {!observationsLoading && !observations.length ? (
+              <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
+                ยังไม่มี learning signal สำหรับ agent นี้ ลองเปิด conversation detail หรือรัน backfill เพื่อให้ระบบ ingest observation
+              </div>
+            ) : null}
+            <div className="space-y-3">
+              {observations.map(observation => (
+                <ObservationRow
+                  key={observation.id}
+                  observation={observation}
+                  onPromote={() => promoteMutation.mutate(observation)}
+                  busy={promoteMutation.isPending}
+                />
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="settings" className="p-4">
+            <div className="grid gap-4 lg:grid-cols-[420px_minmax(0,1fr)]">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Settings2 className="size-4" />
+                    Auto-Learn Policy
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    เปลี่ยนโหมดต่อ agent ได้ โดยค่าแนะนำสำหรับ production คือเริ่มจาก Observe only
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">โหมด</span>
+                    <Select value={policyForm.mode} onValueChange={value => updatePolicyDraft({ mode: value as MemoryPolicyMode })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {policyModes.map(mode => <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">{policyModes.find(mode => mode.value === policyForm.mode)?.help}</p>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">Memory context สูงสุดต่อ turn</span>
+                    <Input value={policyForm.maxContextChars} onChange={event => updatePolicyDraft({ maxContextChars: event.target.value })} inputMode="numeric" />
+                    <p className="text-xs text-muted-foreground">ใช้คุม token ไม่ให้ memory ยาวเกินจำเป็น</p>
+                  </label>
+                  <label className="flex items-start gap-2 rounded-lg border p-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={policyForm.allowChatTeaching}
+                      onChange={event => updatePolicyDraft({ allowChatTeaching: event.target.checked })}
+                    />
+                    <span>
+                      <span className="block text-sm font-medium">อนุญาต staff สอนผ่าน chat</span>
+                      <span className="block text-xs text-muted-foreground">ควรเปิดเฉพาะ agent หรือ channel ที่รู้ว่า user เป็น staff/admin</span>
+                    </span>
+                  </label>
+                  <Button onClick={() => policyMutation.mutate()} disabled={!effectiveAgentId || policyMutation.isPending}>
+                    <ShieldCheck className="size-4" />
+                    บันทึก Policy
+                  </Button>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">กติกาความปลอดภัย</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-muted-foreground">
+                  <p>ระบบจะไม่จำราคา สต็อก ต้นทุน สินค้ามี/ไม่มี หรือสินค้าทดแทนจากบทสนทนาเป็นความจริงถาวร</p>
+                  <p>ถ้า admin ลบ memory ระบบจะสร้าง tombstone เพื่อกันการเรียนซ้ำทันทีจาก pattern เดิม</p>
+                  <p>Business Profile, SOUL และ MCP/Search ยังเป็นชั้นแยก ไม่ถูกแก้อัตโนมัติจาก Auto-Learn v2</p>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="files" className="p-4">
+            <div className="grid gap-3 xl:grid-cols-2">
+              {agents.map(agent => (
+                <Card key={agent.agentId}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base font-mono">{agent.agentId}</CardTitle>
+                    <p className="break-all text-xs text-muted-foreground">{agent.workspace}</p>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <FileRow
+                      title="MEMORY.md"
+                      subtitle={agent.memory.exists ? `${formatChars(agent.memory.sizeChars)} · ${agent.memory.injectedLikely}` : 'ยังไม่มีไฟล์'}
+                      preview={agent.memory.preview}
+                      canOpen={agent.memory.exists}
+                      onOpen={() => openView(`${agent.agentId} — MEMORY.md`, () => getMemoryContent(agent.agentId))}
+                    />
+                    <FileRow
+                      title={agent.dreams.canonicalName || 'DREAMS.md'}
+                      subtitle={agent.dreams.exists ? `${formatChars(agent.dreams.sizeChars)} · review diary` : 'ยังไม่มีไฟล์'}
+                      preview={agent.dreams.preview}
+                      canOpen={agent.dreams.exists}
+                      onOpen={() => openView(`${agent.agentId} — ${agent.dreams.canonicalName || 'DREAMS.md'}`, () => getDreamsContent(agent.agentId))}
+                    />
+                    <div className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">memory/*.md</p>
+                          <p className="text-xs text-muted-foreground">{agent.dailyMemory?.fileCount || 0} files · {formatChars(agent.dailyMemory?.totalChars || 0)}</p>
+                        </div>
+                      </div>
+                      <div className="mt-2 max-h-56 space-y-1 overflow-auto">
+                        {(agent.dailyMemory?.files || []).map(file => (
+                          <div key={file} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-muted">
+                            <span className="truncate font-mono text-xs">{file}</span>
+                            <Button variant="ghost" size="sm" onClick={() => openView(`${agent.agentId} — ${file}`, () => getDailyMemoryContent(agent.agentId, file))}>อ่าน</Button>
+                          </div>
+                        ))}
+                        {!agent.dailyMemory?.files?.length ? <p className="text-xs text-muted-foreground">ยังไม่มี daily memory</p> : null}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="backups" className="p-4">
+            {!backupData?.backups.length ? (
+              <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
+                ยังไม่มี backup จาก Learning Review หรือ rollback สำหรับ agent นี้
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              {backupData?.backups.map(backup => (
+                <div key={backup.backupId} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-mono text-sm">{backup.fileName}</p>
+                    <p className="text-xs text-muted-foreground">{formatDateTime(backup.createdAt)} · {formatBytes(backup.sizeBytes)}</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setRollbackBackup(backup)}>
+                    <ArchiveRestore className="size-4" />
+                    Rollback
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-h-[86vh] overflow-hidden sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-sm">
-              <FileText className="size-4" />
-              {viewDialog?.title}
-            </DialogTitle>
+            <DialogTitle>เพิ่ม Memory</DialogTitle>
           </DialogHeader>
-          <div className="min-h-0 overflow-auto overscroll-contain rounded-lg border bg-muted p-3">
-            {viewDialog?.loading ? (
-              <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
-            ) : (
-              <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed">{viewDialog?.content || '(ไฟล์ว่างเปล่า)'}</pre>
-            )}
+          <div className="min-h-0 space-y-3 overflow-auto pr-1">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="space-y-1.5">
+                <span className="text-sm font-medium">Status</span>
+                <Select value={memoryForm.status} onValueChange={value => setMemoryForm(f => ({ ...f, status: value as AgentMemoryStatus }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="soft">Soft</SelectItem>
+                    <SelectItem value="blocked">Blocked</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-sm font-medium">Type</span>
+                <Select value={memoryForm.type} onValueChange={value => setMemoryForm(f => ({ ...f, type: value as MemoryType }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {memoryTypeOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-sm font-medium">Scope</span>
+                <Select value={memoryForm.scope} onValueChange={value => setMemoryForm(f => ({ ...f, scope: value as MemoryScope }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {scopeOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium">ข้อความที่จะจำ</span>
+              <Textarea
+                rows={6}
+                value={memoryForm.content}
+                onChange={event => setMemoryForm(f => ({ ...f, content: event.target.value }))}
+                placeholder="เขียนเป็นข้อเท็จจริงสั้น ๆ ที่ปลอดภัย เช่น ลูกค้าร้านนี้มักส่งรูปก่อนแล้วถามต่อด้วยข้อความสั้น"
+              />
+            </label>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              ห้ามใส่ราคา สต็อก ต้นทุน token หรือข้อมูลลับลง memory เพราะข้อมูลเหล่านี้ต้องมาจาก tool เท่านั้น
+            </div>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>ยกเลิก</Button>
+            <Button onClick={() => createMutation.mutate()} disabled={!memoryForm.content.trim() || createMutation.isPending}>
+              <Plus className="size-4" />
+              เพิ่ม Memory
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!applyCandidate} onOpenChange={open => { if (!open) setApplyCandidate(null) }}>
-        <DialogContent className="max-w-xl sm:max-w-xl">
+      <Dialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null) }}>
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Apply เข้า MEMORY.md</DialogTitle>
+            <DialogTitle>ลบ memory และกันเรียนซ้ำ</DialogTitle>
           </DialogHeader>
-          {applyCandidate ? (
+          {deleteTarget ? (
             <div className="space-y-3 text-sm">
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-xs font-medium text-muted-foreground">จะเพิ่มใน managed section</p>
-                <p className="mt-2 whitespace-pre-wrap">{applyCandidate.summary}</p>
-              </div>
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                ระบบจะสร้าง backup ก่อนเขียน และจะไม่ทับ section ที่ admin/user เขียนเอง
-              </div>
+              <p>memory นี้จะถูกย้ายไป Deleted และสร้าง tombstone เพื่อกันไม่ให้ระบบเรียนเรื่องเดิมซ้ำทันที</p>
+              <div className="max-h-56 overflow-auto rounded-lg border bg-muted p-3 whitespace-pre-wrap">{deleteTarget.content}</div>
             </div>
           ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setApplyCandidate(null)}>ยกเลิก</Button>
-            <Button onClick={() => applyCandidate && applyMutation.mutate(applyCandidate)} disabled={applyMutation.isPending}>
-              <ShieldCheck className="size-4" />
-              Apply
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>ยกเลิก</Button>
+            <Button variant="destructive" onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget)} disabled={deleteMutation.isPending}>
+              <Trash2 className="size-4" />
+              ลบและกันเรียนซ้ำ
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!rollbackBackup} onOpenChange={open => { if (!open) setRollbackBackup(null) }}>
-        <DialogContent className="max-w-xl sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Rollback MEMORY.md</DialogTitle>
           </DialogHeader>
@@ -708,6 +730,143 @@ export default function MemoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!viewDialog} onOpenChange={open => { if (!open) setViewDialog(null) }}>
+        <DialogContent className="grid max-h-[86vh] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm">
+              <FileText className="size-4" />
+              {viewDialog?.title}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 overflow-auto overscroll-contain rounded-lg border bg-muted p-3">
+            {viewDialog?.loading ? (
+              <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed">{viewDialog?.content || '(ไฟล์ว่างเปล่า)'}</pre>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function MemoryCard({
+  memory,
+  onDisable,
+  onBlock,
+  onDelete,
+  busy,
+}: {
+  memory: AgentMemory
+  onDisable: () => void
+  onBlock: () => void
+  onDelete: () => void
+  busy: boolean
+}) {
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={statusVariant(memory.status)}>{memory.status}</Badge>
+            <Badge variant="outline">{typeLabel(memory.type)}</Badge>
+            <Badge variant="secondary">{scopeLabel(memory.scope)}</Badge>
+            {memory.confidence !== null ? <Badge variant="outline">{Math.round(memory.confidence * 100)}%</Badge> : null}
+          </div>
+          <p className="mt-3 whitespace-pre-wrap break-words text-sm font-medium leading-relaxed">{memory.content}</p>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+            <span>source: {memory.sourceAuthority}</span>
+            <span>used: {memory.usageCount}</span>
+            <span>updated: {formatDateTime(memory.updatedAt)}</span>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {memory.status !== 'deleted' ? (
+            <Button variant="outline" size="sm" onClick={onDisable} disabled={busy}>
+              <Clock3 className="size-4" />
+              {memory.status === 'active' ? 'ทำเป็น Soft' : 'Activate'}
+            </Button>
+          ) : null}
+          {memory.status !== 'blocked' && memory.status !== 'deleted' ? (
+            <Button variant="outline" size="sm" onClick={onBlock} disabled={busy}>
+              <Ban className="size-4" />
+              Block
+            </Button>
+          ) : null}
+          {memory.status !== 'deleted' ? (
+            <Button variant="destructive" size="sm" onClick={onDelete}>
+              <Trash2 className="size-4" />
+              ลบ
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ObservationRow({ observation, onPromote, busy }: { observation: MemoryObservation; onPromote: () => void; busy: boolean }) {
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={statusVariant(observation.status)}>{observation.status}</Badge>
+            <Badge variant={observation.risk === 'high' ? 'destructive' : 'outline'}>risk: {observation.risk}</Badge>
+            <Badge variant="outline">{typeLabel(observation.type)}</Badge>
+            <Badge variant="secondary">{observation.recommendedAction}</Badge>
+          </div>
+          <p className="mt-3 whitespace-pre-wrap break-words text-sm font-medium">{observation.summary}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            turn: {observation.sourceTurnId || '-'} · updated {formatDateTime(observation.updatedAt)}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={onPromote} disabled={busy || observation.status === 'promoted'}>
+          <Database className="size-4" />
+          Promote
+        </Button>
+      </div>
+      {Object.keys(observation.evidence || {}).length ? (
+        <details className="mt-3 rounded-md border bg-muted/20">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium">Evidence</summary>
+          <pre className="max-h-56 overflow-auto border-t p-3 text-xs">{JSON.stringify(observation.evidence, null, 2)}</pre>
+        </details>
+      ) : null}
+    </div>
+  )
+}
+
+function FileRow({
+  title,
+  subtitle,
+  preview,
+  canOpen,
+  onOpen,
+}: {
+  title: string
+  subtitle: string
+  preview?: string
+  canOpen?: boolean
+  onOpen: () => void
+}) {
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{title}</p>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+        {canOpen ? (
+          <Button variant="outline" size="sm" onClick={onOpen}>อ่าน</Button>
+        ) : null}
+      </div>
+      {preview ? (
+        <pre className="mt-2 max-h-28 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-relaxed">
+          {shortText(preview, 420)}
+        </pre>
+      ) : null}
     </div>
   )
 }

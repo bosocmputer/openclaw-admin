@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Archive, CalendarClock, ChevronRight, Download, FileText, Image as ImageIcon, Lightbulb, RefreshCw, Search, SlidersHorizontal, Tags, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Ban, Brain, CalendarClock, ChevronRight, Database, Download, FileText, Image as ImageIcon, Lightbulb, RefreshCw, Search, SlidersHorizontal, Tags, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
   backfillConversations,
+  createAgentMemory,
   createMemoryLearningCandidate,
   exportConversationAnalysis,
   getAgents,
@@ -15,11 +16,14 @@ import {
   getConversationInsights,
   getConversationIngestStatus,
   getMemoryLearningCandidates,
+  promoteMemoryObservation,
   type ConversationAnalysisParams,
   type ConversationIssue,
   type ConversationAnalysisTurn,
+  type MemoryObservation,
   type MemoryLearningCandidate,
   type MemoryLearningTargetType,
+  type MemoryType,
   type MonitorMedia,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -173,6 +177,23 @@ function evidencePreview(issue: ConversationIssue) {
   } catch {
     return shortText(String(issue.tag), 360)
   }
+}
+
+function memoryTypeLabel(type?: string) {
+  if (type === 'terminology') return 'คำศัพท์'
+  if (type === 'preference') return 'Preference'
+  if (type === 'workflow_hint') return 'Workflow'
+  if (type === 'faq_pattern') return 'FAQ'
+  if (type === 'entity_alias') return 'Alias'
+  if (type === 'staff_instruction') return 'Staff'
+  if (type === 'blocked_fact') return 'Blocked'
+  return type || 'Memory'
+}
+
+function learningDecisionVariant(decision?: string) {
+  if (decision === 'learned') return 'default'
+  if (decision === 'blocked') return 'destructive'
+  return 'secondary'
 }
 
 function conversationMediaUrl(media: MonitorMedia) {
@@ -454,7 +475,7 @@ export default function ConversationAnalysisPage() {
   })
 
   const exportMutation = useMutation({
-    mutationFn: async (request: { format?: 'csv' | 'jsonl' | 'markdown'; mode?: 'raw' | 'codex_review_pack' | 'issues_csv' | 'events_jsonl'; filename: string }) => {
+    mutationFn: async (request: { format?: 'csv' | 'jsonl' | 'markdown'; mode?: 'raw' | 'codex_review_pack' | 'learning_review_pack' | 'issues_csv' | 'events_jsonl'; filename: string }) => {
       const blob = await exportConversationAnalysis({ ...baseParams, format: request.format, mode: request.mode })
       return { blob, filename: request.filename }
     },
@@ -472,6 +493,9 @@ export default function ConversationAnalysisPage() {
   const hasTrace = events.some(event => event.type === 'trace')
   const selectedIssues = detail?.turn?.issues ?? selectedTurn?.issues ?? []
   const selectedMediaItems = detail?.turn?.media ?? selectedTurn?.media ?? []
+  const learningSignals = detail?.learningSignals ?? []
+  const memoryUsage = detail?.memoryUsage ?? []
+  const memoryDecisions = detail?.memoryDecisions ?? []
   const learningCandidatesByTurnId = useMemo(() => {
     const map = new Map<string, MemoryLearningCandidate[]>()
     for (const candidate of activeLearningCandidates(learningCandidateData?.candidates)) {
@@ -507,6 +531,78 @@ export default function ConversationAnalysisPage() {
       setLearningDialogOpen(false)
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'สร้าง Learning candidate ไม่สำเร็จ'),
+  })
+  const createTurnMemoryMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedTurn) throw new Error('ยังไม่ได้เลือก conversation')
+      const firstSignal = learningSignals[0]
+      return createAgentMemory({
+        agentId: selectedTurn.agentId || 'unknown',
+        status: firstSignal?.risk === 'high' ? 'blocked' : 'soft',
+        type: (firstSignal?.type || 'workflow_hint') as MemoryType,
+        scope: 'agent',
+        content: firstSignal?.summary || `จากบทสนทนา: ${shortText(selectedTurn.userText || selectedTurn.finalText || selectedTurn.id, 700)}`,
+        sourceAuthority: 'admin_from_conversation',
+        confidence: firstSignal?.confidence ?? 0.65,
+        evidence: {
+          source: 'conversation_analysis',
+          turnId: selectedTurn.id,
+          issueTags: selectedTurn.issueTags,
+          reviewTargets: selectedTurn.reviewTargets,
+        },
+        sourceTurnIds: [selectedTurn.id],
+      })
+    },
+    onSuccess: () => {
+      toast.success('สร้าง memory จาก conversation แล้ว')
+      queryClient.invalidateQueries({ queryKey: ['conversation-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-memories'] })
+      queryClient.invalidateQueries({ queryKey: ['memory-status'] })
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'สร้าง memory ไม่สำเร็จ'),
+  })
+  const blockTurnMemoryMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedTurn) throw new Error('ยังไม่ได้เลือก conversation')
+      return createAgentMemory({
+        agentId: selectedTurn.agentId || 'unknown',
+        status: 'blocked',
+        type: 'blocked_fact',
+        scope: 'agent',
+        content: `ห้ามจำเป็นความจริงถาวรจาก turn นี้: ${shortText(selectedTurn.userText || selectedTurn.finalText || selectedTurn.id, 700)}`,
+        sourceAuthority: 'admin_blocked_from_conversation',
+        confidence: 1,
+        evidence: {
+          source: 'conversation_analysis_block',
+          turnId: selectedTurn.id,
+          issueTags: selectedTurn.issueTags,
+        },
+        sourceTurnIds: [selectedTurn.id],
+      })
+    },
+    onSuccess: () => {
+      toast.success('บันทึกเป็น Blocked memory แล้ว')
+      queryClient.invalidateQueries({ queryKey: ['agent-memories'] })
+      queryClient.invalidateQueries({ queryKey: ['memory-status'] })
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Block memory ไม่สำเร็จ'),
+  })
+  const promoteObservationMutation = useMutation({
+    mutationFn: (signal: MemoryObservation) => promoteMemoryObservation(signal.id, {
+      status: signal.risk === 'high' ? 'blocked' : 'soft',
+      type: signal.type,
+      scope: signal.scope,
+      content: signal.summary,
+      confidence: signal.confidence,
+    }),
+    onSuccess: () => {
+      toast.success('Promote signal เป็น memory แล้ว')
+      queryClient.invalidateQueries({ queryKey: ['conversation-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-memories'] })
+      queryClient.invalidateQueries({ queryKey: ['memory-observations'] })
+      queryClient.invalidateQueries({ queryKey: ['memory-status'] })
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Promote signal ไม่สำเร็จ'),
   })
   const groupedTurns = useMemo(() => {
     const groups: Array<{ day: string; turns: ConversationAnalysisTurn[] }> = []
@@ -722,6 +818,7 @@ export default function ConversationAnalysisPage() {
               Export for Codex
             </Button>
             <Button variant="outline" disabled={exportDisabled} onClick={() => exportMutation.mutate({ mode: 'issues_csv', filename: 'conversation-issues.csv' })}>Issues CSV</Button>
+            <Button variant="outline" disabled={exportDisabled} onClick={() => exportMutation.mutate({ mode: 'learning_review_pack', filename: 'conversation-learning-review-pack.md' })}>Learning Evidence</Button>
             <Button variant="outline" disabled={exportDisabled} onClick={() => exportMutation.mutate({ mode: 'events_jsonl', filename: 'conversation-events.jsonl' })}>Events JSONL</Button>
             <Button variant="ghost" disabled={exportDisabled} onClick={() => exportMutation.mutate({ mode: 'raw', format: 'csv', filename: 'conversation-history.csv' })}>
               <Download className="size-4" />
@@ -955,6 +1052,82 @@ export default function ConversationAnalysisPage() {
                   </div>
                 </div>
               ) : null}
+
+              <div className="rounded-lg border p-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Brain className="size-4 text-muted-foreground" />
+                      <p className="text-sm font-medium">Learning signals</p>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      แสดงสิ่งที่ระบบสังเกตได้จาก turn นี้ ยังไม่ใช่ความจำที่ใช้ตอบจริงจนกว่าจะถูก promote หรือ policy อนุญาต
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => createTurnMemoryMutation.mutate()} disabled={!selectedTurn || createTurnMemoryMutation.isPending}>
+                      <Database className="size-4" />
+                      จำเรื่องนี้
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => blockTurnMemoryMutation.mutate()} disabled={!selectedTurn || blockTurnMemoryMutation.isPending}>
+                      <Ban className="size-4" />
+                      ห้ามจำเรื่องนี้
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { window.location.href = '/memory?tab=sources' }}>
+                      เปิด Memory
+                    </Button>
+                  </div>
+                </div>
+
+                {learningSignals.length ? (
+                  <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                    {learningSignals.map(signal => {
+                      const decision = memoryDecisions.find(item => item.observationId === signal.id)
+                      return (
+                        <div key={signal.id} className="rounded-md border bg-muted/20 p-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant={learningDecisionVariant(decision?.decision)}>{decision?.decision || signal.status}</Badge>
+                            <Badge variant={signal.risk === 'high' ? 'destructive' : 'outline'}>risk: {signal.risk}</Badge>
+                            <Badge variant="secondary">{memoryTypeLabel(signal.type)}</Badge>
+                            <Badge variant="outline">{signal.recommendedAction}</Badge>
+                          </div>
+                          <p className="mt-2 whitespace-pre-wrap text-sm">{signal.summary}</p>
+                          {decision?.reason ? <p className="mt-2 text-xs text-muted-foreground">{decision.reason}</p> : null}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={signal.status === 'promoted' || promoteObservationMutation.isPending}
+                              onClick={() => promoteObservationMutation.mutate(signal)}
+                            >
+                              <Database className="size-4" />
+                              Promote
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    ยังไม่มี learning signal สำหรับ turn นี้ ถ้าเป็นบทสนทนาเก่าให้ลองเปิด detail หลัง backfill หรือใช้ปุ่ม “จำเรื่องนี้” เพื่อสร้าง memory ด้วยตัวเอง
+                  </div>
+                )}
+
+                {memoryUsage.length ? (
+                  <div className="mt-3 rounded-md border bg-background p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Memory used in this answer</p>
+                    <div className="mt-2 space-y-1">
+                      {memoryUsage.map(usage => (
+                        <div key={usage.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="font-mono">{usage.memoryId || 'memory'}</span>
+                          <span className="text-muted-foreground">{usage.injectedChars} chars · score {usage.relevanceScore ?? '-'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
 
               <details className="rounded-lg border">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
