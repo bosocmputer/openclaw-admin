@@ -700,18 +700,13 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
    - `MEMORY.md` = ความจำที่ runtime ใช้ตอบจริง
    - `memory/*.md` = บันทึกรายวัน/working notes สำหรับ review
    - `DREAMS.md` = review diary จาก dreaming phase ยังไม่ถือเป็น truth โดยตรง
-3. แท็บ **Learning Review** ใช้ตรวจ candidate ที่สร้างจาก Conversation Analysis หรือ admin กรอกเอง
-4. Candidate แต่ละรายการต้องถูก admin ตัดสินก่อน:
-   - `MEMORY.md` = fact/preference เฉพาะ agent/ร้านที่ยืนยันแล้ว
-   - `Business Profile` = pattern ธุรกิจทั่วไป
-   - `SOUL` = กติกาการตอบ/safety/tool contract
-   - `MCP/Search` = synonym, normalization หรือ search behavior
-   - `Model/Runtime` = timeout, fallback, latency หรือ runtime behavior
-5. Apply อัตโนมัติใน v1 ทำได้เฉพาะ target `MEMORY.md` และระบบจะสร้าง backup ก่อนทุกครั้ง
-6. ถ้า apply memory จริง ให้ restart gateway หรือ reset active sessions เพื่อให้ bot โหลด context ใหม่
+3. เปิด **Safe Auto** ต่อ agent ที่ใช้งานจริง เช่น `sale` หรือ `stock`
+4. Safe Auto จะเรียนเฉพาะข้อมูล low-risk เช่น คำศัพท์, alias, workflow hint, FAQ pattern และคำสอนที่ปลอดภัย
+5. ข้อมูล ERP ที่ต้องดึงสด เช่น ราคา, สต็อก, ต้นทุน, สินค้ามี/ไม่มี, ราคาพิเศษ จะถูกบันทึกเป็นเรื่อง **ห้ามจำ**
+6. ถ้าเปิดหรือเปลี่ยน memory policy ให้ restart gateway หรือ reset active sessions เพื่อให้ bot โหลด context ใหม่
 
-> ลูกค้าแชทตามปกติ ระบบเก็บ evidence จากบทสนทนาไว้ใน Conversation Analysis แล้ว admin ค่อยส่งเรื่องที่ควรเรียนรู้เข้า Learning Review
-> ห้ามให้ chat user เขียน memory โดยตรง เพราะเสี่ยงจำข้อมูลผิดหรือ prompt injection
+> ลูกค้าแชทตามปกติ ระบบเก็บ evidence จากบทสนทนาไว้ใน Conversation Analysis และ Safe Auto จะจัดการ memory ตาม policy
+> Admin ยังสามารถค้นหา/ลบ/ห้ามจำ memory ผิดจากหน้า Memory ได้เสมอ
 
 ---
 
@@ -722,9 +717,9 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
 1. เปิด **Conversation Analysis** (`/analysis/conversations`)
 2. Filter ช่วงวันที่, agent, channel หรือ issue tag
 3. ดู turn detail: คำถาม, คำตอบ, tool/model evidence, media preview และ raw timeline ที่ runtime บันทึกจริง
-4. กด **Export for Codex** เพื่อส่งข้อมูลให้ทีมวิเคราะห์ SOUL/MCP/Search ต่อ
-5. ถ้าเจอ turn ที่ควรนำไปเรียนรู้ ให้กด **ส่งเรื่องนี้ให้ Admin Review**
-6. เปิด **Memory → Learning Review** หรือปุ่ม **เปิด Learning Review** เพื่อตรวจ candidate ต่อ
+4. กด **Export for Codex** เพื่อส่งข้อมูลให้ทีมวิเคราะห์ SOUL/MCP/Search/Memory ต่อ
+5. ถ้าเจอ turn ที่ต้องตรวจเองภายหลัง ให้กด **เพิ่มเป็นงานตรวจทีหลัง**
+6. เปิด **Memory** เพื่อดู memory ที่ใช้ตอบจริง, memory ที่ห้ามจำ, policy และ signals จากแชท
 
 หลักการแยกชั้น:
 
@@ -732,8 +727,9 @@ Session Checkpoints ถูกสร้างอัตโนมัติเมื
 - กติกาตอบผิด เช่น เดาราคา/เดาสต็อก → `SOUL`
 - บริบทธุรกิจทั่วไปซ้ำหลายเคส → `Business Profile`
 - Model timeout/fallback/latency → `Model/Runtime`
-- ความจำเฉพาะร้านที่ admin ยืนยันแล้ว → `MEMORY.md`
+- ความจำเฉพาะร้านที่ Safe Auto หรือ admin ยืนยันว่า low-risk → `MEMORY.md`
 
+> Export for Codex เป็นไฟล์เดียวที่รวม conversation turns, issue tags, learning signals, memory policy/state, active/blocked memories, Business Profile links, channel bindings, model config และ version snapshot แบบ redacted
 > Export ไม่รวมไฟล์รูปจริง ส่งเฉพาะ metadata/text preview แบบ redacted เท่านั้น
 
 ## ขั้นตอนที่ 11 — ทดสอบระบบ

@@ -433,10 +433,11 @@ GET /api/analysis/conversations/insights
   → issue tags, top failed keywords, slow turns, agent breakdown
 
 GET /api/analysis/conversations/export?mode=codex_review_pack
-  → Markdown pack สำหรับส่งให้ Codex/ทีมวิเคราะห์ SOUL/MCP/search ต่อ
+  → Markdown pack สำหรับส่งให้ Codex/ทีมวิเคราะห์ SOUL/MCP/search/memory ต่อ
+  → รวม context snapshot แบบ redacted: memory policy/state, active/blocked memories, Business Profile links, channel bindings, model config, runtime/API/admin version
 
-POST /api/memory/learning-candidates
-  → สร้าง Learning Candidate จาก selected turn ใน Conversation Analysis
+POST /api/memory/policies/:agentId/apply-auto-learn
+  → apply Safe Auto-Learn สำหรับ agent จาก observations ที่เก็บไว้
 ```
 
 หลักการ:
