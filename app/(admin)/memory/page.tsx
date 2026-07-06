@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveRestore,
+  AlertTriangle,
   Ban,
   CheckCircle2,
   Clock3,
@@ -17,12 +18,14 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  Wrench,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
   applyMemoryAutoLearn,
   blockMemoryRelearn,
+  cleanupMemory,
   createAgentMemory,
   deleteAgentMemory,
   getAgentMemories,
@@ -45,6 +48,8 @@ import {
   type MemoryScope,
   type MemoryType,
   type MemoryAutoApplyResult,
+  type MemoryCleanupResult,
+  type MemoryHealth,
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -105,6 +110,27 @@ function formatBytes(value?: number) {
   return `${Math.round(value / (1024 * 102.4)) / 10} MB`
 }
 
+function defaultMemoryHealth(): MemoryHealth {
+  return {
+    noiseCount: 0,
+    duplicateCount: 0,
+    dynamicFactCount: 0,
+    vagueTeachingCount: 0,
+    overBudget: false,
+    injectedChars: 0,
+    activeButNotInjectedCount: 0,
+    totalActiveChars: 0,
+  }
+}
+
+function cleanupIssueCount(health?: MemoryHealth) {
+  if (!health) return 0
+  return (health.noiseCount || 0)
+    + (health.duplicateCount || 0)
+    + (health.dynamicFactCount || 0)
+    + (health.vagueTeachingCount || 0)
+}
+
 function statusVariant(status: string) {
   if (status === 'active' || status === 'promoted') return 'default'
   if (status === 'soft' || status === 'observed') return 'secondary'
@@ -157,6 +183,7 @@ export default function MemoryPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<AgentMemory | null>(null)
   const [rollbackBackup, setRollbackBackup] = useState<MemoryBackup | null>(null)
+  const [cleanupResult, setCleanupResult] = useState<MemoryCleanupResult | null>(null)
   const [memoryForm, setMemoryForm] = useState({
     type: 'workflow_hint' as MemoryType,
     scope: 'agent' as MemoryScope,
@@ -366,6 +393,25 @@ export default function MemoryPage() {
     onError: err => toast.error(err instanceof Error ? err.message : 'Apply Auto-Learn ไม่สำเร็จ'),
   })
 
+  const cleanupPreviewMutation = useMutation({
+    mutationFn: () => cleanupMemory(effectiveAgentId, true),
+    onSuccess: result => {
+      setCleanupResult(result)
+      toast.success(`Preview cleanup: พบ ${result.actions.length} รายการที่ควรจัดการ`)
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Preview cleanup ไม่สำเร็จ'),
+  })
+
+  const cleanupApplyMutation = useMutation({
+    mutationFn: () => cleanupMemory(effectiveAgentId, false),
+    onSuccess: result => {
+      setCleanupResult(result)
+      toast.success(`Cleanup applied: delete ${result.summary.delete + result.summary.deleteDuplicate}, block ${result.summary.block}, soften ${result.summary.soften}`)
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Apply cleanup ไม่สำเร็จ'),
+  })
+
   const rollbackMutation = useMutation({
     mutationFn: (backup: MemoryBackup) => rollbackMemoryBackup(effectiveAgentId, backup.backupId),
     onSuccess: result => {
@@ -387,7 +433,9 @@ export default function MemoryPage() {
     deletedCount: 0,
     estimatedInjectedChars: 0,
     maxContextChars: 1200,
+    memoryHealth: defaultMemoryHealth(),
   }
+  const memoryHealth = summary.memoryHealth || defaultMemoryHealth()
 
   return (
     <div className="space-y-5">
@@ -420,10 +468,13 @@ export default function MemoryPage() {
         blockedCount={summary.blockedCount}
         estimatedChars={summary.estimatedInjectedChars}
         maxChars={summary.maxContextChars}
+        memoryHealth={memoryHealth}
         busy={enableSafeAutoMutation.isPending || applyAutoMutation.isPending}
         lastResult={enableSafeAutoMutation.data?.autoApplyResult || applyAutoMutation.data}
         onEnable={() => enableSafeAutoMutation.mutate()}
         onApply={() => applyAutoMutation.mutate()}
+        onPreviewCleanup={() => cleanupPreviewMutation.mutate()}
+        cleanupBusy={cleanupPreviewMutation.isPending || cleanupApplyMutation.isPending}
       />
 
       <section className="grid gap-3 lg:grid-cols-4">
@@ -782,6 +833,13 @@ export default function MemoryPage() {
         </DialogContent>
       </Dialog>
 
+      <CleanupDialog
+        result={cleanupResult}
+        busy={cleanupApplyMutation.isPending}
+        onClose={() => setCleanupResult(null)}
+        onApply={() => cleanupApplyMutation.mutate()}
+      />
+
       <Dialog open={!!viewDialog} onOpenChange={open => { if (!open) setViewDialog(null) }}>
         <DialogContent className="grid max-h-[86vh] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden sm:max-w-4xl">
           <DialogHeader>
@@ -811,10 +869,13 @@ function LearningControlPanel({
   blockedCount,
   estimatedChars,
   maxChars,
+  memoryHealth,
   busy,
+  cleanupBusy,
   lastResult,
   onEnable,
   onApply,
+  onPreviewCleanup,
 }: {
   agentId: string
   mode?: MemoryPolicyMode | string
@@ -823,13 +884,18 @@ function LearningControlPanel({
   blockedCount: number
   estimatedChars: number
   maxChars: number
+  memoryHealth: MemoryHealth
   busy: boolean
+  cleanupBusy: boolean
   lastResult?: MemoryAutoApplyResult
   onEnable: () => void
   onApply: () => void
+  onPreviewCleanup: () => void
 }) {
   const safeAuto = mode === 'safe_auto'
   const off = mode === 'off'
+  const qualityIssues = cleanupIssueCount(memoryHealth)
+  const needsCleanup = qualityIssues > 0 || memoryHealth.overBudget
   return (
     <section className="rounded-xl border bg-card p-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -839,13 +905,13 @@ function LearningControlPanel({
               {safeAuto ? 'Safe Auto เปิดอยู่' : off ? 'Auto-Learn ปิดอยู่' : modeLabel(mode)}
             </Badge>
             <Badge variant="outline">agent: {agentId || '-'}</Badge>
-            <Badge variant="outline">{formatChars(estimatedChars)} / {formatChars(maxChars)}</Badge>
+            <Badge variant={memoryHealth.overBudget ? 'destructive' : 'outline'}>{formatChars(memoryHealth.injectedChars || estimatedChars)} / {formatChars(maxChars)}</Badge>
           </div>
           <h2 className="mt-3 text-base font-semibold">Auto-Learn ใช้งานจริงแบบปลอดภัย</h2>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             ระบบจะเรียนรู้เฉพาะคำศัพท์, alias, workflow และคำสอนที่ปลอดภัย ส่วนราคา สต็อก ต้นทุน สินค้ามี/ไม่มี และราคาพิเศษจะถูกบันทึกเป็นเรื่องห้ามจำ ต้องดึงสดจาก MCP/SML ทุกครั้ง
           </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
             <div className="rounded-lg border bg-muted/20 p-3">
               <p className="text-xs text-muted-foreground">ใช้ตอบจริง</p>
               <p className="mt-1 text-lg font-semibold">{activeCount}</p>
@@ -858,17 +924,36 @@ function LearningControlPanel({
               <p className="text-xs text-muted-foreground">ห้ามจำ</p>
               <p className="mt-1 text-lg font-semibold">{blockedCount}</p>
             </div>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">ซ้ำ</p>
+              <p className="mt-1 text-lg font-semibold">{memoryHealth.duplicateCount}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">noise/dynamic</p>
+              <p className="mt-1 text-lg font-semibold">{memoryHealth.noiseCount + memoryHealth.dynamicFactCount}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">ไม่ได้ inject</p>
+              <p className="mt-1 text-lg font-semibold">{memoryHealth.activeButNotInjectedCount}</p>
+            </div>
           </div>
         </div>
         <div className="rounded-lg border bg-background p-3">
           <p className="text-sm font-medium">สิ่งที่ควรทำตอนนี้</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {safeAuto
+            {needsCleanup
+              ? 'มี memory ที่ควรตรวจ เช่น ซ้ำ, noise, dynamic fact หรือเกิน budget ให้ preview ก่อน cleanup'
+              : safeAuto
               ? 'กด apply เพื่อประมวลผล signal ที่รออยู่ แล้วให้ลูกค้าทดลองคุย 1-3 วัน'
               : 'เปิด Safe Auto ก่อน เพื่อให้ระบบเรียนรู้ low-risk โดยไม่ต้อง approve ทีละเรื่อง'}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {safeAuto ? (
+            {needsCleanup ? (
+              <Button onClick={onPreviewCleanup} disabled={!agentId || cleanupBusy}>
+                <Wrench className="size-4" />
+                Preview Cleanup
+              </Button>
+            ) : safeAuto ? (
               <Button onClick={onApply} disabled={!agentId || busy}>
                 <Sparkles className="size-4" />
                 Apply Auto-Learn now
@@ -884,6 +969,15 @@ function LearningControlPanel({
               ดู Conversation
             </Button>
           </div>
+          {needsCleanup ? (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+              <div className="flex items-center gap-2 font-medium">
+                <AlertTriangle className="size-3.5" />
+                Memory Health ต้องตรวจ
+              </div>
+              <p className="mt-1">preview จะไม่แก้ข้อมูล จนกว่าจะกด Apply cleanup ใน dialog</p>
+            </div>
+          ) : null}
           {lastResult ? (
             <div className="mt-3 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
               <div className="flex items-center gap-2 font-medium text-foreground">
@@ -896,6 +990,123 @@ function LearningControlPanel({
         </div>
       </div>
     </section>
+  )
+}
+
+function CleanupDialog({
+  result,
+  busy,
+  onClose,
+  onApply,
+}: {
+  result: MemoryCleanupResult | null
+  busy: boolean
+  onClose: () => void
+  onApply: () => void
+}) {
+  const actionableCount = result?.actions.length || 0
+  const summary = result?.summary
+  const exampleGroups = [
+    { key: 'dynamic_fact', label: 'Dynamic facts', help: 'ราคา/สต็อก/ต้นทุน/availability ต้องดึงสดจาก MCP' },
+    { key: 'noise', label: 'Noise', help: 'log/system marker หรือ media placeholder ที่ไม่ควรเป็น memory' },
+    { key: 'duplicate', label: 'Duplicates', help: 'memory ซ้ำจาก content เดียวกัน' },
+    { key: 'vague_teaching', label: 'Vague teaching', help: 'คำสอนที่อ้าง “ตัวนี้/รายการนี้” ไม่ชัดพอ' },
+  ]
+  return (
+    <Dialog open={!!result} onOpenChange={open => { if (!open) onClose() }}>
+      <DialogContent className="grid max-h-[88vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Wrench className="size-4" />
+            {result?.dryRun ? 'Preview Memory Cleanup' : 'Memory Cleanup Result'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 space-y-4 overflow-auto pr-1">
+          <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={result?.dryRun ? 'secondary' : result?.ok ? 'default' : 'destructive'}>
+                {result?.dryRun ? 'dry-run ยังไม่แก้ข้อมูล' : result?.ok ? 'applied' : 'partial error'}
+              </Badge>
+              <Badge variant="outline">agent: {result?.agentId || '-'}</Badge>
+              <Badge variant="outline">actionable: {actionableCount}</Badge>
+              {result?.backup ? <Badge variant="outline">backup: {result.backup.fileName}</Badge> : null}
+            </div>
+            <p className="mt-2 text-muted-foreground">
+              Cleanup จะลบ noise/duplicate แบบไม่ทำลายหลักฐาน, block dynamic fact พร้อม tombstone, และ sync MEMORY.md ใหม่หลัง apply
+            </p>
+          </div>
+
+          {summary ? (
+            <div className="grid gap-2 sm:grid-cols-4">
+              <MetricTile label="สแกน" value={summary.scanned} />
+              <MetricTile label="ลบ/ซ้ำ" value={summary.delete + summary.deleteDuplicate} />
+              <MetricTile label="block" value={summary.block} />
+              <MetricTile label="soften" value={summary.soften} />
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            {exampleGroups.map(group => {
+              const examples = result?.examples?.[group.key] || []
+              return (
+                <div key={group.key} className="rounded-lg border p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">{group.label}</p>
+                      <p className="text-xs text-muted-foreground">{group.help}</p>
+                    </div>
+                    <Badge variant={examples.length ? 'secondary' : 'outline'}>{examples.length}</Badge>
+                  </div>
+                  <div className="mt-2 max-h-48 space-y-2 overflow-auto">
+                    {examples.length ? examples.map(example => (
+                      <div key={example.memoryId} className="rounded-md bg-muted/40 p-2 text-xs">
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="outline">{example.action}</Badge>
+                          <span className="text-muted-foreground">{example.reason}</span>
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap break-words">{example.contentPreview}</p>
+                      </div>
+                    )) : <p className="text-xs text-muted-foreground">ไม่พบตัวอย่างกลุ่มนี้</p>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {result?.actions.length ? (
+            <details className="rounded-lg border">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Action preview ({result.actions.length})</summary>
+              <pre className="max-h-72 overflow-auto border-t p-3 text-xs">{JSON.stringify(result.actions, null, 2)}</pre>
+            </details>
+          ) : null}
+
+          {!result?.dryRun && result?.errors?.length ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+              <p className="font-medium">มีบางรายการ cleanup ไม่สำเร็จ</p>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(result.errors, null, 2)}</pre>
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>ปิด</Button>
+          {result?.dryRun && actionableCount > 0 ? (
+            <Button onClick={onApply} disabled={busy}>
+              <Wrench className="size-4" />
+              Apply cleanup พร้อม backup
+            </Button>
+          ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function MetricTile({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-lg font-semibold">{value}</p>
+    </div>
   )
 }
 
@@ -956,7 +1167,8 @@ function MemoryCard({
 
 function ObservationRow({ observation, onPromote, busy }: { observation: MemoryObservation; onPromote: () => void; busy: boolean }) {
   const highRisk = isHighRiskObservation(observation)
-  const actionDisabled = busy || observation.status === 'promoted' || observation.status === 'blocked'
+  const canPromote = observation.safeToPromote === true || highRisk
+  const actionDisabled = busy || !canPromote || observation.status === 'promoted' || observation.status === 'blocked'
   return (
     <div className="rounded-lg border p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -966,6 +1178,7 @@ function ObservationRow({ observation, onPromote, busy }: { observation: MemoryO
             <Badge variant={observation.risk === 'high' ? 'destructive' : 'outline'}>risk: {observation.risk}</Badge>
             <Badge variant="outline">{typeLabel(observation.type)}</Badge>
             <Badge variant="secondary">{observation.recommendedAction}</Badge>
+            {observation.decision ? <Badge variant={observation.safeToPromote ? 'default' : 'outline'}>{observation.decision}</Badge> : null}
           </div>
           <p className="mt-3 whitespace-pre-wrap break-words text-sm font-medium">{observation.summary}</p>
           <p className="mt-2 text-xs text-muted-foreground">
@@ -976,10 +1189,15 @@ function ObservationRow({ observation, onPromote, busy }: { observation: MemoryO
               ข้อมูลราคา สต็อก ต้นทุน หรือสถานะจาก ERP ต้องดึงสดจาก MCP/SML ทุกครั้ง จึงบันทึกได้เฉพาะเป็นเรื่องที่ห้ามจำ
             </p>
           ) : null}
+          {observation.decisionReason ? (
+            <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
+              decision: {observation.decisionReason}
+            </p>
+          ) : null}
         </div>
         <Button variant={highRisk ? 'destructive' : 'outline'} size="sm" onClick={onPromote} disabled={actionDisabled}>
           {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
-          {highRisk ? 'ห้ามจำเรื่องนี้' : 'บันทึกเป็น Soft memory'}
+          {highRisk ? 'ห้ามจำเรื่องนี้' : canPromote ? 'บันทึกเป็น Soft memory' : 'ใช้เป็นหลักฐานเท่านั้น'}
         </Button>
       </div>
       {Object.keys(observation.evidence || {}).length ? (

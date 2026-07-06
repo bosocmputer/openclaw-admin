@@ -404,6 +404,7 @@ export default function ConversationAnalysisPage() {
   const [route, setRoute] = useState('all')
   const [issueTag, setIssueTag] = useState('all')
   const [reviewTarget, setReviewTarget] = useState('all')
+  const [learningDecision, setLearningDecision] = useState('all')
   const [hasToolError, setHasToolError] = useState(false)
   const [slowOnly, setSlowOnly] = useState(false)
   const [hasMedia, setHasMedia] = useState(false)
@@ -426,6 +427,7 @@ export default function ConversationAnalysisPage() {
     route: route === 'all' ? undefined : route,
     issueTag: issueTag === 'all' ? undefined : issueTag,
     reviewTarget: reviewTarget === 'all' ? undefined : reviewTarget,
+    learningDecision: learningDecision === 'all' ? undefined : learningDecision,
     hasToolError: hasToolError || undefined,
     slowOnly: slowOnly || undefined,
     hasMedia: hasMedia || undefined,
@@ -644,6 +646,7 @@ export default function ConversationAnalysisPage() {
     setSelectedId(null)
     setIssueTag('all')
     setReviewTarget('all')
+    setLearningDecision('all')
     setHasToolError(false)
     setSlowOnly(false)
     setHasMedia(false)
@@ -818,6 +821,19 @@ export default function ConversationAnalysisPage() {
                   <SelectContent>
                     <SelectItem value="all">ทั้งหมด</SelectItem>
                     {reviewTargetOptions.map(target => <SelectItem key={target} value={target}>{target}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Learning decision</span>
+                <Select value={learningDecision} onValueChange={v => { setLearningDecision(v || 'all'); resetListState(); setTriageTab('all') }}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    <SelectItem value="promotable">Promotable</SelectItem>
+                    <SelectItem value="unsafe">Unsafe/manual</SelectItem>
+                    <SelectItem value="blocked">Blocked dynamic fact</SelectItem>
+                    <SelectItem value="mcp_search_review">MCP/Search review</SelectItem>
                   </SelectContent>
                 </Select>
               </label>
@@ -1115,11 +1131,12 @@ export default function ConversationAnalysisPage() {
                     {learningSignals.map(signal => {
                       const decision = memoryDecisions.find(item => item.observationId === signal.id)
                       const highRisk = isHighRiskSignal(signal)
-                      const actionDisabled = signal.status === 'promoted' || signal.status === 'blocked' || promoteObservationMutation.isPending
+                      const canPromoteSignal = highRisk || signal.safeToPromote === true || decision?.safeToPromote === true
+                      const actionDisabled = !canPromoteSignal || signal.status === 'promoted' || signal.status === 'blocked' || promoteObservationMutation.isPending
                       return (
                         <div key={signal.id} className="rounded-md border bg-muted/20 p-3">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <Badge variant={learningDecisionVariant(decision?.decision)}>{decision?.decision || signal.status}</Badge>
+                            <Badge variant={learningDecisionVariant(decision?.decision || signal.decision)}>{decision?.decision || signal.decision || signal.status}</Badge>
                             <Badge variant={signal.risk === 'high' ? 'destructive' : 'outline'}>risk: {signal.risk}</Badge>
                             <Badge variant="secondary">{memoryTypeLabel(signal.type)}</Badge>
                             <Badge variant="outline">{signal.recommendedAction}</Badge>
@@ -1139,7 +1156,7 @@ export default function ConversationAnalysisPage() {
                               onClick={() => promoteObservationMutation.mutate(signal)}
                             >
                               {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
-                              {highRisk ? 'ห้ามจำเรื่องนี้' : 'บันทึกเป็น Soft memory'}
+                              {highRisk ? 'ห้ามจำเรื่องนี้' : canPromoteSignal ? 'บันทึกเป็น Soft memory' : 'ใช้เป็นหลักฐานเท่านั้น'}
                             </Button>
                           </div>
                         </div>

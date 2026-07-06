@@ -1265,6 +1265,8 @@ export interface ConversationAnalysisDetail {
     risk: string
     decision: string
     reason: string
+    safeToPromote?: boolean
+    blockedReason?: string | null
   }>
 }
 
@@ -1341,6 +1343,7 @@ export interface ConversationAnalysisParams {
   q?: string
   issueTag?: string
   reviewTarget?: string
+  learningDecision?: string
   hasToolError?: boolean
   slowOnly?: boolean
   hasMedia?: boolean
@@ -1709,6 +1712,7 @@ export interface MemoryAgentStatus {
     deletedCount: number
     estimatedInjectedChars: number
     maxContextChars: number
+    memoryHealth?: MemoryHealth
   }
 }
 
@@ -1737,6 +1741,17 @@ export type MemoryScope = 'session' | 'contact' | 'agent' | 'business' | 'global
 export type AgentMemoryStatus = 'active' | 'soft' | 'blocked' | 'deleted'
 export type MemoryPolicyMode = 'off' | 'observe_only' | 'safe_auto' | 'manual_review'
 export type MemoryObservationStatus = 'observed' | 'promoted' | 'blocked' | 'ignored'
+
+export interface MemoryHealth {
+  noiseCount: number
+  duplicateCount: number
+  dynamicFactCount: number
+  vagueTeachingCount: number
+  overBudget: boolean
+  injectedChars: number
+  activeButNotInjectedCount: number
+  totalActiveChars: number
+}
 
 export interface AgentMemory {
   id: string
@@ -1769,6 +1784,10 @@ export interface MemoryObservation {
   sourceTurnId?: string | null
   risk: 'low' | 'medium' | 'high' | string
   recommendedAction: string
+  decision?: string
+  decisionReason?: string
+  safeToPromote?: boolean
+  blockedReason?: string | null
   status: MemoryObservationStatus
   confidence: number | null
   createdAt: string
@@ -1888,6 +1907,49 @@ export async function putMemoryPolicy(agentId: string, body: Partial<MemoryPolic
 
 export async function applyMemoryAutoLearn(agentId: string, limit = 200): Promise<MemoryAutoApplyResult> {
   const { data } = await api.post(`/api/memory/policies/${encodeURIComponent(agentId)}/apply-auto-learn`, { limit })
+  return data
+}
+
+export interface MemoryCleanupAction {
+  memoryId: string
+  agentId: string
+  status: AgentMemoryStatus | string
+  type: MemoryType | string
+  action: 'keep' | 'delete' | 'block' | 'soften' | 'delete_duplicate' | string
+  reason: string
+  categories: string[]
+  tombstone: boolean
+  contentPreview: string
+  nextStatus?: string
+}
+
+export interface MemoryCleanupResult {
+  ok: boolean
+  dryRun: boolean
+  agentId: string
+  summary: {
+    scanned: number
+    keep: number
+    delete: number
+    block: number
+    soften: number
+    deleteDuplicate: number
+    duplicateCount: number
+    noiseCount: number
+    dynamicFactCount: number
+    vagueTeachingCount: number
+    tombstoneCount: number
+  }
+  examples: Record<string, Array<{ memoryId: string; action: string; reason: string; contentPreview: string }>>
+  actions: MemoryCleanupAction[]
+  backup?: { backupId: string; fileName: string; existed: boolean } | null
+  applied?: MemoryCleanupAction[]
+  errors?: Array<{ memoryId: string; action: string; error: string }>
+  syncResult?: Record<string, unknown>
+}
+
+export async function cleanupMemory(agentId: string, dryRun = true): Promise<MemoryCleanupResult> {
+  const { data } = await api.post('/api/memory/maintenance/cleanup', { agentId, dryRun })
   return data
 }
 
