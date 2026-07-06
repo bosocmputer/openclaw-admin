@@ -10,12 +10,14 @@
 
 | ส่วน | Version / commit | สถานะ |
 | ---- | ---------------- | ------ |
-| OpenClaw ERP runtime | `OpenClaw 2026.6.11` + ERP overlay | ใช้งานจริงบน dev แล้ว |
-| Runtime overlay | `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` | ใช้สำหรับ server ลูกค้าที่มี base runtime 2026.6.11 |
+| OpenClaw ERP runtime | `2026.6.11-erp` runtime overlay | ใช้งานจริงบน dev และ chang168 แล้ว |
+| Runtime overlay | `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` | ใช้ทับ runtime skeleton ที่มี `node_modules` อยู่แล้ว |
 | Runtime overlay SHA256 | `a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99` | ต้องตรวจทุกครั้งก่อนติดตั้ง |
 | Runtime source commits | `f608a18664`, `9976b9bbd7`, `fe432925eb` | sidebar export fix + LINE media burst + text-only fast path |
-| openclaw-api | `main` หลัง commit `3166394` | provider/model, Auto-Learn hardening, media/analysis, system actions |
-| openclaw-admin | `main` หลัง commit `a767392` | current Admin UX, Memory/Analysis, model/provider, system docs |
+| openclaw-api | `main` หลัง commit `b32f1f0` | provider/model, Auto-Learn hardening, media/analysis, system actions |
+| openclaw-admin | `main` หลัง commit `adba0bb` | current Admin UX, Memory/Analysis, model/provider, system docs |
+
+> **Runtime version note**: overlay release นี้ใช้ target path `openclaw-runtime-2026.6.11-erp` แต่ server ที่ upgrade จาก skeleton 2026.6.8 อาจยังแสดง `OpenClaw 2026.6.8` เมื่อรัน `node ... --version`. ให้ถือว่าไม่ใช่ fail ถ้า gateway ใช้ path ถูก, checksum ถูก, marker `line_burst_preflight` / `line_delivery_attempt` อยู่ใน `dist`, และ smoke test LINE/Telegram ผ่าน.
 
 พฤติกรรมสำคัญใน release นี้:
 
@@ -27,7 +29,7 @@
 
 ## Current Customer Overlay Update (2026-07-06)
 
-ใช้ section นี้เมื่อลูกค้ามี runtime base อยู่แล้วที่ `/root/openclaw-runtime-2026.6.11-erp` และต้องอัปเดต overlay ล่าสุดเท่านั้น ไม่ต้อง reinstall OpenClaw ทั้งก้อน
+ใช้ section นี้เมื่อลูกค้ามี runtime skeleton อยู่แล้ว และต้องอัปเดต overlay ล่าสุดเท่านั้น ไม่ต้อง reinstall OpenClaw ทั้งก้อน. ถ้ายังไม่มี `/root/openclaw-runtime-2026.6.11-erp` แต่มี `/root/openclaw-runtime-2026.6.8-erp` ให้ copy skeleton เดิมตามคำสั่งด้านล่างก่อน apply overlay.
 
 1. อัปเดต API/Admin ก่อน:
 
@@ -64,14 +66,22 @@ cd /root
 echo "a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99  openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz" | sha256sum -c -
 
 RUNTIME=/root/openclaw-runtime-2026.6.11-erp
+OLD_RUNTIME=/root/openclaw-runtime-2026.6.8-erp
 BACKUP_ID=$(date +%Y%m%d%H%M%S)
 mkdir -p /root/openclaw-backups/$BACKUP_ID
+
+if [ ! -d "$RUNTIME" ] && [ -d "$OLD_RUNTIME" ]; then
+  cp -a "$OLD_RUNTIME" "$RUNTIME"
+fi
+
+test -d "$RUNTIME/dist" || { echo "missing $RUNTIME"; exit 1; }
 cp -a "$RUNTIME/dist" /root/openclaw-backups/$BACKUP_ID/dist
 cp -a "$RUNTIME/extensions/line/src" /root/openclaw-backups/$BACKUP_ID/line-src 2>/dev/null || true
 cp -a "$RUNTIME/ui/src/app-navigation.ts" /root/openclaw-backups/$BACKUP_ID/app-navigation.ts 2>/dev/null || true
 
 tar -xzf /root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz -C "$RUNTIME"
-node "$RUNTIME/dist/index.js" --version
+node "$RUNTIME/dist/index.js" --version || true
+grep -R "textWindowMs.*0\\|line_burst_preflight\\|line_delivery_attempt" -n "$RUNTIME/dist" | head -30
 
 pm2 restart openclaw-gateway --update-env
 pm2 restart openclaw-api --update-env
@@ -95,7 +105,7 @@ pm2 save
 | OpenRouter API Key | `sk-or-v1-...` | จาก openrouter.ai |
 | Kilo AI API Key (ถ้าใช้) | `kg_...` หรือ key จาก Kilo | ต้องทดสอบ runtime จริงก่อน save model |
 | MCP Server URL | `http://192.168.1.50:3001/sse` | ถามทีมที่ติดตั้ง MCP |
-| OpenClaw ERP Runtime Overlay | `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` | ใช้ทับ base runtime 2026.6.11 สำหรับ gateway |
+| OpenClaw ERP Runtime Overlay | `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` | ใช้ทับ runtime skeleton สำหรับ gateway |
 | รหัสผ่าน Admin | ตั้งเองได้ | สำหรับ login หน้าเว็บ |
 
 ---
@@ -239,7 +249,8 @@ wizard จะถามเรื่อง model/provider — **เลือกอ
 
 ### 6.2 เตรียม base runtime และ overlay
 
-สำหรับ install ใหม่ ให้ติดตั้ง base runtime `OpenClaw 2026.6.11` ไว้ที่ `/root/openclaw-runtime-2026.6.11-erp` ก่อน จากนั้น download overlay นี้ไปที่ `/root`:
+สำหรับ install ใหม่ ให้เตรียม runtime skeleton ที่มี `dist` และ `node_modules` ไว้ที่ `/root/openclaw-runtime-2026.6.11-erp` ก่อน จากนั้น download overlay นี้ไปที่ `/root`.
+ถ้าเป็น server เก่าที่มี `/root/openclaw-runtime-2026.6.8-erp` อยู่แล้ว สามารถ copy skeleton เดิมมาเป็น target dir แล้วค่อย apply overlay ได้:
 
 ```bash
 cd /root
@@ -252,6 +263,7 @@ curl -fL -o /root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz \
 ```bash
 cd /root
 RUNTIME=/root/openclaw-runtime-2026.6.11-erp
+OLD_RUNTIME=/root/openclaw-runtime-2026.6.8-erp
 OVERLAY=/root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
 SHA="a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99"
 
@@ -261,7 +273,11 @@ curl -fL -o "$OVERLAY" \
 BACKUP_ID=$(date +%Y%m%d%H%M%S)
 mkdir -p /root/openclaw-backups/$BACKUP_ID
 
-test -d "$RUNTIME/dist"
+if [ ! -d "$RUNTIME" ] && [ -d "$OLD_RUNTIME" ]; then
+  cp -a "$OLD_RUNTIME" "$RUNTIME"
+fi
+
+test -d "$RUNTIME/dist" || { echo "missing $RUNTIME"; exit 1; }
 echo "$SHA  $OVERLAY" | sha256sum -c -
 
 cp -a "$RUNTIME/dist" /root/openclaw-backups/$BACKUP_ID/dist
@@ -301,15 +317,19 @@ pm2 save
 
 ```bash
 ps -ef | grep -E "openclaw-runtime-2026.6.11-erp|openclaw.*gateway" | grep -v grep
-node /root/openclaw-runtime-2026.6.11-erp/dist/index.js --version
+node /root/openclaw-runtime-2026.6.11-erp/dist/index.js --version || true
+grep -R "textWindowMs.*0\\|line_burst_preflight\\|line_delivery_attempt" -n /root/openclaw-runtime-2026.6.11-erp/dist | head -30
 ```
 
-ต้องเห็นประมาณนี้:
+ต้องเห็น process ใช้ path นี้ และ marker อย่างน้อย `line_burst_preflight` / `line_delivery_attempt`:
 
 ```text
 node /root/openclaw-runtime-2026.6.11-erp/dist/index.js gateway --port 18789
-OpenClaw 2026.6.11
+line_burst_preflight
+line_delivery_attempt
 ```
+
+ถ้า `--version` ยังแสดง `OpenClaw 2026.6.8` บนเครื่องที่ upgrade จาก skeleton เดิม ให้ตรวจ marker และ smoke test แทน version string.
 
 > **สำคัญ**: ห้าม start gateway ด้วย `openclaw gateway run` ใน production เพราะจะกลับไปใช้ official runtime ที่อาจไม่เหมือน dev
 
@@ -677,7 +697,7 @@ https://<tunnel-url>/line/webhook/<accountId>
 2. ส่งรูป แล้วพิมพ์ข้อความตามมาเร็ว ๆ เช่น `มีสินค้านี้ไหม` หรือคำถามใดก็ได้
 3. ต้องได้คำตอบที่ใช้รูปและข้อความตามหลังเป็นบริบทเดียวกัน
 4. เปิด `/monitor` ต้องเห็น turn ล่าสุด; ถ้า marker `line_burst_*` ไม่ขึ้นแต่ behavior ผ่าน ให้ถือว่า telemetry ยังไม่ครบ ไม่ใช่เหตุ rollback
-5. ถ้า bot ไม่ตอบหรือ session ค้าง ให้ตรวจว่า runtime เป็น `OpenClaw 2026.6.11`, gateway ใช้ `/root/openclaw-runtime-2026.6.11-erp/dist/index.js`, และ API/Admin เป็น `main` ล่าสุด
+5. ถ้า bot ไม่ตอบหรือ session ค้าง ให้ตรวจว่า gateway ใช้ `/root/openclaw-runtime-2026.6.11-erp/dist/index.js`, marker overlay อยู่ใน `dist`, และ API/Admin เป็น `main` ล่าสุด
 
 > LINE loading animation แสดงบน LINE mobile เป็นหลัก บน desktop หรือบาง client อาจไม่เห็น แม้ runtime จะเรียก loading API แล้ว
 

@@ -18,7 +18,7 @@
 | `/root/.openclaw` | symlink ไป `/data/openclaw-state/.openclaw` | runtime/API ยังหา state ที่ path เดิมได้ |
 | Admin repo | `/data/openclaw-admin` | แยกจาก SML |
 | API repo | `/data/openclaw-api` | แยกจาก SML |
-| Runtime overlay dir | `/data/openclaw-runtime-2026.6.11-erp` | ใช้ runtime ERP ที่ pin version |
+| Runtime overlay dir | `/data/openclaw-runtime-2026.6.11-erp` | ใช้ runtime skeleton + ERP overlay ที่ pin release |
 | npm global | `/data/npm-global` | ไม่พึ่ง default npm global path |
 | Admin web port | `13000` | ไม่ชน SML ที่อาจใช้ `3000` |
 | OpenClaw PostgreSQL host port | `15432` | ไม่ชน SML PostgreSQL ที่ใช้ `5432` |
@@ -254,27 +254,33 @@ Release ที่ใช้:
 
 | รายการ | ค่า |
 | --- | --- |
-| Runtime version | `OpenClaw 2026.6.11` |
+| Runtime overlay release | `2026.6.11-erp-20260706-line-burst-fastpath` |
 | Runtime directory | `/data/openclaw-runtime-2026.6.11-erp` |
 | Overlay file | `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` |
 | SHA256 | `a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99` |
 
 เตรียมไฟล์ runtime:
 
-- ถ้าเป็น server ใหม่ ให้ติดตั้ง base runtime `OpenClaw 2026.6.11` ไว้ที่ `/data/openclaw-runtime-2026.6.11-erp` ก่อน
+- ถ้าเป็น server ใหม่ ให้เตรียม runtime skeleton ที่มี `dist` และ `node_modules` ไว้ที่ `/data/openclaw-runtime-2026.6.11-erp` ก่อน
 - Download overlay `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` ไปที่ `/data`
 - ห้ามเดา URL เอง ถ้าไม่มีไฟล์ overlay ให้ขอไฟล์จากทีม release ก่อน
+- ถ้า upgrade จาก skeleton 2026.6.8 แล้ว `--version` ยังแสดง `OpenClaw 2026.6.8` หลัง apply overlay ให้ตรวจ marker และ smoke test แทน version string
 
 ```bash
 cd /data
 RUNTIME=/data/openclaw-runtime-2026.6.11-erp
+OLD_RUNTIME=/data/openclaw-runtime-2026.6.8-erp
 OVERLAY=/data/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
 SHA="a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99"
 
 curl -fL -o "$OVERLAY" \
   https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.11-erp-20260706-line-burst-fastpath/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
 
-test -d "$RUNTIME/dist"
+if [ ! -d "$RUNTIME" ] && [ -d "$OLD_RUNTIME" ]; then
+  cp -a "$OLD_RUNTIME" "$RUNTIME"
+fi
+
+test -d "$RUNTIME/dist" || { echo "missing $RUNTIME"; exit 1; }
 echo "$SHA  $OVERLAY" | sha256sum -c -
 ```
 
@@ -293,14 +299,11 @@ cp -a /data/start-openclaw-gateway.sh /data/openclaw-backups/runtime-$TS/ 2>/dev
 
 tar -xzf "$OVERLAY" -C "$RUNTIME"
 
-node /data/openclaw-runtime-2026.6.11-erp/dist/index.js --version
+node /data/openclaw-runtime-2026.6.11-erp/dist/index.js --version || true
+grep -R "textWindowMs.*0\\|line_burst_preflight\\|line_delivery_attempt" -n /data/openclaw-runtime-2026.6.11-erp/dist | head -30
 ```
 
-ต้องเห็น:
-
-```text
-OpenClaw 2026.6.11
-```
+ต้องเห็น marker `line_burst_preflight` และ `line_delivery_attempt` ใน `dist`. `--version` อาจยังแสดง `OpenClaw 2026.6.8` ถ้า runtime skeleton เดิมเป็น 2026.6.8.
 
 สร้าง start script:
 
@@ -999,7 +1002,7 @@ pm2 list
 | Admin URL | `http://SERVER_IP:13000` |
 | Admin username | `superadmin` หรือ user ใหม่ |
 | Admin password | บันทึกในที่ปลอดภัย |
-| OpenClaw runtime version | `OpenClaw 2026.6.11` |
+| OpenClaw runtime overlay release | `2026.6.11-erp-20260706-line-burst-fastpath` |
 | Runtime SHA256 | `a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99` |
 | API port | `4000` |
 | Admin port | `13000` |
