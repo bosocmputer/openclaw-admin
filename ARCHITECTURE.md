@@ -1,6 +1,6 @@
 # openclaw-admin — Architecture
 
-> อัปเดต: 2026-06-23 (OpenClaw v2026.6.8 + ERP runtime artifact, Conversation Analysis, Memory Learning)
+> อัปเดต: 2026-07-06 (OpenClaw v2026.6.11 + ERP runtime overlay, LINE burst coalescing, Conversation Analysis, Auto-Learn hardening)
 
 ---
 
@@ -68,7 +68,7 @@ openclaw.json  workspace-*/      workspace-*/      (gateway restart,
 
 | Service | Deploy | Port | Repo | อัปเดต |
 | ------- | ------ | ---- | ---- | ------ |
-| openclaw-gateway | pm2 + ERP runtime artifact | 18789 | bosocmputer/openclaw-runtime-artifacts | `pm2 restart openclaw-gateway` |
+| openclaw-gateway | pm2 + ERP runtime overlay | 18789 | local OpenClaw runtime overlay | `pm2 restart openclaw-gateway` |
 | openclaw-api | pm2 | 4000 | bosocmputer/openclaw-api | `git pull --ff-only origin main && npm ci --omit=dev && pm2 restart openclaw-api --update-env` |
 | openclaw-admin | Docker | 3000 | bosocmputer/openclaw-admin | `git pull --ff-only origin main && docker compose build openclaw-admin && docker compose up -d openclaw-admin` |
 | PostgreSQL | Docker | 5432 | — (same compose) | restart อัตโนมัติกับ openclaw-admin |
@@ -99,8 +99,8 @@ Browser → POST /api/gateway/restart
 
 Production policy:
 
-- customer server ควรรัน gateway จาก `/root/openclaw-runtime-2026.6.8-erp/dist/index.js gateway --port 18789`
-- หลีกเลี่ยงการ restart ด้วย global `openclaw gateway restart` ใน production เพราะอาจกลับไปใช้ official/global runtime แทน ERP runtime artifact
+- customer server ควรรัน gateway จาก `/root/openclaw-runtime-2026.6.11-erp/dist/index.js gateway --port 18789`
+- หลีกเลี่ยงการ restart ด้วย global `openclaw gateway restart` ใน production เพราะอาจกลับไปใช้ official/global runtime แทน ERP runtime overlay
 - restart action ใน Admin ต้องมี confirm และแสดงผลลัพธ์ชัดเจน
 
 ---

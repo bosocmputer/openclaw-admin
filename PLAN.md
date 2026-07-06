@@ -1,6 +1,6 @@
 # OpenClaw Admin — Current Project Status
 
-> Updated: 2026-06-23
+> Updated: 2026-07-06
 
 This file tracks the current operational state of the OpenClaw ERP Chatbot Admin solution. It replaces the older sprint plan that referenced the pre-2026.6 runtime and systemd gateway setup.
 
@@ -10,9 +10,9 @@ This file tracks the current operational state of the OpenClaw ERP Chatbot Admin
 
 | Component | Current Baseline | Notes |
 | --- | --- | --- |
-| OpenClaw runtime | `2026.6.8` + ERP runtime artifact | Gateway should run `/root/openclaw-runtime-2026.6.8-erp/dist/index.js` |
+| OpenClaw runtime | `2026.6.11` + ERP runtime overlay | Gateway should run `/root/openclaw-runtime-2026.6.11-erp/dist/index.js` |
 | openclaw-gateway | `pm2` on host, port `18789` | Uses `/root/start-openclaw-gateway.sh` |
-| openclaw-api | `pm2` on host, port `4000` | Must use `OPENCLAW_BIN` pointing to the same ERP runtime artifact |
+| openclaw-api | `pm2` on host, port `4000` | Must use `OPENCLAW_BIN` pointing to the same ERP runtime overlay |
 | openclaw-admin | Docker, port `3000` | Next.js Admin UI |
 | PostgreSQL | Docker, port `5432` | Admin users, webchat, audit, conversation analysis, business profiles, learning queue |
 
@@ -33,14 +33,14 @@ MONITOR_MEDIA_PREVIEW_ENABLED=1
 - `/monitor` supports live debug, model trace metadata, and secure media preview when runtime logs include safe media refs.
 - `/analysis/conversations` supports historical triage, issue tags, media metadata/preview, Export for Codex, and sending selected turns to Learning Review.
 - `/business-profiles` supports bounded business context templates, editable profiles, agent links, and SOUL template injection through admin-controlled Load Template.
-- `/memory` supports Memory Learning: `MEMORY.md` truth, daily memory notes, `DREAMS.md` review diary, learning candidates, approve/reject/apply, backups, and rollback.
+- `/memory` supports Auto-Learn hardening: Active/Observed/Blocked/Deleted memory, source evidence, tombstones, cleanup dry-run/apply, `MEMORY.md` compatibility sync, backups, and rollback.
 
 ---
 
 ## Current Rollout State
 
 - Dev server `192.168.2.109` is current and is the reference environment.
-- Customer server `chang168.thddns.net` has been updated through openclaw-api + openclaw-admin and uses the ERP runtime artifact under pm2.
+- Customer server `chang168.thddns.net` has been updated through openclaw-api + openclaw-admin and uses the ERP runtime overlay under pm2.
 - Conversation Analysis was cleared after Business Profile rollout so new data can represent customer behavior after the latest prompt/context changes.
 - Current mode: wait for customer conversation data, export/analyze, and tune only the correct layer.
 
@@ -48,7 +48,7 @@ MONITOR_MEDIA_PREVIEW_ENABLED=1
 
 ## Operating Loop For Customer Feedback
 
-1. Let customer users chat normally in Telegram.
+1. Let customer users chat normally in LINE and Telegram.
 2. Open `/analysis/conversations` and filter by date, agent, channel, issue tag, keyword, or media.
 3. Use turn detail to inspect user question, final answer, tool/model evidence, latency, media metadata, and raw timeline.
 4. Export with **Export for Codex** when a larger review pack is needed.

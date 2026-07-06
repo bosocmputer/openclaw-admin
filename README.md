@@ -2,23 +2,26 @@
 
 Web Admin Panel สำหรับจัดการ OpenClaw ERP Chatbot — ไม่ต้อง SSH server
 
-รองรับ **OpenClaw v2026.6.8 + OpenClaw ERP Runtime Artifact**
+รองรับ **OpenClaw v2026.6.11 + OpenClaw ERP Runtime Overlay**
 
 ## Release Status ล่าสุด
 
 | ส่วน | Baseline |
 | ---- | -------- |
-| Runtime | `OpenClaw 2026.6.8 (1c81b77)` |
-| Runtime artifact | `2026.6.8-erp-20260624-line-burst-coalescing` |
-| Runtime SHA256 | `1f4ca1e96d6ea84b7e26da1091f323a50c39e023c18c1e36a100966d55e291e7` |
-| openclaw-api | `645f116` หรือใหม่กว่า |
-| openclaw-admin | `bbfe324` หรือใหม่กว่า |
+| Runtime | `OpenClaw 2026.6.11` + ERP overlay |
+| Runtime overlay | `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` |
+| Runtime overlay SHA256 | `a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99` |
+| Runtime source commits | `f608a18664`, `9976b9bbd7`, `fe432925eb` |
+| openclaw-api | `3166394` หรือใหม่กว่า |
+| openclaw-admin | `a767392` หรือใหม่กว่า |
 
 พฤติกรรมสำคัญ:
 
-- `/monitor` แสดง `LINE grouped` เมื่อ runtime รวมรูป LINE กับข้อความที่ user ส่งตามมาเร็ว ๆ เป็น turn เดียว
+- LINE รวมรูปกับข้อความที่ user ส่งตามมาเร็ว ๆ เป็น turn เดียวแบบ generic โดยไม่ hardcode keyword ธุรกิจ
+- LINE ข้อความธรรมดาเดี่ยว ๆ ไม่ถูก delay และ `/reset` bypass การรวมข้อความ
+- `/monitor` และ `/analysis/conversations` รองรับ media preview เมื่อ runtime มี managed media ref
 - `/analysis/conversations` ใช้เก็บ feedback จริงเพื่อปรับ Business Profile, SOUL, MCP/Search และ Memory Learning
-- Runtime ต้องรันจาก ERP artifact path เช่น `/root/openclaw-runtime-2026.6.8-erp/dist/index.js` ไม่ใช่ global `openclaw`
+- Runtime ต้องรันจาก ERP runtime path เช่น `/root/openclaw-runtime-2026.6.11-erp/dist/index.js` ไม่ใช่ global `openclaw`
 - ถ้า LINE coalescing มีปัญหา สามารถ rollback เฉพาะ feature ด้วย `OPENCLAW_LINE_COALESCING=0` แล้ว restart gateway
 
 ## โครงสร้างระบบ
@@ -39,7 +42,7 @@ openclaw-api    ← Express.js (pm2 บน host)
     └── openclaw CLI / ERP runtime helpers
         (gateway restart, doctor, model runtime test)
 
-openclaw-gateway ← pm2 + ERP runtime artifact (port 18789)
+openclaw-gateway ← pm2 + ERP runtime overlay (port 18789)
 
 PostgreSQL 16  ← Docker container (port 5432)
     └── admin_users, webchat_*, audit_logs,
@@ -48,7 +51,7 @@ PostgreSQL 16  ← Docker container (port 5432)
 ```
 
 > **openclaw-api** รันบน host ด้วย pm2 (ไม่ใช้ Docker) เพราะต้องเข้าถึง OpenClaw runtime, config และ workspace files
-> **openclaw-gateway** production ควรรันผ่าน pm2 จาก ERP runtime artifact เช่น `/root/openclaw-runtime-2026.6.8-erp/dist/index.js` เพื่อให้ behavior ตรงกับ dev server และ customer rollout
+> **openclaw-gateway** production ควรรันผ่าน pm2 จาก ERP runtime overlay เช่น `/root/openclaw-runtime-2026.6.11-erp/dist/index.js` เพื่อให้ behavior ตรงกับ dev server และ customer rollout
 > ดูที่ repo แยก: [bosocmputer/openclaw-api](https://github.com/bosocmputer/openclaw-api)
 
 ## Security Architecture
@@ -171,7 +174,7 @@ openclaw-admin/
 
 - Docker + Docker Compose
 - **openclaw-api รันด้วย pm2 บน host อยู่แล้ว** (port 4000)
-- **OpenClaw Gateway v2026.6.8** ผ่าน **OpenClaw ERP Runtime Artifact**
+- **OpenClaw Gateway v2026.6.11** ผ่าน **OpenClaw ERP Runtime Overlay**
 - **cloudflared** — สำหรับ LINE webhook (LINE ต้องการ HTTPS): ดู INSTALL.md ขั้นตอน 11.9
 
 ### 1. ติดตั้ง Docker (ครั้งแรกเท่านั้น)
@@ -228,13 +231,13 @@ docker compose up -d openclaw-admin
 docker compose ps
 ```
 
-### Operational Status (2026-06-23)
+### Operational Status (2026-07-06)
 
-- Dev server `192.168.2.109` is current on OpenClaw v2026.6.8 ERP runtime artifact.
-- Customer rollout path for `chang168` is current through `openclaw-api` + `openclaw-admin`; gateway remains pm2 + ERP runtime artifact.
+- Dev server `192.168.2.109` is current on OpenClaw v2026.6.11 ERP runtime overlay.
+- Customer rollout path for `chang168` is current through `openclaw-api` + `openclaw-admin`; gateway remains pm2 + ERP runtime overlay.
 - `/analysis/conversations` supports triage, media preview, export for Codex, and sending selected turns to `/memory` Learning Review.
-- `/memory` separates `MEMORY.md` truth, daily memory notes, `DREAMS.md` review diary, and admin-approved Learning Candidates.
-- Current operating mode: wait for customer conversation data, export/analyze, then approve targeted improvements to Business Profile, SOUL, MCP/Search, Model/Runtime, or MEMORY.md.
+- `/memory` separates active memory, observed signals, blocked/deleted memories, source evidence, policy settings, and compatibility `MEMORY.md`/`DREAMS.md` views.
+- Current operating mode: strict safe auto-learn plus generic hardening. Dynamic ERP facts such as price, stock, cost, availability, credit, and substitute products must still come from MCP/SML tools.
 
 ### Migration (ถ้า DB มีข้อมูลอยู่แล้ว)
 
