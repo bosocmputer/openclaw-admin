@@ -77,6 +77,14 @@ const KILO_RECOMMENDED = {
   imagePrimary: 'kilocode/kilo/auto',
 }
 
+const OLLAMA_CLOUD_RECOMMENDED_IDS = [
+  'gemini-3-flash-preview',
+  'gemma4:31b',
+  'kimi-k2.6',
+  'gpt-oss:20b',
+  'glm-5',
+]
+
 type KeyTestState = 'idle' | 'ok' | 'fail'
 type ImageMode = 'off' | 'chat_model' | 'image_model'
 type ImageUploadDraft = ModelImageUploadPayload & {
@@ -102,7 +110,22 @@ function fullRef(provider: ProviderConfig, modelId: string) {
 }
 
 function compactModel(ref: string) {
-  return ref.replace(/^openrouter\//, '').replace(/^kilocode\//, 'kilo/')
+  return ref.replace(/^openrouter\//, '').replace(/^kilocode\//, 'kilo/').replace(/^ollama-cloud\//, 'ollama/')
+}
+
+function catalogSuggestion(value: string, provider: ProviderConfig, catalog?: ModelCatalog) {
+  if (!value || catalog?.status !== 'ready') return ''
+  const currentId = modelIdFromRef(value, provider)
+  if (!currentId) return ''
+  const normalized = currentId.replace(/:cloud$/i, '').replace(/-cloud$/i, '')
+  const exact = catalog.models.find(model => model.id === normalized)
+  if (exact) return fullRef(provider, exact.id)
+  const lower = normalized.toLowerCase()
+  const fuzzy = catalog.models.find(model => (
+    model.id.toLowerCase().includes(lower) ||
+    lower.includes(model.id.toLowerCase())
+  ))
+  return fuzzy ? fullRef(provider, fuzzy.id) : ''
 }
 
 function statusLabel(status?: string) {
@@ -243,6 +266,7 @@ function ModelPicker({
   })
 
   const selected = catalog?.models?.find(model => model.id === modelId)
+  const suggestedRef = value && !selected ? catalogSuggestion(value, provider, catalog) : ''
   const selectedTest = value ? textTestResults?.[value] : undefined
   const selectedRuntimeState = value && runtimeStateForRef ? runtimeStateForRef(value) : undefined
   const visibleModels = useMemo(() => {
@@ -381,6 +405,11 @@ function ModelPicker({
           </div>
           <p className="mt-2 break-all font-mono">{value}</p>
           {selected && formatPrice(selected) && <p className="mt-1 text-muted-foreground">{formatPrice(selected)}</p>}
+          {!selected && provider.id === 'ollama-cloud' && suggestedRef && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-900 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
+              Model id นี้ไม่ตรง catalog สด ใช้ชื่อจาก catalog แทน: <span className="break-all font-mono">{suggestedRef}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -834,6 +863,30 @@ export default function ModelPage() {
     toast.info('ใส่ชุด Kilo AI แนะนำแล้ว กดทดสอบแต่ละ model ก่อนบันทึก')
   }
 
+  async function applyOllamaCloudRecommended() {
+    try {
+      const catalog = await getModelCatalog('ollama-cloud', true)
+      qc.setQueryData(['models-catalog', 'ollama-cloud'], catalog)
+      if (catalog.status !== 'ready') {
+        toast.warning(catalog.summary || statusLabel(catalog.status))
+        return
+      }
+      const available = new Set((catalog.models || []).map(model => model.id))
+      const selected = OLLAMA_CLOUD_RECOMMENDED_IDS.filter(id => available.has(id))
+      if (!selected.length) {
+        toast.warning('ยังไม่พบ model แนะนำของ Ollama Cloud ใน catalog ของ key นี้')
+        return
+      }
+      setPrimary(fullRef(PROVIDERS.find(provider => provider.id === 'ollama-cloud') || PROVIDERS[0], selected[0]))
+      setFallbacks(selected.slice(1, 3).map(id => fullRef(PROVIDERS.find(provider => provider.id === 'ollama-cloud') || PROVIDERS[0], id)))
+      resetTextTest()
+      resetImageTest()
+      toast.info('ใส่ชุด Ollama Cloud จาก catalog สดแล้ว กดทดสอบก่อนบันทึก')
+    } catch {
+      toast.error('โหลด catalog Ollama Cloud ไม่สำเร็จ')
+    }
+  }
+
   function addFallback() {
     if (!fallbackDraft) return
     if (fallbackDraft === primary || fallbacks.includes(fallbackDraft)) {
@@ -1207,6 +1260,10 @@ export default function ModelPage() {
                     <CheckCircle2 className="size-4" />
                     Kilo AI
                   </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void applyOllamaCloudRecommended()}>
+                    <CheckCircle2 className="size-4" />
+                    Ollama Cloud
+                  </Button>
                 </div>
               </div>
             </div>
@@ -1221,6 +1278,7 @@ export default function ModelPage() {
                 recommendedRefs={[
                   OPENROUTER_RECOMMENDED.primary,
                   KILO_RECOMMENDED.primary,
+                  ...OLLAMA_CLOUD_RECOMMENDED_IDS.map(id => `ollama-cloud/${id}`),
                 ]}
                 textTestResults={textTestResults}
                 runtimeStateForRef={ref => runtimeState(ref, 'text')}
@@ -1255,6 +1313,7 @@ export default function ModelPage() {
                   recommendedRefs={[
                     ...OPENROUTER_RECOMMENDED.fallbacks,
                     ...KILO_RECOMMENDED.fallbacks,
+                    ...OLLAMA_CLOUD_RECOMMENDED_IDS.map(id => `ollama-cloud/${id}`),
                   ]}
                   textTestResults={textTestResults}
                   runtimeStateForRef={ref => runtimeState(ref, 'text')}

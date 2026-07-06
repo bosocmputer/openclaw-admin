@@ -131,6 +131,7 @@ export const PROVIDERS: ProviderConfig[] = [
   { id: 'mistral',    label: 'Mistral',       envKey: 'MISTRAL_API_KEY',    modelPrefix: 'mistral'    },
   { id: 'groq',       label: 'Groq',          envKey: 'GROQ_API_KEY',       modelPrefix: 'groq'       },
   { id: 'kilocode',   label: 'Kilo AI',       envKey: 'KILOCODE_API_KEY',   modelPrefix: 'kilocode' },
+  { id: 'ollama-cloud', label: 'Ollama Cloud', envKey: 'OLLAMA_API_KEY',     modelPrefix: 'ollama-cloud' },
 ]
 
 export async function testProvider(provider: string, apiKey: string, signal?: AbortSignal): Promise<boolean> {
