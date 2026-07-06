@@ -248,62 +248,52 @@ ls -l /data/openclaw-install-secrets.env
 
 ---
 
-## 10. ติดตั้ง OpenClaw ERP runtime overlay
+## 10. ติดตั้ง OpenClaw ERP runtime
 
 Release ที่ใช้:
 
 | รายการ | ค่า |
 | --- | --- |
-| Runtime overlay release | `2026.6.11-erp-20260706-line-burst-fastpath` |
+| Runtime release | `2026.6.11-erp-20260706-line-burst-fastpath` |
 | Runtime directory | `/data/openclaw-runtime-2026.6.11-erp` |
 | Overlay file | `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` |
 | SHA256 | `a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99` |
 
-เตรียมไฟล์ runtime:
+เตรียม runtime:
 
-- ถ้าเป็น server ใหม่ ให้เตรียม runtime skeleton ที่มี `dist` และ `node_modules` ไว้ที่ `/data/openclaw-runtime-2026.6.11-erp` ก่อน
-- Download overlay `openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz` ไปที่ `/data`
-- ห้ามเดา URL เอง ถ้าไม่มีไฟล์ overlay ให้ขอไฟล์จากทีม release ก่อน
-- ถ้า upgrade จาก skeleton 2026.6.8 แล้ว `--version` ยังแสดง `OpenClaw 2026.6.8` หลัง apply overlay ให้ตรวจ marker และ smoke test แทน version string
+- Default production path คือ build full runtime 2026.6.11 จาก source branch ที่ pin ไว้
+- Overlay file ใช้ทับ runtime 2026.6.11 ที่ถูกต้องแล้วเท่านั้น หรือใช้เป็น legacy LINE-only emergency patch
+- ถ้าใช้ `ollama-cloud` หรือ provider ใหม่ ต้องเห็น `OpenClaw 2026.6.11 (fe43292)` จาก `node ... --version` และ `/model` runtime test
 
 ```bash
 cd /data
 RUNTIME=/data/openclaw-runtime-2026.6.11-erp
-OLD_RUNTIME=/data/openclaw-runtime-2026.6.8-erp
-OVERLAY=/data/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
-SHA="a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99"
+NEW_RUNTIME=/data/openclaw-runtime-2026.6.11-erp.new
+BACKUP=/data/openclaw-runtime-2026.6.11-erp.bak-$(date +%Y%m%d-%H%M%S)
 
-curl -fL -o "$OVERLAY" \
-  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.11-erp-20260706-line-burst-fastpath/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
+pm2 stop openclaw-gateway || true
 
-if [ ! -d "$RUNTIME" ] && [ -d "$OLD_RUNTIME" ]; then
-  cp -a "$OLD_RUNTIME" "$RUNTIME"
+if [ -d "$RUNTIME" ]; then
+  mv "$RUNTIME" "$BACKUP"
 fi
 
-test -d "$RUNTIME/dist" || { echo "missing $RUNTIME"; exit 1; }
-echo "$SHA  $OVERLAY" | sha256sum -c -
+rm -rf "$NEW_RUNTIME"
+git clone --depth 1 \
+  --branch codex/openclaw-2026.6.11-erp-line-burst \
+  https://github.com/bosocmputer/openclaw.git \
+  "$NEW_RUNTIME"
+
+cd "$NEW_RUNTIME"
+git rev-parse --short HEAD
+corepack enable
+corepack prepare pnpm@11.2.2 --activate
+pnpm install --frozen-lockfile
+pnpm build:docker
+node "$NEW_RUNTIME/dist/index.js" --version
+mv "$NEW_RUNTIME" "$RUNTIME"
 ```
 
-ถ้า checksum ไม่ตรง ให้หยุดทันที
-
-backup และ apply overlay:
-
-```bash
-cd /data
-TS=$(date +%Y%m%d%H%M%S)
-mkdir -p /data/openclaw-backups/runtime-$TS
-cp -a "$RUNTIME/dist" /data/openclaw-backups/runtime-$TS/dist
-cp -a "$RUNTIME/extensions/line/src" /data/openclaw-backups/runtime-$TS/line-src 2>/dev/null || true
-cp -a "$RUNTIME/ui/src/app-navigation.ts" /data/openclaw-backups/runtime-$TS/app-navigation.ts 2>/dev/null || true
-cp -a /data/start-openclaw-gateway.sh /data/openclaw-backups/runtime-$TS/ 2>/dev/null || true
-
-tar -xzf "$OVERLAY" -C "$RUNTIME"
-
-node /data/openclaw-runtime-2026.6.11-erp/dist/index.js --version || true
-grep -R "textWindowMs.*0\\|line_burst_preflight\\|line_delivery_attempt" -n /data/openclaw-runtime-2026.6.11-erp/dist | head -30
-```
-
-ต้องเห็น marker `line_burst_preflight` และ `line_delivery_attempt` ใน `dist`. `--version` อาจยังแสดง `OpenClaw 2026.6.8` ถ้า runtime skeleton เดิมเป็น 2026.6.8.
+ต้องเห็น `OpenClaw 2026.6.11 (fe43292)` หรือใหม่กว่า
 
 สร้าง start script:
 
@@ -313,6 +303,12 @@ cat > /data/start-openclaw-gateway.sh <<'SH'
 set -euo pipefail
 export HOME=/root
 export PATH=/data/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+set -a
+[ -f /data/openclaw-api/.env ] && . /data/openclaw-api/.env
+[ -f /root/openclaw-api/.env ] && . /root/openclaw-api/.env
+set +a
+
 exec /usr/bin/node /data/openclaw-runtime-2026.6.11-erp/dist/index.js gateway --port 18789
 SH
 

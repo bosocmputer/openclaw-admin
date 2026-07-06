@@ -17,7 +17,7 @@
 | openclaw-api | `main` หลัง commit `b32f1f0` | provider/model, Auto-Learn hardening, media/analysis, system actions |
 | openclaw-admin | `main` หลัง commit `adba0bb` | current Admin UX, Memory/Analysis, model/provider, system docs |
 
-> **Runtime version note**: overlay release นี้ใช้ target path `openclaw-runtime-2026.6.11-erp` แต่ server ที่ upgrade จาก skeleton 2026.6.8 อาจยังแสดง `OpenClaw 2026.6.8` เมื่อรัน `node ... --version`. ให้ถือว่าไม่ใช่ fail ถ้า gateway ใช้ path ถูก, checksum ถูก, marker `line_burst_preflight` / `line_delivery_attempt` อยู่ใน `dist`, และ smoke test LINE/Telegram ผ่าน.
+> **Runtime version gate**: production ปัจจุบันควรใช้ base runtime 2026.6.11 จริง โดย `node /root/openclaw-runtime-2026.6.11-erp/dist/index.js --version` ต้องแสดง `OpenClaw 2026.6.11 (fe43292)` หรือใหม่กว่า. Overlay-only บน skeleton 2026.6.8 เป็น legacy LINE-only emergency path และไม่พอสำหรับ provider ใหม่อย่าง `ollama-cloud`.
 
 พฤติกรรมสำคัญใน release นี้:
 
@@ -29,7 +29,7 @@
 
 ## Current Customer Overlay Update (2026-07-06)
 
-ใช้ section นี้เมื่อลูกค้ามี runtime skeleton อยู่แล้ว และต้องอัปเดต overlay ล่าสุดเท่านั้น ไม่ต้อง reinstall OpenClaw ทั้งก้อน. ถ้ายังไม่มี `/root/openclaw-runtime-2026.6.11-erp` แต่มี `/root/openclaw-runtime-2026.6.8-erp` ให้ copy skeleton เดิมตามคำสั่งด้านล่างก่อน apply overlay.
+ใช้ section นี้เมื่อลูกค้ามี git checkout ของ `openclaw-api` และ `openclaw-admin` แล้ว. Default ปัจจุบันคือ build runtime 2026.6.11 จริงจาก source branch เพื่อให้ behavior ตรงกับ dev และรองรับ provider ใหม่ เช่น `ollama-cloud`. Overlay tarball ใช้ทับ runtime 2026.6.11 ที่ถูกต้องแล้วเท่านั้น.
 
 1. อัปเดต API/Admin ก่อน:
 
@@ -51,41 +51,63 @@ git pull --ff-only origin main
 docker compose up -d --build openclaw-admin
 ```
 
-2. Download ไฟล์ overlay ไปที่ server ลูกค้า:
+2. ติดตั้งหรือ refresh runtime 2026.6.11 จริงจาก source:
 
 ```bash
 cd /root
-curl -fL -o /root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz \
-  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.11-erp-20260706-line-burst-fastpath/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
-```
-
-3. Apply overlay และ restart gateway:
-
-```bash
-cd /root
-echo "a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99  openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz" | sha256sum -c -
-
 RUNTIME=/root/openclaw-runtime-2026.6.11-erp
-OLD_RUNTIME=/root/openclaw-runtime-2026.6.8-erp
-BACKUP_ID=$(date +%Y%m%d%H%M%S)
-mkdir -p /root/openclaw-backups/$BACKUP_ID
+NEW_RUNTIME=/root/openclaw-runtime-2026.6.11-erp.new
+BACKUP=/root/openclaw-runtime-2026.6.11-erp.bak-$(date +%Y%m%d-%H%M%S)
 
-if [ ! -d "$RUNTIME" ] && [ -d "$OLD_RUNTIME" ]; then
-  cp -a "$OLD_RUNTIME" "$RUNTIME"
+pm2 stop openclaw-gateway || true
+
+if [ -d "$RUNTIME" ]; then
+  mv "$RUNTIME" "$BACKUP"
 fi
 
-test -d "$RUNTIME/dist" || { echo "missing $RUNTIME"; exit 1; }
-cp -a "$RUNTIME/dist" /root/openclaw-backups/$BACKUP_ID/dist
-cp -a "$RUNTIME/extensions/line/src" /root/openclaw-backups/$BACKUP_ID/line-src 2>/dev/null || true
-cp -a "$RUNTIME/ui/src/app-navigation.ts" /root/openclaw-backups/$BACKUP_ID/app-navigation.ts 2>/dev/null || true
+rm -rf "$NEW_RUNTIME"
+git clone --depth 1 \
+  --branch codex/openclaw-2026.6.11-erp-line-burst \
+  https://github.com/bosocmputer/openclaw.git \
+  "$NEW_RUNTIME"
 
-tar -xzf /root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz -C "$RUNTIME"
-node "$RUNTIME/dist/index.js" --version || true
-grep -R "textWindowMs.*0\\|line_burst_preflight\\|line_delivery_attempt" -n "$RUNTIME/dist" | head -30
+cd "$NEW_RUNTIME"
+git rev-parse --short HEAD
+corepack enable
+corepack prepare pnpm@11.2.2 --activate
+pnpm install --frozen-lockfile
+pnpm build:docker
+node "$NEW_RUNTIME/dist/index.js" --version
+mv "$NEW_RUNTIME" "$RUNTIME"
+```
 
-pm2 restart openclaw-gateway --update-env
+3. สร้าง start script ให้ gateway อ่าน provider keys จาก `/root/openclaw-api/.env` แล้ว restart:
+
+```bash
+cat > /root/start-openclaw-gateway.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+export HOME=/root
+export PATH=/root/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+set -a
+[ -f /root/openclaw-api/.env ] && . /root/openclaw-api/.env
+set +a
+
+exec /usr/bin/node /root/openclaw-runtime-2026.6.11-erp/dist/index.js gateway --port 18789
+SH
+
+chmod +x /root/start-openclaw-gateway.sh
+
+pm2 delete openclaw-gateway || true
+pm2 start /root/start-openclaw-gateway.sh --name openclaw-gateway --cwd /root
 pm2 restart openclaw-api --update-env
 pm2 save
+
+sleep 8
+node /root/openclaw-runtime-2026.6.11-erp/dist/index.js --version
+grep -R "textWindowMs.*0\\|line_burst_preflight\\|line_delivery_attempt" -n /root/openclaw-runtime-2026.6.11-erp/dist | head -30
+ps -ef | grep -E "openclaw-runtime-2026.6.11-erp|openclaw.*gateway" | grep -v grep
 ```
 
 4. Smoke test:
@@ -93,6 +115,7 @@ pm2 save
 - LINE: ส่ง `/reset`, ส่งข้อความธรรมดา, ส่งรูปแล้วพิมพ์คำถามตามมาเร็ว ๆ ต้องตอบและไม่ค้าง
 - Telegram: ส่ง `/reset`, ข้อความธรรมดา, ค้นสินค้า/เช็คสต็อกตาม agent
 - Admin: `/system` ไม่มี critical fail, `/monitor` เห็น turn ล่าสุด, `/model` runtime test ยังผ่าน
+- ถ้าใช้ Ollama Cloud: `/model` test ต้องแสดง `runtimeVersion: OpenClaw 2026.6.11 (fe43292)` หรือใหม่กว่า
 
 ถ้า LINE coalescing มีปัญหาให้ rollback เฉพาะ feature ด้วย `OPENCLAW_LINE_COALESCING=0` แล้ว restart gateway หรือ restore backup จาก `/root/openclaw-backups/$BACKUP_ID`
 
@@ -247,57 +270,53 @@ wizard จะถามเรื่อง model/provider — **เลือกอ
 > ค่าที่เลือกใน wizard แก้ได้ทั้งหมดผ่าน Web Admin ในขั้นตอนถัดไป
 > หลังจากนี้ CLI เป็นแค่ตัวช่วย config ไม่ใช่ runtime production
 
-### 6.2 เตรียม base runtime และ overlay
+### 6.2 เตรียม full runtime 2026.6.11
 
-สำหรับ install ใหม่ ให้เตรียม runtime skeleton ที่มี `dist` และ `node_modules` ไว้ที่ `/root/openclaw-runtime-2026.6.11-erp` ก่อน จากนั้น download overlay นี้ไปที่ `/root`.
-ถ้าเป็น server เก่าที่มี `/root/openclaw-runtime-2026.6.8-erp` อยู่แล้ว สามารถ copy skeleton เดิมมาเป็น target dir แล้วค่อย apply overlay ได้:
-
-```bash
-cd /root
-curl -fL -o /root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz \
-  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.11-erp-20260706-line-burst-fastpath/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
-```
-
-### 6.3 ตรวจ checksum, apply overlay และสร้าง start script
+ติดตั้ง runtime จาก source branch ที่ pin ไว้ เพื่อให้ runtime capability ตรงกับ dev server และ provider ใหม่ เช่น `ollama-cloud` ใช้งานได้จริง:
 
 ```bash
 cd /root
 RUNTIME=/root/openclaw-runtime-2026.6.11-erp
-OLD_RUNTIME=/root/openclaw-runtime-2026.6.8-erp
-OVERLAY=/root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
-SHA="a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99"
+NEW_RUNTIME=/root/openclaw-runtime-2026.6.11-erp.new
+BACKUP=/root/openclaw-runtime-2026.6.11-erp.bak-$(date +%Y%m%d-%H%M%S)
 
-curl -fL -o "$OVERLAY" \
-  https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.11-erp-20260706-line-burst-fastpath/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
-
-BACKUP_ID=$(date +%Y%m%d%H%M%S)
-mkdir -p /root/openclaw-backups/$BACKUP_ID
-
-if [ ! -d "$RUNTIME" ] && [ -d "$OLD_RUNTIME" ]; then
-  cp -a "$OLD_RUNTIME" "$RUNTIME"
+if [ -d "$RUNTIME" ]; then
+  mv "$RUNTIME" "$BACKUP"
 fi
 
-test -d "$RUNTIME/dist" || { echo "missing $RUNTIME"; exit 1; }
-echo "$SHA  $OVERLAY" | sha256sum -c -
+rm -rf "$NEW_RUNTIME"
+git clone --depth 1 \
+  --branch codex/openclaw-2026.6.11-erp-line-burst \
+  https://github.com/bosocmputer/openclaw.git \
+  "$NEW_RUNTIME"
 
-cp -a "$RUNTIME/dist" /root/openclaw-backups/$BACKUP_ID/dist
-cp -a "$RUNTIME/extensions/line/src" /root/openclaw-backups/$BACKUP_ID/line-src 2>/dev/null || true
-cp -a "$RUNTIME/ui/src/app-navigation.ts" /root/openclaw-backups/$BACKUP_ID/app-navigation.ts 2>/dev/null || true
-cp -a /root/start-openclaw-gateway.sh /root/openclaw-backups/$BACKUP_ID/start-openclaw-gateway.sh 2>/dev/null || true
+cd "$NEW_RUNTIME"
+git rev-parse --short HEAD
+corepack enable
+corepack prepare pnpm@11.2.2 --activate
+pnpm install --frozen-lockfile
+pnpm build:docker
+node "$NEW_RUNTIME/dist/index.js" --version
+mv "$NEW_RUNTIME" "$RUNTIME"
+```
 
-tar -xzf "$OVERLAY" -C "$RUNTIME"
+### 6.3 สร้าง start script
 
+```bash
 cat > /root/start-openclaw-gateway.sh <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 export HOME=/root
 export PATH=/root/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+set -a
+[ -f /root/openclaw-api/.env ] && . /root/openclaw-api/.env
+set +a
+
 exec /usr/bin/node /root/openclaw-runtime-2026.6.11-erp/dist/index.js gateway --port 18789
 SH
 
 chmod +x /root/start-openclaw-gateway.sh
-
-echo "BACKUP_ID=$BACKUP_ID"
 ```
 
 ### 6.4 Start gateway ผ่าน pm2
@@ -329,7 +348,7 @@ line_burst_preflight
 line_delivery_attempt
 ```
 
-ถ้า `--version` ยังแสดง `OpenClaw 2026.6.8` บนเครื่องที่ upgrade จาก skeleton เดิม ให้ตรวจ marker และ smoke test แทน version string.
+ถ้า `--version` ยังแสดง `OpenClaw 2026.6.8` แปลว่ายังไม่ใช่ full runtime 2026.6.11. ให้กลับไปทำขั้นตอน 6.2 ใหม่ โดยเฉพาะถ้าจะใช้ `ollama-cloud`.
 
 > **สำคัญ**: ห้าม start gateway ด้วย `openclaw gateway run` ใน production เพราะจะกลับไปใช้ official runtime ที่อาจไม่เหมือน dev
 
@@ -974,15 +993,18 @@ warnings = []
 
 ## การอัปเดตระบบ
 
-> Production policy: gateway ต้องอัปเดตด้วย **OpenClaw ERP Runtime Overlay** เท่านั้น เพื่อให้ behavior เหมือน dev server ห้ามใช้ `npm install -g openclaw@latest` แล้วรันเป็น gateway runtime โดยตรง
+> Production policy: gateway ต้องรันจาก `/root/openclaw-runtime-2026.6.11-erp/dist/index.js` ที่ build จาก source branch ที่ pin ไว้ หรือเป็น runtime 2026.6.11 ที่ apply overlay แล้วเท่านั้น ห้ามใช้ `npm install -g openclaw@latest` แล้วรันเป็น gateway runtime โดยตรง
 
-### อัปเดต OpenClaw ERP Runtime Overlay
+### อัปเดต OpenClaw ERP Runtime Overlay บน base 2026.6.11
 
 ```bash
 cd /root
 RUNTIME=/root/openclaw-runtime-2026.6.11-erp
 OVERLAY=/root/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
 SHA="a26156d0440b4d6010d89c98a94cdefa8f0d51693762874bde0d607175f94a99"
+
+node "$RUNTIME/dist/index.js" --version | grep 'OpenClaw 2026.6.11' \
+  || { echo "base runtime is not 2026.6.11; run full runtime install first"; exit 1; }
 
 curl -fL -o "$OVERLAY" \
   https://raw.githubusercontent.com/bosocmputer/openclaw-runtime-artifacts/main/releases/2026.6.11-erp-20260706-line-burst-fastpath/openclaw-runtime-2026.6.11-erp-line-burst-fe432925.tgz
@@ -1005,6 +1027,11 @@ cat > /root/start-openclaw-gateway.sh <<'SH'
 set -euo pipefail
 export HOME=/root
 export PATH=/root/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+set -a
+[ -f /root/openclaw-api/.env ] && . /root/openclaw-api/.env
+set +a
+
 exec /usr/bin/node /root/openclaw-runtime-2026.6.11-erp/dist/index.js gateway --port 18789
 SH
 
