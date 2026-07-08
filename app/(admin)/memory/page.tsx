@@ -60,12 +60,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 
-type MemoryTab = 'active' | 'soft' | 'blocked' | 'deleted' | 'sources' | 'settings' | 'files' | 'backups'
+type MemoryTab = 'active' | 'search_hints' | 'description_suggestions' | 'soft' | 'blocked' | 'deleted' | 'sources' | 'settings' | 'files' | 'backups'
 
 const memoryTypeOptions: Array<{ value: MemoryType; label: string; help: string }> = [
   { value: 'terminology', label: 'คำศัพท์/คำพ้อง', help: 'คำเรียก, spelling, alias ที่ช่วยเข้าใจคำถาม' },
   { value: 'preference', label: 'Preference', help: 'ความชอบหรือรูปแบบที่ลูกค้าหรือ agent ใช้ซ้ำ' },
   { value: 'workflow_hint', label: 'Workflow hint', help: 'ข้อสังเกตที่ช่วยให้ flow ตอบดีขึ้น' },
+  { value: 'search_hint', label: 'Search hint', help: 'คำช่วยค้นที่ต้อง verify ด้วย MCP/Search ทุกครั้ง' },
+  { value: 'description_suggestion', label: 'SML description suggestion', help: 'คำแนะนำให้ staff เติมช่อง description ใน SML ERP' },
   { value: 'faq_pattern', label: 'FAQ pattern', help: 'รูปแบบคำถามที่เจอบ่อย' },
   { value: 'entity_alias', label: 'Entity alias', help: 'ชื่อเรียกสินค้า/หมวด/ลูกค้าแบบกลาง ๆ' },
   { value: 'staff_instruction', label: 'Staff instruction', help: 'สิ่งที่ staff/admin สอนอย่างชัดเจน' },
@@ -165,10 +167,20 @@ function tabStatus(tab: MemoryTab): AgentMemoryStatus | undefined {
   return undefined
 }
 
+function tabForcedType(tab: MemoryTab): MemoryType | undefined {
+  if (tab === 'search_hints') return 'search_hint'
+  if (tab === 'description_suggestions') return 'description_suggestion'
+  return undefined
+}
+
+function tabUsesMemoryList(tab: MemoryTab) {
+  return Boolean(tabStatus(tab) || tabForcedType(tab))
+}
+
 function tabFromSearch(): MemoryTab | null {
   if (typeof window === 'undefined') return null
   const value = new URLSearchParams(window.location.search).get('tab')
-  if (value === 'active' || value === 'soft' || value === 'blocked' || value === 'deleted' || value === 'sources' || value === 'settings' || value === 'files' || value === 'backups') return value
+  if (value === 'active' || value === 'search_hints' || value === 'description_suggestions' || value === 'soft' || value === 'blocked' || value === 'deleted' || value === 'sources' || value === 'settings' || value === 'files' || value === 'backups') return value
   return null
 }
 
@@ -212,11 +224,11 @@ export default function MemoryPage() {
       agentId: effectiveAgentId || undefined,
       status: tabStatus(tab),
       q: query || undefined,
-      type: typeFilter === 'all' ? undefined : typeFilter,
+      type: tabForcedType(tab) || (typeFilter === 'all' ? undefined : typeFilter),
       scope: scopeFilter === 'all' ? undefined : scopeFilter,
       limit: 300,
     }),
-    enabled: Boolean(effectiveAgentId && tabStatus(tab)),
+    enabled: Boolean(effectiveAgentId && tabUsesMemoryList(tab)),
     retry: false,
   })
 
@@ -441,9 +453,9 @@ export default function MemoryPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Memory Control Center</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Agent Brain Control Center</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            หน้านี้ใช้เปิด Auto-Learn และคุม “ความจำที่ใช้ตอบจริง” ส่วน Conversation Analysis ใช้ดูหลักฐานจากบทสนทนา
+            หน้านี้ใช้คุมความรู้ที่ agent ใช้จริง, คำช่วยค้น, คำแนะนำเติม SML description และเรื่องที่ห้ามจำ ส่วน Conversation Analysis ใช้ดูหลักฐานจากบทสนทนา
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -512,9 +524,9 @@ export default function MemoryPage() {
         <div className="border-b p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <h2 className="text-base font-semibold">ค้นหาและจัดการความจำ</h2>
+              <h2 className="text-base font-semibold">ค้นหาและจัดการ Agent Brain</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                ค้นหา/ลบ/ปิดความจำที่ใช้ตอบจริง และดูสัญญาณจากบทสนทนาที่ระบบเรียนรู้ได้
+                Active Knowledge ใช้ตอบจริง, Search Hints ช่วยค้นแต่ยังต้อง verify ด้วย MCP, Description Suggestions เป็นคำแนะนำให้ staff เติม SML ERP
               </p>
             </div>
             <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_150px_150px]">
@@ -544,6 +556,8 @@ export default function MemoryPage() {
           <div className="border-b px-4 py-3">
             <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
               <TabsTrigger value="active">ใช้ตอบจริง</TabsTrigger>
+              <TabsTrigger value="search_hints">Search Hints</TabsTrigger>
+              <TabsTrigger value="description_suggestions">Description</TabsTrigger>
               <TabsTrigger value="soft">พักไว้</TabsTrigger>
               <TabsTrigger value="blocked">ห้ามจำ</TabsTrigger>
               <TabsTrigger value="deleted">ลบแล้ว</TabsTrigger>
@@ -554,12 +568,22 @@ export default function MemoryPage() {
             </TabsList>
           </div>
 
-          {(['active', 'soft', 'blocked', 'deleted'] as MemoryTab[]).map(statusTab => (
+          {(['active', 'search_hints', 'description_suggestions', 'soft', 'blocked', 'deleted'] as MemoryTab[]).map(statusTab => (
             <TabsContent key={statusTab} value={statusTab} className="p-4">
+              {statusTab === 'search_hints' ? (
+                <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  Search Hints คือคำช่วยค้นหรือ alias ที่ช่วยให้ agent ตั้ง keyword ดีขึ้น แต่ราคา/สต็อก/สินค้าแทนยังต้องยืนยันด้วย MCP/SML ทุกครั้ง
+                </div>
+              ) : null}
+              {statusTab === 'description_suggestions' ? (
+                <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  Description Suggestions คือคำแนะนำให้ staff เติมช่อง description ใน SML ERP เพื่อให้ search_product.v2 ค้นง่ายขึ้น ไม่ใช่ข้อมูลที่ bot ใช้ตอบลูกค้าโดยตรง
+                </div>
+              ) : null}
               {memoriesLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด memory...</div> : null}
               {!memoriesLoading && !memories.length ? (
                 <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-                  ยังไม่มี memory ในหมวดนี้ ใช้ปุ่ม “เพิ่ม Memory” หรือ promote จาก Sources เมื่อพร้อมใช้งาน
+                  ยังไม่มีรายการในหมวดนี้ ใช้ปุ่ม “เพิ่ม Memory” หรือดู Sources เมื่อพร้อมใช้งาน
                 </div>
               ) : null}
               <div className="grid gap-3 xl:grid-cols-2">
@@ -579,7 +603,7 @@ export default function MemoryPage() {
 
           <TabsContent value="sources" className="p-4">
             <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-              สัญญาณจากแชทมาจาก Conversation Analysis ถ้า Safe Auto เปิด ระบบจะเรียนรู้ low-risk ให้เอง และ block เรื่องราคา/สต็อก/ต้นทุนไม่ให้เข้า prompt
+              Sources คือหลักฐานจาก Conversation Analysis ยังไม่ใช่ truth โดยตรง ระบบจะแยก decision เช่น search hint, description suggestion, blocked fact หรือ manual review ก่อนเสมอ
             </div>
             {observationsLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด learning signals...</div> : null}
             {!observationsLoading && !observations.length ? (
@@ -652,6 +676,7 @@ export default function MemoryPage() {
                 <CardContent className="space-y-3 text-sm text-muted-foreground">
                   <p>ระบบจะไม่จำราคา สต็อก ต้นทุน สินค้ามี/ไม่มี หรือสินค้าทดแทนจากบทสนทนาเป็นความจริงถาวร</p>
                   <p>ถ้า admin ลบ memory ระบบจะสร้าง tombstone เพื่อกันการเรียนซ้ำทันทีจาก pattern เดิม</p>
+                  <p>Search Hints และ Description Suggestions เป็น Agent Brain evidence ไม่ใช่ราคา/สต็อกหรือ master data</p>
                   <p>Business Profile, SOUL และ MCP/Search ยังเป็นชั้นแยก ไม่ถูกแก้อัตโนมัติจาก Auto-Learn v2</p>
                 </CardContent>
               </Card>

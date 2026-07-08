@@ -1737,7 +1737,7 @@ export async function getDailyMemoryContent(agentId: string, filename: string): 
   return data.content ?? ''
 }
 
-export type MemoryType = 'terminology' | 'preference' | 'workflow_hint' | 'faq_pattern' | 'entity_alias' | 'staff_instruction' | 'blocked_fact'
+export type MemoryType = 'terminology' | 'preference' | 'workflow_hint' | 'search_hint' | 'description_suggestion' | 'faq_pattern' | 'entity_alias' | 'staff_instruction' | 'blocked_fact'
 export type MemoryScope = 'session' | 'contact' | 'agent' | 'business' | 'global'
 export type AgentMemoryStatus = 'active' | 'soft' | 'blocked' | 'deleted'
 export type MemoryPolicyMode = 'off' | 'observe_only' | 'safe_auto' | 'manual_review'
@@ -1831,6 +1831,38 @@ export interface MemoryUsageEvent {
   createdAt: string
 }
 
+export type AgentBrainAudience = 'customer' | 'staff' | 'internal'
+
+export interface AgentBrainChannelPolicy {
+  channel: 'line' | 'telegram' | 'webchat' | string | null
+  accountId: string | null
+  audience: AgentBrainAudience
+  showDescriptionSuggestions: boolean
+  enabled: boolean
+  updatedBy?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AgentBrainEvaluationResult {
+  ok: boolean
+  status: string
+  agentId: string
+  channel?: string | null
+  accountId?: string | null
+  policy?: MemoryPolicy
+  channelPolicy?: AgentBrainChannelPolicy
+  memoriesToInject?: string[]
+  injectedChars?: number
+  includedMemoryIds?: string[]
+  excludedMemoryIds?: string[]
+  learningSignals?: MemoryObservation[]
+  searchHints?: Array<Record<string, unknown>>
+  descriptionSuggestions?: Array<Record<string, unknown>>
+  assistantAddendum?: string | null
+  safeMessage?: string
+}
+
 export async function getAgentMemories(params: {
   agentId?: string
   status?: AgentMemoryStatus | string
@@ -1840,6 +1872,65 @@ export async function getAgentMemories(params: {
   limit?: number
 } = {}): Promise<{ memories: AgentMemory[] }> {
   const { data } = await api.get('/api/memory/memories', { params })
+  return data
+}
+
+export async function getAgentBrainItems(params: {
+  agentId?: string
+  status?: AgentMemoryStatus | string
+  type?: MemoryType | string
+  scope?: MemoryScope | string
+  q?: string
+  limit?: number
+} = {}): Promise<{ memories: AgentMemory[] }> {
+  const { data } = await api.get('/api/agent-brain/items', { params })
+  return data
+}
+
+export async function updateAgentBrainItem(id: string, body: Partial<Pick<AgentMemory, 'status' | 'type' | 'scope' | 'content' | 'confidence' | 'evidence'>>): Promise<AgentMemory> {
+  const { data } = await api.patch(`/api/agent-brain/items/${encodeURIComponent(id)}`, body)
+  return data
+}
+
+export async function deleteAgentBrainItem(id: string, blockRelearn = true): Promise<{ memory: AgentMemory; tombstone?: Record<string, unknown> | null }> {
+  const { data } = await api.delete(`/api/agent-brain/items/${encodeURIComponent(id)}`, { params: { blockRelearn } })
+  return data
+}
+
+export async function blockAgentBrainItemRelearn(id: string, reason?: string): Promise<{ memory: AgentMemory; tombstone: Record<string, unknown> }> {
+  const { data } = await api.post(`/api/agent-brain/items/${encodeURIComponent(id)}/block-relearn`, { reason })
+  return data
+}
+
+export async function evaluateAgentBrainTurn(body: {
+  agentId: string
+  channel?: 'line' | 'telegram' | 'webchat' | string
+  accountId?: string
+  turnId?: string
+  userText?: string
+  finalText?: string
+  hasMedia?: boolean
+  mediaCount?: number
+  issues?: Array<Record<string, unknown>>
+}): Promise<AgentBrainEvaluationResult> {
+  const { data } = await api.post('/api/agent-brain/evaluate-turn', body)
+  return data
+}
+
+export async function getAgentBrainChannelPolicies(params: {
+  channel?: 'line' | 'telegram' | 'webchat' | string
+  accountId?: string
+} = {}): Promise<{ policies: AgentBrainChannelPolicy[] }> {
+  const { data } = await api.get('/api/agent-brain/channel-policies', { params })
+  return data
+}
+
+export async function putAgentBrainChannelPolicy(
+  channel: 'line' | 'telegram' | 'webchat' | string,
+  accountId: string,
+  body: Partial<Pick<AgentBrainChannelPolicy, 'audience' | 'showDescriptionSuggestions' | 'enabled'>>,
+): Promise<AgentBrainChannelPolicy> {
+  const { data } = await api.put(`/api/agent-brain/channel-policies/${encodeURIComponent(channel)}/${encodeURIComponent(accountId)}`, body)
   return data
 }
 

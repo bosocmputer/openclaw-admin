@@ -74,6 +74,9 @@ const triageTabs = [
   { id: 'slow', label: 'ตอบช้า' },
   { id: 'price', label: 'เดาราคา' },
   { id: 'media', label: 'มีรูป' },
+  { id: 'brain', label: 'Agent Brain' },
+  { id: 'search_hint', label: 'Search Hint' },
+  { id: 'description', label: 'เติม description' },
 ] as const
 
 type TriageTab = typeof triageTabs[number]['id']
@@ -183,6 +186,8 @@ function memoryTypeLabel(type?: string) {
   if (type === 'terminology') return 'คำศัพท์'
   if (type === 'preference') return 'Preference'
   if (type === 'workflow_hint') return 'Workflow'
+  if (type === 'search_hint') return 'Search hint'
+  if (type === 'description_suggestion') return 'SML description'
   if (type === 'faq_pattern') return 'FAQ'
   if (type === 'entity_alias') return 'Alias'
   if (type === 'staff_instruction') return 'Staff'
@@ -193,6 +198,7 @@ function memoryTypeLabel(type?: string) {
 function learningDecisionVariant(decision?: string) {
   if (decision === 'learned') return 'default'
   if (decision === 'blocked') return 'destructive'
+  if (decision === 'description_suggestion' || decision === 'search_hint_candidate') return 'outline'
   return 'secondary'
 }
 
@@ -656,6 +662,9 @@ export default function ConversationAnalysisPage() {
     if (next === 'slow') setSlowOnly(true)
     if (next === 'price') setIssueTag('unverified_price_guess')
     if (next === 'media') setHasMedia(true)
+    if (next === 'brain') setLearningDecision('agent_brain')
+    if (next === 'search_hint') setLearningDecision('search_hint')
+    if (next === 'description') setLearningDecision('description_suggestion')
   }
 
   function openLearningDialog() {
@@ -834,6 +843,9 @@ export default function ConversationAnalysisPage() {
                     <SelectItem value="unsafe">Unsafe/manual</SelectItem>
                     <SelectItem value="blocked">Blocked dynamic fact</SelectItem>
                     <SelectItem value="mcp_search_review">MCP/Search review</SelectItem>
+                    <SelectItem value="agent_brain">Agent Brain signal</SelectItem>
+                    <SelectItem value="search_hint">Search hint</SelectItem>
+                    <SelectItem value="description_suggestion">SML description suggestion</SelectItem>
                   </SelectContent>
                 </Select>
               </label>

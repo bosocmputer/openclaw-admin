@@ -6,6 +6,10 @@ import {
   addLineAccount, deleteLineAccount, updateLineAccount, setLineBinding, approveLinePairing, restartGateway,
   getLineDeliveryStats,
   applyChannelBinding,
+  getAgentBrainChannelPolicies,
+  putAgentBrainChannelPolicy,
+  type AgentBrainAudience,
+  type AgentBrainChannelPolicy,
   type ChannelBindingApplyResult,
   type LineBotInfo,
   type LineDeliveryStats,
@@ -38,6 +42,9 @@ function AccountCard({
   onSaveApply,
   onSaveOnly,
   onCancelBindingChange,
+  brainPolicy,
+  brainPolicySaving,
+  onUpdateBrainPolicy,
 }: {
   accountId: string
   botInfo: LineBotInfo | null
@@ -55,6 +62,9 @@ function AccountCard({
   onSaveApply: () => void
   onSaveOnly: () => void
   onCancelBindingChange: () => void
+  brainPolicy: AgentBrainChannelPolicy
+  brainPolicySaving: boolean
+  onUpdateBrainPolicy: (patch: Partial<Pick<AgentBrainChannelPolicy, 'audience' | 'showDescriptionSuggestions' | 'enabled'>>) => void
 }) {
   const qrUrl = botInfo?.basicId
     ? `https://qr-official.line.me/gs/M_${botInfo.basicId}_GW.png`
@@ -163,6 +173,46 @@ function AccountCard({
           {!boundAgentId && (
             <p className="text-xs text-amber-600 dark:text-amber-400">⚠ ยังไม่ได้ผูก Agent</p>
           )}
+        </div>
+
+        <Separator />
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Agent Brain Audience</p>
+          <p className="text-xs text-zinc-500">
+            ใช้กำหนดว่า channel นี้เป็นลูกค้าหรือ staff เพื่อควบคุมคำแนะนำเติม SML description
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={brainPolicy.audience}
+              onValueChange={value => onUpdateBrainPolicy({
+                audience: value as AgentBrainAudience,
+                showDescriptionSuggestions: value === 'customer' ? false : brainPolicy.showDescriptionSuggestions,
+              })}
+            >
+              <SelectTrigger className="w-44" aria-label="Agent Brain audience">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="customer">Customer</SelectItem>
+                <SelectItem value="staff">Staff</SelectItem>
+                <SelectItem value="internal">Internal</SelectItem>
+              </SelectContent>
+            </Select>
+            <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
+              <input
+                type="checkbox"
+                checked={brainPolicy.showDescriptionSuggestions}
+                disabled={brainPolicySaving || brainPolicy.audience === 'customer'}
+                onChange={event => onUpdateBrainPolicy({ showDescriptionSuggestions: event.target.checked })}
+              />
+              Show SML description suggestions
+            </label>
+            {brainPolicySaving ? <span className="text-xs text-zinc-400">Saving...</span> : null}
+          </div>
+          <p className="text-xs text-zinc-400">
+            Customer channel จะไม่เห็นคำแนะนำหลังบ้าน ส่วน Staff/Internal เปิดได้เมื่อใช้เพื่อสอนข้อมูลสินค้า
+          </p>
         </div>
 
         <Separator />
@@ -359,6 +409,12 @@ export default function LinePage() {
     retry: false,
   })
   const { data: bindings = [] } = useQuery({ queryKey: ['line-bindings'], queryFn: getLineBindings })
+  const { data: brainPoliciesData } = useQuery({
+    queryKey: ['agent-brain-channel-policies', 'line'],
+    queryFn: () => getAgentBrainChannelPolicies({ channel: 'line' }),
+    enabled: !!lineConfig?.line,
+    retry: false,
+  })
   const { data: pending = [] } = useQuery({
     queryKey: ['line-pending'],
     queryFn: getLinePending,
@@ -461,6 +517,16 @@ export default function LinePage() {
       if (data) setApplyResult(data)
       toast.error(data?.safeMessage || 'Failed to apply binding')
     },
+  })
+
+  const brainPolicyMutation = useMutation({
+    mutationFn: ({ accountId, patch }: { accountId: string; patch: Partial<Pick<AgentBrainChannelPolicy, 'audience' | 'showDescriptionSuggestions' | 'enabled'>> }) =>
+      putAgentBrainChannelPolicy('line', accountId, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent-brain-channel-policies', 'line'] })
+      toast.success('บันทึก Agent Brain channel policy แล้ว')
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'บันทึก Agent Brain policy ไม่สำเร็จ'),
   })
 
   const updateMutation = useMutation({
@@ -592,6 +658,13 @@ export default function LinePage() {
         {accountIds.map(id => {
           const boundAgentId = bindings.find(b => b.accountId === id)?.agentId ?? ''
           const selectedAgentId = draftBindings[id] ?? boundAgentId
+          const brainPolicy = brainPoliciesData?.policies.find(policy => policy.channel === 'line' && policy.accountId === id) || {
+            channel: 'line',
+            accountId: id,
+            audience: 'customer' as AgentBrainAudience,
+            showDescriptionSuggestions: false,
+            enabled: true,
+          }
           return (
             <AccountCard
               key={id}
@@ -610,6 +683,9 @@ export default function LinePage() {
                 delete next[id]
                 return next
               })}
+              brainPolicy={brainPolicy}
+              brainPolicySaving={brainPolicyMutation.isPending}
+              onUpdateBrainPolicy={patch => brainPolicyMutation.mutate({ accountId: id, patch })}
               bindingSaving={bindMutation.isPending || applyBindingMutation.isPending}
               onEdit={() => {
                 setEditToken('')

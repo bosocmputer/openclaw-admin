@@ -106,9 +106,9 @@ Browser → GET /api/proxy/api/status
 | Compaction | `/compaction` | ตั้งค่า memory compaction (รองรับ fields ใหม่ v2026.3.28) |
 | Checkpoints | `/sessions` | ดูและ restore session compaction checkpoints ต่อ agent |
 | Webhooks | `/webhooks` | CRUD webhook routes สำหรับรับข้อมูลจากระบบภายนอก |
-| Memory Learning | `/memory` | ดู MEMORY.md, daily memory, DREAMS.md และ Learning Review queue สำหรับ approve/reject/apply/rollback ความจำ |
+| Agent Brain | `/memory` | คุม Active Knowledge, Search Hints, SML Description Suggestions, Blocked/Deleted memory, Sources, policy และ compatibility `MEMORY.md`/`DREAMS.md` |
 | Analysis | `/analysis` | วิเคราะห์ usage/operational metrics |
-| Conversation Analysis | `/analysis/conversations` | ดูประวัติบทสนทนา, issue tags, trace/tool/model/media detail, export pack และส่ง turn เข้า Learning Review |
+| Conversation Analysis | `/analysis/conversations` | ดูประวัติบทสนทนา, issue tags, trace/tool/model/media detail, Agent Brain evidence และ export pack |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
 | System Check | `/system` | Self-service health: สิ่งที่ต้องจัดการ, action ที่ปลอดภัย, runtime/model checks, restart gateway และ copy support bundle |
 | Guide | `/guide` | คู่มือผู้ใช้ (แสดง bot name จริงจาก config) |
@@ -237,9 +237,10 @@ docker compose ps
 
 - Dev server `192.168.2.109` is current on OpenClaw v2026.6.11 ERP runtime overlay.
 - Customer rollout path for `chang168` is current through `openclaw-api` + `openclaw-admin`; gateway remains pm2 + ERP runtime overlay.
-- `/analysis/conversations` supports triage, media preview, export for Codex, and sending selected turns to `/memory` Learning Review.
-- `/memory` separates active memory, observed signals, blocked/deleted memories, source evidence, policy settings, and compatibility `MEMORY.md`/`DREAMS.md` views.
-- Current operating mode: strict safe auto-learn plus generic hardening. Dynamic ERP facts such as price, stock, cost, availability, credit, and substitute products must still come from MCP/SML tools.
+- `/analysis/conversations` supports triage, media preview, export for Codex, Agent Brain decisions, search hints, and SML description suggestion evidence.
+- `/memory` is the Agent Brain Control Center: Active Knowledge is used as safe context, Search Hints help MCP/Search, Description Suggestions guide staff to improve SML ERP `description`, Sources are evidence only, and Blocked/Deleted keeps tombstones.
+- `/line` and `/telegram` include Agent Brain audience policy per account. Default is `customer`, and SML description suggestions are hidden unless a channel is explicitly `staff` or `internal`.
+- Current operating mode: strict default-deny safe auto-learn plus generic hardening. Dynamic ERP facts such as price, stock, cost, availability, credit, and substitute products must still come from MCP/SML tools.
 
 ### Migration (ถ้า DB มีข้อมูลอยู่แล้ว)
 

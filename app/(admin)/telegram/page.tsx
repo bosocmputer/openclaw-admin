@@ -15,6 +15,10 @@ import {
   setTelegramDefault,
   getAgents,
   applyChannelBinding,
+  getAgentBrainChannelPolicies,
+  putAgentBrainChannelPolicy,
+  type AgentBrainAudience,
+  type AgentBrainChannelPolicy,
   type ChannelBindingApplyResult,
 } from '@/lib/api'
 import { useState, useEffect } from 'react'
@@ -56,6 +60,9 @@ function AccountCard({
   onSaveApply,
   onSaveOnly,
   onCancelBindingChange,
+  brainPolicy,
+  brainPolicySaving,
+  onUpdateBrainPolicy,
 }: {
   accountId: string
   label: string
@@ -77,6 +84,9 @@ function AccountCard({
   onSaveApply: () => void
   onSaveOnly: () => void
   onCancelBindingChange: () => void
+  brainPolicy: AgentBrainChannelPolicy
+  brainPolicySaving: boolean
+  onUpdateBrainPolicy: (patch: Partial<Pick<AgentBrainChannelPolicy, 'audience' | 'showDescriptionSuggestions' | 'enabled'>>) => void
 }) {
   const hasBindingChange = selectedAgentId !== (boundAgentId || '')
 
@@ -181,6 +191,46 @@ function AccountCard({
           {!boundAgentId && (
             <p className="text-xs text-amber-600 dark:text-amber-400">⚠ ยังไม่ได้ผูก Agent — bot จะ fallback ไปยัง default agent แทน</p>
           )}
+        </div>
+
+        <Separator />
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Agent Brain Audience</p>
+          <p className="text-xs text-zinc-500">
+            ใช้กำหนดว่า bot นี้คุยกับลูกค้าหรือ staff เพื่อควบคุมคำแนะนำเติม SML description
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={brainPolicy.audience}
+              onValueChange={value => onUpdateBrainPolicy({
+                audience: value as AgentBrainAudience,
+                showDescriptionSuggestions: value === 'customer' ? false : brainPolicy.showDescriptionSuggestions,
+              })}
+            >
+              <SelectTrigger className="w-44" aria-label="Agent Brain audience">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="customer">Customer</SelectItem>
+                <SelectItem value="staff">Staff</SelectItem>
+                <SelectItem value="internal">Internal</SelectItem>
+              </SelectContent>
+            </Select>
+            <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
+              <input
+                type="checkbox"
+                checked={brainPolicy.showDescriptionSuggestions}
+                disabled={brainPolicySaving || brainPolicy.audience === 'customer'}
+                onChange={event => onUpdateBrainPolicy({ showDescriptionSuggestions: event.target.checked })}
+              />
+              Show SML description suggestions
+            </label>
+            {brainPolicySaving ? <span className="text-xs text-zinc-400">Saving...</span> : null}
+          </div>
+          <p className="text-xs text-zinc-400">
+            Customer bot จะไม่เห็นคำแนะนำหลังบ้าน ส่วน Staff/Internal เปิดได้เมื่อใช้เพื่อสอนข้อมูลสินค้า
+          </p>
         </div>
 
         <Separator />
@@ -324,6 +374,11 @@ export default function TelegramPage() {
   const { data: botInfo = {} } = useQuery({ queryKey: ['telegram-botinfo'], queryFn: getTelegramBotInfo })
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: getAgents })
   const { data: routeBindings = [] } = useQuery({ queryKey: ['telegram-bindings'], queryFn: getTelegramBindings })
+  const { data: brainPoliciesData } = useQuery({
+    queryKey: ['agent-brain-channel-policies', 'telegram'],
+    queryFn: () => getAgentBrainChannelPolicies({ channel: 'telegram' }),
+    retry: false,
+  })
 
   // Build accounts state from config
   useEffect(() => {
@@ -468,6 +523,16 @@ export default function TelegramPage() {
       if (data) setApplyResult(data)
       toast.error(data?.safeMessage || 'Failed to apply binding')
     },
+  })
+
+  const brainPolicyMutation = useMutation({
+    mutationFn: ({ accountId, patch }: { accountId: string; patch: Partial<Pick<AgentBrainChannelPolicy, 'audience' | 'showDescriptionSuggestions' | 'enabled'>> }) =>
+      putAgentBrainChannelPolicy('telegram', accountId, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent-brain-channel-policies', 'telegram'] })
+      toast.success('บันทึก Agent Brain channel policy แล้ว')
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'บันทึก Agent Brain policy ไม่สำเร็จ'),
   })
 
   const setDefaultMutation = useMutation({
@@ -616,6 +681,13 @@ export default function TelegramPage() {
         {accountIds.map(id => {
           const boundAgentId = routeBindings.find(b => b.accountId === id)?.agentId ?? ''
           const selectedAgentId = draftBindings[id] ?? boundAgentId
+          const brainPolicy = brainPoliciesData?.policies.find(policy => policy.channel === 'telegram' && policy.accountId === id) || {
+            channel: 'telegram',
+            accountId: id,
+            audience: 'customer' as AgentBrainAudience,
+            showDescriptionSuggestions: false,
+            enabled: true,
+          }
           return (
             <AccountCard
               key={id}
@@ -638,6 +710,9 @@ export default function TelegramPage() {
                 delete next[id]
                 return next
               })}
+              brainPolicy={brainPolicy}
+              brainPolicySaving={brainPolicyMutation.isPending}
+              onUpdateBrainPolicy={patch => brainPolicyMutation.mutate({ accountId: id, patch })}
               bindingSaving={bindMutation.isPending || applyBindingMutation.isPending}
               onDelete={id === 'default' ? undefined : () => setDeleteDialog(id)}
               deleting={deleteMutation.isPending}
