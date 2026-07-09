@@ -29,13 +29,16 @@ import {
   cleanSessions,
   getAgentSoul,
   getAgentSoulTemplate,
+  getCustomerUpdateCommand,
   getModelReadiness,
   getSupportBundle,
   getSystemHealth,
+  getSystemObservability,
   markTelegramRegressionPassed,
   putAgentSoul,
   resetAgentSessions,
   restartGateway,
+  runReleaseGate,
   runDoctorFix,
   testModelRuntime,
   type ModelReadinessIssue,
@@ -43,6 +46,8 @@ import {
   type SystemCheckStatus,
   type SystemHealth,
   type SystemHealthCheck,
+  type ReleaseGateResult,
+  type SystemObservability,
   acknowledgeTelegramBindingIntent,
 } from '@/lib/api'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -409,6 +414,143 @@ function SystemErrorPanel({
   )
 }
 
+function releaseStatusClass(status?: string) {
+  if (status === 'ok') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (status === 'fail') return 'border-red-200 bg-red-50 text-red-700'
+  return 'border-amber-200 bg-amber-50 text-amber-700'
+}
+
+function releaseLabel(status?: string) {
+  if (status === 'ok') return 'พร้อม deploy'
+  if (status === 'fail') return 'ยังไม่ผ่าน'
+  return 'ต้องตรวจทาน'
+}
+
+function ProductionReadinessPanel({
+  observability,
+  gate,
+  loading,
+  runningGate,
+  loadingCommand,
+  onRunGate,
+  onCopyCommand,
+  onRefresh,
+}: {
+  observability?: SystemObservability
+  gate?: ReleaseGateResult
+  loading: boolean
+  runningGate: boolean
+  loadingCommand: boolean
+  onRunGate: () => void
+  onCopyCommand: () => void
+  onRefresh: () => void
+}) {
+  const status = gate?.status || (observability?.runtime?.ok ? 'ok' : 'warn')
+  const gateway = observability?.services?.pm2?.processes?.find(process => process.name === 'openclaw-gateway')
+  const legacy = observability?.memory?.legacy || []
+  const legacyWarn = legacy.filter(item => item.state === 'warn' || item.state === 'block')
+  const checks = gate?.checks || []
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="size-4" />
+              Production Readiness
+            </CardTitle>
+            <p className="mt-1 text-sm text-zinc-500">
+              ตรวจ runtime, process, commit และ memory hygiene ก่อน update ลูกค้าหรือหลัง restart gateway
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${releaseStatusClass(status)}`}>
+              {releaseLabel(status)}
+            </span>
+            {observability?.targetRuntimeVersion && <Badge variant="outline">target {observability.targetRuntimeVersion}</Badge>}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading && !observability ? (
+          <div className="grid gap-3 md:grid-cols-4">
+            {[1, 2, 3, 4].map(item => <LoadingBlock key={item} className="h-20" />)}
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-lg border p-3">
+              <p className="text-xs font-medium uppercase text-zinc-500">Runtime</p>
+              <p className="mt-1 break-words text-sm font-semibold">{observability?.runtime?.rawVersion || observability?.runtime?.version || 'unknown'}</p>
+              <p className="mt-1 break-all text-xs text-zinc-500">{observability?.runtime?.bin || '-'}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs font-medium uppercase text-zinc-500">Gateway</p>
+              <p className="mt-1 text-sm font-semibold">{gateway?.status || 'unknown'}</p>
+              <p className="mt-1 break-all text-xs text-zinc-500">{gateway?.args || gateway?.execPath || '-'}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs font-medium uppercase text-zinc-500">Code</p>
+              <p className="mt-1 text-sm font-semibold">API {observability?.versions?.apiCommit || '-'}</p>
+              <p className="mt-1 text-sm font-semibold">Admin {observability?.versions?.adminCommit || '-'}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs font-medium uppercase text-zinc-500">Memory</p>
+              <p className="mt-1 text-sm font-semibold">{legacyWarn.length ? `${legacyWarn.length} ต้องตรวจ` : 'OK'}</p>
+              <p className="mt-1 text-xs text-zinc-500">legacy MEMORY.md size guard</p>
+            </div>
+          </div>
+        )}
+
+        {gate && (
+          <div className="rounded-lg border bg-zinc-50 p-3 dark:bg-zinc-900">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">{gate.safeMessage}</p>
+                <p className="text-xs text-zinc-500">ใช้ผลนี้แนบ support bundle หรือยืนยันก่อน update production</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => copyText('Release gate result', JSON.stringify(gate, null, 2))}>
+                <ClipboardCopy className="size-4" />
+                Copy Result
+              </Button>
+            </div>
+            <div className="mt-3 grid gap-2 lg:grid-cols-2">
+              {checks.map(check => (
+                <div key={check.id} className="rounded-md border bg-white p-2 text-sm dark:bg-zinc-950">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">{check.label}</span>
+                    <span className={`rounded-md border px-2 py-0.5 text-xs ${releaseStatusClass(check.status)}`}>{check.status}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">{check.safeMessage}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={onRunGate} disabled={runningGate}>
+            <PlayCircle className={runningGate ? 'animate-pulse' : ''} />
+            Run Release Gate
+          </Button>
+          <Button type="button" variant="outline" onClick={onCopyCommand} disabled={loadingCommand}>
+            <ClipboardCopy className={loadingCommand ? 'animate-pulse' : ''} />
+            Copy Customer Update Command
+          </Button>
+          <Button type="button" variant="outline" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className={loading ? 'animate-spin' : ''} />
+            Refresh Snapshot
+          </Button>
+          <Link href="/memory" className={cn(buttonVariants({ variant: 'outline' }), 'gap-2')}>
+            <ExternalLink className="size-4" />
+            Open Memory Cleanup
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function CollapsibleSection({
   title,
   description,
@@ -671,10 +813,17 @@ export default function SystemPage() {
   const [infoOpen, setInfoOpen] = useState(false)
   const [checkDetailsOpen, setCheckDetailsOpen] = useState(false)
   const [commandsOpen, setCommandsOpen] = useState(false)
+  const [releaseGateResult, setReleaseGateResult] = useState<ReleaseGateResult | undefined>(undefined)
   const { data: health, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ['system-health'],
     queryFn: () => getSystemHealth(false),
     staleTime: 15_000,
+    refetchInterval: false,
+  })
+  const { data: observability, isLoading: observabilityLoading, isFetching: observabilityFetching } = useQuery({
+    queryKey: ['system-observability'],
+    queryFn: () => getSystemObservability(false),
+    staleTime: 30_000,
     refetchInterval: false,
   })
 
@@ -698,6 +847,28 @@ export default function SystemPage() {
     onSuccess: bundle => copyText('Support bundle', JSON.stringify(bundle, null, 2)),
     onError: () => toast.error('Failed to build support bundle'),
   })
+
+  const releaseGate = useMutation({
+    mutationFn: runReleaseGate,
+    onSuccess: result => {
+      setReleaseGateResult(result)
+      toast[result.status === 'fail' ? 'error' : result.status === 'warn' ? 'warning' : 'success'](result.safeMessage)
+      qc.setQueryData(['system-observability'], result.snapshot || observability)
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Release gate failed'),
+  })
+
+  const updateCommand = useMutation({
+    mutationFn: getCustomerUpdateCommand,
+    onSuccess: result => copyText('Customer update command', result.command),
+    onError: err => toast.error(err instanceof Error ? err.message : 'Build update command failed'),
+  })
+
+  async function refreshObservabilityNow() {
+    const data = await getSystemObservability(true)
+    qc.setQueryData(['system-observability'], data)
+    toast.success('Production snapshot refreshed')
+  }
 
   const addActionResult = (result: Omit<ActionResult, 'at'>) => {
     setActionResults(prev => [{ ...result, at: new Date().toISOString() }, ...prev].slice(0, 8))
@@ -1237,6 +1408,17 @@ export default function SystemPage() {
           </>
         )}
       </div>
+
+      <ProductionReadinessPanel
+        observability={observability}
+        gate={releaseGateResult}
+        loading={observabilityLoading || observabilityFetching}
+        runningGate={releaseGate.isPending}
+        loadingCommand={updateCommand.isPending}
+        onRunGate={() => releaseGate.mutate()}
+        onCopyCommand={() => updateCommand.mutate()}
+        onRefresh={refreshObservabilityNow}
+      />
 
       {loadingHealth && <SystemLoadingPanel />}
 

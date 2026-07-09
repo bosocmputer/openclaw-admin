@@ -40,7 +40,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { toast } from 'sonner'
 
-const WHATS_NEW_KEY = 'whats-new-dismissed-v2026.6.8'
+const WHATS_NEW_KEY = 'whats-new-dismissed-v2026.6.11'
 
 function statusTone(status?: string) {
   if (status === 'ok' || status === 'online' || status === 'current') return 'bg-emerald-600 text-white'

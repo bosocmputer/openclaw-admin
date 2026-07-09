@@ -1625,6 +1625,7 @@ export interface SupportBundle {
     uptime?: number
   }[]
   runtime: { node: string; platform: string; arch: string }
+  observability?: SystemObservability | { ok: false; error: string }
 }
 
 export async function getSystemHealth(refresh = false): Promise<SystemHealth> {
@@ -1634,6 +1635,110 @@ export async function getSystemHealth(refresh = false): Promise<SystemHealth> {
 
 export async function getSupportBundle(): Promise<SupportBundle> {
   const { data } = await api.get('/api/system/support-bundle')
+  return data
+}
+
+export interface SystemObservability {
+  ok: boolean
+  generatedAt: string
+  durationMs: number
+  targetRuntimeVersion: string
+  versions: {
+    apiCommit?: string | null
+    adminCommit?: string | null
+    runtimeVersion?: string | null
+    nodeVersion?: string | null
+  }
+  repos: Record<string, {
+    path?: string
+    commit?: string | null
+    dirty?: string[]
+  }>
+  runtime: {
+    targetVersion?: string
+    root?: string | null
+    bin?: string | null
+    source?: string | null
+    version?: string | null
+    rawVersion?: string | null
+    commit?: string | null
+    distIndexSha?: string | null
+    markerMissing?: string[]
+    ok?: boolean
+    error?: string | null
+  }
+  services: {
+    api?: Record<string, unknown>
+    pm2?: {
+      ok?: boolean
+      error?: string
+      processes?: Array<{
+        name?: string
+        pid?: number
+        status?: string
+        restarts?: number
+        uptime?: number
+        execPath?: string
+        args?: string
+        cwd?: string
+      }>
+    }
+    postgres?: { ok?: boolean; configured?: boolean }
+  }
+  channels?: {
+    lineAccounts?: number
+    telegramAccounts?: number
+    routes?: Array<{ channel?: string | null; accountId?: string | null; agentId?: string | null }>
+  }
+  memory?: {
+    summaryByAgent?: Record<string, unknown>
+    legacy?: Array<{ agentId: string; exists: boolean; sizeChars: number; estimatedTokens: number; state: string }>
+  }
+  privacy?: Record<string, string>
+  cache?: { hit: boolean; ttlSeconds: number }
+}
+
+export type ReleaseGateStatus = 'ok' | 'warn' | 'fail' | string
+
+export interface ReleaseGateCheck {
+  id: string
+  label: string
+  status: ReleaseGateStatus
+  safeMessage: string
+  remediation?: string
+  evidence?: Record<string, unknown>
+}
+
+export interface ReleaseGateResult {
+  ok: boolean
+  status: ReleaseGateStatus
+  generatedAt: string
+  durationMs: number
+  targetRuntimeVersion: string
+  checks: ReleaseGateCheck[]
+  safeMessage: string
+  snapshot?: SystemObservability
+}
+
+export interface CustomerUpdateCommand {
+  generatedAt: string
+  targetRuntimeVersion: string
+  command: string
+  notes: string[]
+}
+
+export async function getSystemObservability(refresh = false): Promise<SystemObservability> {
+  const { data } = await api.get('/api/system/observability', { params: refresh ? { refresh: true } : {} })
+  return data
+}
+
+export async function runReleaseGate(): Promise<ReleaseGateResult> {
+  const { data } = await api.post('/api/system/release-gate/run')
+  return data
+}
+
+export async function getCustomerUpdateCommand(): Promise<CustomerUpdateCommand> {
+  const { data } = await api.get('/api/system/update-command')
   return data
 }
 
@@ -1741,6 +1846,7 @@ export type MemoryType = 'terminology' | 'preference' | 'workflow_hint' | 'searc
 export type MemoryScope = 'session' | 'contact' | 'agent' | 'business' | 'global'
 export type AgentMemoryStatus = 'active' | 'soft' | 'blocked' | 'deleted'
 export type MemoryPolicyMode = 'off' | 'observe_only' | 'safe_auto' | 'manual_review'
+export type LegacyMemoryMode = 'managed_only' | 'full' | 'disabled'
 export type MemoryObservationStatus = 'observed' | 'promoted' | 'blocked' | 'ignored'
 
 export interface MemoryHealth {
@@ -1798,6 +1904,7 @@ export interface MemoryObservation {
 export interface MemoryPolicy {
   agentId: string
   mode: MemoryPolicyMode
+  legacyMemoryMode?: LegacyMemoryMode
   maxContextChars: number
   safeTypes: MemoryType[]
   allowChatTeaching: boolean
@@ -2012,6 +2119,8 @@ export interface MemoryCleanupAction {
   categories: string[]
   tombstone: boolean
   contentPreview: string
+  sizeChars?: number
+  unmanagedChars?: number
   nextStatus?: string
 }
 
@@ -2019,6 +2128,7 @@ export interface MemoryCleanupResult {
   ok: boolean
   dryRun: boolean
   agentId: string
+  mode?: 'structured' | 'legacy' | 'all' | string
   summary: {
     scanned: number
     keep: number
@@ -2031,6 +2141,9 @@ export interface MemoryCleanupResult {
     dynamicFactCount: number
     vagueTeachingCount: number
     tombstoneCount: number
+    legacyRewriteCount?: number
+    legacySizeChars?: number
+    legacyUnmanagedChars?: number
   }
   examples: Record<string, Array<{ memoryId: string; action: string; reason: string; contentPreview: string }>>
   actions: MemoryCleanupAction[]
@@ -2038,10 +2151,11 @@ export interface MemoryCleanupResult {
   applied?: MemoryCleanupAction[]
   errors?: Array<{ memoryId: string; action: string; error: string }>
   syncResult?: Record<string, unknown>
+  legacy?: MemoryCleanupResult
 }
 
-export async function cleanupMemory(agentId: string, dryRun = true): Promise<MemoryCleanupResult> {
-  const { data } = await api.post('/api/memory/maintenance/cleanup', { agentId, dryRun })
+export async function cleanupMemory(agentId: string, dryRun = true, mode: 'structured' | 'legacy' | 'all' = 'structured'): Promise<MemoryCleanupResult> {
+  const { data } = await api.post('/api/memory/maintenance/cleanup', { agentId, dryRun, mode })
   return data
 }
 

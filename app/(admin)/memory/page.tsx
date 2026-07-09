@@ -45,6 +45,7 @@ import {
   type MemoryBackup,
   type MemoryObservation,
   type MemoryPolicyMode,
+  type LegacyMemoryMode,
   type MemoryScope,
   type MemoryType,
   type MemoryAutoApplyResult,
@@ -87,6 +88,12 @@ const policyModes: Array<{ value: MemoryPolicyMode; label: string; help: string 
   { value: 'observe_only', label: 'Observe only', help: 'เก็บ signal ให้ดู แต่ยังไม่ใช้ตอบจริง' },
   { value: 'safe_auto', label: 'Safe auto', help: 'ใช้ memory low-risk ตาม policy' },
   { value: 'manual_review', label: 'Manual review', help: 'ใช้เฉพาะ memory ที่ admin สร้างหรือ promote' },
+]
+
+const legacyMemoryModes: Array<{ value: LegacyMemoryMode; label: string; help: string }> = [
+  { value: 'managed_only', label: 'Managed only', help: 'ใช้เฉพาะ block ที่ระบบสร้าง ลด token และกัน memory เก่าค้าง' },
+  { value: 'full', label: 'Full compatibility', help: 'เก็บ note เดิมใน MEMORY.md ไว้ เหมาะกับช่วง transition' },
+  { value: 'disabled', label: 'ไม่ sync MEMORY.md', help: 'ใช้ structured memory เท่านั้น ไม่เขียนไฟล์ compatibility' },
 ]
 
 const safeAutoTypes: MemoryType[] = ['terminology', 'preference', 'workflow_hint', 'faq_pattern', 'entity_alias', 'staff_instruction']
@@ -196,6 +203,7 @@ export default function MemoryPage() {
   const [deleteTarget, setDeleteTarget] = useState<AgentMemory | null>(null)
   const [rollbackBackup, setRollbackBackup] = useState<MemoryBackup | null>(null)
   const [cleanupResult, setCleanupResult] = useState<MemoryCleanupResult | null>(null)
+  const [cleanupMode, setCleanupMode] = useState<'structured' | 'legacy' | 'all'>('structured')
   const [memoryForm, setMemoryForm] = useState({
     type: 'workflow_hint' as MemoryType,
     scope: 'agent' as MemoryScope,
@@ -205,6 +213,7 @@ export default function MemoryPage() {
   const [policyDraft, setPolicyDraft] = useState({
     agentId: '',
     mode: 'observe_only' as MemoryPolicyMode,
+    legacyMemoryMode: 'managed_only' as LegacyMemoryMode,
     maxContextChars: '1200',
     allowChatTeaching: false,
   })
@@ -261,6 +270,7 @@ export default function MemoryPage() {
     return policyData?.policies.find(policy => policy.agentId === effectiveAgentId) || {
       agentId: effectiveAgentId,
       mode: currentAgent?.autoLearn?.autoLearnMode || 'observe_only',
+      legacyMemoryMode: 'managed_only' as LegacyMemoryMode,
       maxContextChars: currentAgent?.autoLearn?.maxContextChars || 1200,
       safeTypes: ['terminology', 'preference', 'workflow_hint', 'faq_pattern', 'entity_alias'] as MemoryType[],
       allowChatTeaching: false,
@@ -273,10 +283,11 @@ export default function MemoryPage() {
     return {
       agentId: selectedPolicy.agentId,
       mode: selectedPolicy.mode,
+      legacyMemoryMode: selectedPolicy.legacyMemoryMode || 'managed_only',
       maxContextChars: String(selectedPolicy.maxContextChars || 1200),
       allowChatTeaching: Boolean(selectedPolicy.allowChatTeaching),
     }
-  }, [policyDraft, selectedPolicy.agentId, selectedPolicy.allowChatTeaching, selectedPolicy.maxContextChars, selectedPolicy.mode])
+  }, [policyDraft, selectedPolicy.agentId, selectedPolicy.allowChatTeaching, selectedPolicy.legacyMemoryMode, selectedPolicy.maxContextChars, selectedPolicy.mode])
 
   function updatePolicyDraft(patch: Partial<typeof policyForm>) {
     setPolicyDraft(prev => ({
@@ -368,6 +379,7 @@ export default function MemoryPage() {
   const policyMutation = useMutation({
     mutationFn: () => putMemoryPolicy(effectiveAgentId, {
       mode: policyForm.mode,
+      legacyMemoryMode: policyForm.legacyMemoryMode,
       maxContextChars: Number(policyForm.maxContextChars),
       allowChatTeaching: policyForm.allowChatTeaching,
       safeTypes: policyForm.allowChatTeaching ? safeAutoTypes : safeAutoTypes.filter(type => type !== 'staff_instruction'),
@@ -382,6 +394,7 @@ export default function MemoryPage() {
   const enableSafeAutoMutation = useMutation({
     mutationFn: () => putMemoryPolicy(effectiveAgentId, {
       mode: 'safe_auto',
+      legacyMemoryMode: policyForm.legacyMemoryMode,
       maxContextChars: Number(policyForm.maxContextChars) || 1200,
       allowChatTeaching: true,
       safeTypes: safeAutoTypes,
@@ -406,7 +419,7 @@ export default function MemoryPage() {
   })
 
   const cleanupPreviewMutation = useMutation({
-    mutationFn: () => cleanupMemory(effectiveAgentId, true),
+    mutationFn: () => cleanupMemory(effectiveAgentId, true, cleanupMode),
     onSuccess: result => {
       setCleanupResult(result)
       toast.success(`Preview cleanup: พบ ${result.actions.length} รายการที่ควรจัดการ`)
@@ -415,7 +428,7 @@ export default function MemoryPage() {
   })
 
   const cleanupApplyMutation = useMutation({
-    mutationFn: () => cleanupMemory(effectiveAgentId, false),
+    mutationFn: () => cleanupMemory(effectiveAgentId, false, cleanupResult?.mode === 'legacy' || cleanupResult?.mode === 'all' ? cleanupResult.mode : cleanupMode),
     onSuccess: result => {
       setCleanupResult(result)
       toast.success(`Cleanup applied: delete ${result.summary.delete + result.summary.deleteDuplicate}, block ${result.summary.block}, soften ${result.summary.soften}`)
@@ -483,8 +496,10 @@ export default function MemoryPage() {
         memoryHealth={memoryHealth}
         busy={enableSafeAutoMutation.isPending || applyAutoMutation.isPending}
         lastResult={enableSafeAutoMutation.data?.autoApplyResult || applyAutoMutation.data}
+        cleanupMode={cleanupMode}
         onEnable={() => enableSafeAutoMutation.mutate()}
         onApply={() => applyAutoMutation.mutate()}
+        onCleanupModeChange={setCleanupMode}
         onPreviewCleanup={() => cleanupPreviewMutation.mutate()}
         cleanupBusy={cleanupPreviewMutation.isPending || cleanupApplyMutation.isPending}
       />
@@ -645,6 +660,16 @@ export default function MemoryPage() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">{policyModes.find(mode => mode.value === policyForm.mode)?.help}</p>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">การใช้ MEMORY.md เดิม</span>
+                    <Select value={policyForm.legacyMemoryMode} onValueChange={value => updatePolicyDraft({ legacyMemoryMode: value as LegacyMemoryMode })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {legacyMemoryModes.map(mode => <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">{legacyMemoryModes.find(mode => mode.value === policyForm.legacyMemoryMode)?.help}</p>
                   </label>
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium">Memory context สูงสุดต่อ turn</span>
@@ -898,8 +923,10 @@ function LearningControlPanel({
   busy,
   cleanupBusy,
   lastResult,
+  cleanupMode,
   onEnable,
   onApply,
+  onCleanupModeChange,
   onPreviewCleanup,
 }: {
   agentId: string
@@ -913,8 +940,10 @@ function LearningControlPanel({
   busy: boolean
   cleanupBusy: boolean
   lastResult?: MemoryAutoApplyResult
+  cleanupMode: 'structured' | 'legacy' | 'all'
   onEnable: () => void
   onApply: () => void
+  onCleanupModeChange: (mode: 'structured' | 'legacy' | 'all') => void
   onPreviewCleanup: () => void
 }) {
   const safeAuto = mode === 'safe_auto'
@@ -973,6 +1002,16 @@ function LearningControlPanel({
               : 'เปิด Safe Auto ก่อน เพื่อให้ระบบเรียนรู้ low-risk โดยไม่ต้อง approve ทีละเรื่อง'}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
+            <Select value={cleanupMode} onValueChange={value => onCleanupModeChange(value as 'structured' | 'legacy' | 'all')}>
+              <SelectTrigger className="w-[210px]" aria-label="เลือกขอบเขต cleanup memory">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="structured">Structured memory เท่านั้น</SelectItem>
+                <SelectItem value="legacy">Legacy MEMORY.md เท่านั้น</SelectItem>
+                <SelectItem value="all">ทั้ง structured + legacy</SelectItem>
+              </SelectContent>
+            </Select>
             {needsCleanup ? (
               <Button onClick={onPreviewCleanup} disabled={!agentId || cleanupBusy}>
                 <Wrench className="size-4" />
@@ -1036,6 +1075,7 @@ function CleanupDialog({
     { key: 'noise', label: 'Noise', help: 'log/system marker หรือ media placeholder ที่ไม่ควรเป็น memory' },
     { key: 'duplicate', label: 'Duplicates', help: 'memory ซ้ำจาก content เดียวกัน' },
     { key: 'vague_teaching', label: 'Vague teaching', help: 'คำสอนที่อ้าง “ตัวนี้/รายการนี้” ไม่ชัดพอ' },
+    { key: 'legacy_memory', label: 'Legacy MEMORY.md', help: 'เนื้อหาเก่านอก managed block ที่ควร rewrite เป็น managed-only เพื่อลด token' },
   ]
   return (
     <Dialog open={!!result} onOpenChange={open => { if (!open) onClose() }}>
@@ -1053,6 +1093,7 @@ function CleanupDialog({
                 {result?.dryRun ? 'dry-run ยังไม่แก้ข้อมูล' : result?.ok ? 'applied' : 'partial error'}
               </Badge>
               <Badge variant="outline">agent: {result?.agentId || '-'}</Badge>
+              <Badge variant="outline">mode: {result?.mode || 'structured'}</Badge>
               <Badge variant="outline">actionable: {actionableCount}</Badge>
               {result?.backup ? <Badge variant="outline">backup: {result.backup.fileName}</Badge> : null}
             </div>
@@ -1066,7 +1107,7 @@ function CleanupDialog({
               <MetricTile label="สแกน" value={summary.scanned} />
               <MetricTile label="ลบ/ซ้ำ" value={summary.delete + summary.deleteDuplicate} />
               <MetricTile label="block" value={summary.block} />
-              <MetricTile label="soften" value={summary.soften} />
+              <MetricTile label="legacy rewrite" value={summary.legacyRewriteCount || 0} />
             </div>
           ) : null}
 
