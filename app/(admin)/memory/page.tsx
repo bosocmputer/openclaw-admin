@@ -191,10 +191,26 @@ function tabFromSearch(): MemoryTab | null {
   return null
 }
 
+function agentIdFromSearch() {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('agentId') || ''
+}
+
+function syncMemoryUrl(agentId: string, tab: MemoryTab) {
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  if (agentId) params.set('agentId', agentId)
+  else params.delete('agentId')
+  if (tab && tab !== 'active') params.set('tab', tab)
+  else params.delete('tab')
+  const query = params.toString()
+  window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
+}
+
 export default function MemoryPage() {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<MemoryTab>(() => tabFromSearch() || 'active')
-  const [agentId, setAgentId] = useState('')
+  const [agentId, setAgentId] = useState(() => agentIdFromSearch())
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [scopeFilter, setScopeFilter] = useState('all')
@@ -226,6 +242,19 @@ export default function MemoryPage() {
 
   const effectiveAgentId = agentId || agents[0]?.agentId || ''
   const currentAgent = agents.find(agent => agent.agentId === effectiveAgentId)
+
+  function handleAgentChange(value: string | null) {
+    const nextAgentId = value || ''
+    setAgentId(nextAgentId)
+    syncMemoryUrl(nextAgentId, tab)
+  }
+
+  function handleTabChange(value: string | null) {
+    if (!value) return
+    const nextTab = value as MemoryTab
+    setTab(nextTab)
+    syncMemoryUrl(effectiveAgentId, nextTab)
+  }
 
   const { data: memoriesData, isLoading: memoriesLoading } = useQuery({
     queryKey: ['agent-memories', effectiveAgentId, tab, query, typeFilter, scopeFilter],
@@ -472,7 +501,7 @@ export default function MemoryPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Select value={effectiveAgentId} onValueChange={value => setAgentId(value || '')}>
+          <Select value={effectiveAgentId} onValueChange={handleAgentChange}>
             <SelectTrigger className="w-[180px]" aria-label="เลือก agent"><SelectValue placeholder="เลือก agent" /></SelectTrigger>
             <SelectContent>
               {agents.map(agent => <SelectItem key={agent.agentId} value={agent.agentId}>{agent.agentId}</SelectItem>)}
@@ -567,7 +596,7 @@ export default function MemoryPage() {
           </div>
         </div>
 
-        <Tabs value={tab} onValueChange={value => setTab(value as MemoryTab)} className="gap-0">
+        <Tabs value={tab} onValueChange={handleTabChange} className="gap-0">
           <div className="border-b px-4 py-3">
             <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
               <TabsTrigger value="active">ใช้ตอบจริง</TabsTrigger>
