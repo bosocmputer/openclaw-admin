@@ -104,9 +104,35 @@ function healthAgeMs(health?: SystemHealth) {
 }
 
 function copyText(label: string, text: string) {
-  navigator.clipboard.writeText(text)
-    .then(() => toast.success(`${label} copied`))
-    .catch(() => toast.error(`Failed to copy ${label}`))
+  const fallbackCopy = () => {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    textarea.style.top = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    try {
+      const ok = document.execCommand('copy')
+      if (!ok) throw new Error('copy command rejected')
+      toast.success(`${label} copied`)
+    } catch {
+      toast.error(`Failed to copy ${label}`)
+    } finally {
+      document.body.removeChild(textarea)
+    }
+  }
+
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast.success(`${label} copied`))
+      .catch(fallbackCopy)
+    return
+  }
+
+  fallbackCopy()
 }
 
 type ActionStatus = 'ok' | 'warn' | 'fail' | 'running' | 'cancelled'
