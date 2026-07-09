@@ -41,6 +41,7 @@ import {
   runReleaseGate,
   runDoctorFix,
   testModelRuntime,
+  type CustomerUpdateCommand,
   type ModelReadinessIssue,
   type ModelRuntimeTestResult,
   type SystemCheckStatus,
@@ -840,6 +841,7 @@ export default function SystemPage() {
   const [checkDetailsOpen, setCheckDetailsOpen] = useState(false)
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [releaseGateResult, setReleaseGateResult] = useState<ReleaseGateResult | undefined>(undefined)
+  const [updateCommandDialog, setUpdateCommandDialog] = useState<CustomerUpdateCommand | null>(null)
   const { data: health, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ['system-health'],
     queryFn: () => getSystemHealth(false),
@@ -886,7 +888,10 @@ export default function SystemPage() {
 
   const updateCommand = useMutation({
     mutationFn: getCustomerUpdateCommand,
-    onSuccess: result => copyText('Customer update command', result.command),
+    onSuccess: result => {
+      setUpdateCommandDialog(result)
+      copyText('Customer update command', result.command)
+    },
     onError: err => toast.error(err instanceof Error ? err.message : 'Build update command failed'),
   })
 
@@ -1592,6 +1597,45 @@ export default function SystemPage() {
             >
               {activeAction ? <Loader2 className="animate-spin" /> : null}
               {confirmRequest?.confirmLabel || 'Confirm'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(updateCommandDialog)} onOpenChange={open => !open && setUpdateCommandDialog(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Customer Update Command</DialogTitle>
+            <DialogDescription>
+              ใช้คำสั่งนี้เมื่อต้อง update API, Admin และ runtime บน server ลูกค้า. ระบบพยายาม copy ให้แล้ว แต่ยังแสดงไว้เผื่อ browser บน HTTP ไม่อนุญาต clipboard.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2 text-xs text-zinc-500">
+              <Badge variant="secondary">target {updateCommandDialog?.targetRuntimeVersion || '-'}</Badge>
+              <Badge variant="outline">{updateCommandDialog ? formatTimestamp(updateCommandDialog.generatedAt) : '-'}</Badge>
+            </div>
+            <textarea
+              readOnly
+              value={updateCommandDialog?.command || ''}
+              className="h-[55vh] w-full resize-none rounded-lg border bg-zinc-950 p-3 font-mono text-xs text-zinc-50 outline-none"
+              aria-label="Customer update command"
+              onFocus={event => event.currentTarget.select()}
+            />
+            {!!updateCommandDialog?.notes?.length && (
+              <div className="rounded-lg border bg-zinc-50 p-3 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                <p className="mb-1 font-medium">Notes</p>
+                <ul className="list-disc space-y-1 pl-4">
+                  {updateCommandDialog.notes.map(note => <li key={note}>{note}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUpdateCommandDialog(null)}>Close</Button>
+            <Button onClick={() => updateCommandDialog && copyText('Customer update command', updateCommandDialog.command)}>
+              <ClipboardCopy className="size-4" />
+              Copy Again
             </Button>
           </DialogFooter>
         </DialogContent>
