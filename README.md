@@ -107,7 +107,7 @@ Browser → GET /api/proxy/api/status
 | Compaction | `/compaction` | ตั้งค่า memory compaction (รองรับ fields ใหม่ v2026.3.28) |
 | Checkpoints | `/sessions` | ดูและ restore session compaction checkpoints ต่อ agent |
 | Webhooks | `/webhooks` | CRUD webhook routes สำหรับรับข้อมูลจากระบบภายนอก |
-| Agent Brain | `/memory` | คุม Active Knowledge, Search Hints, SML Description Suggestions, Blocked/Deleted memory, Sources, policy และ compatibility `MEMORY.md`/`DREAMS.md` |
+| Agent Brain | `/memory` | คุมความรู้ที่ใช้อยู่จริง, กำลังเรียนรู้, คำช่วยค้น, คำแนะนำ SML, หยุดใช้/ห้ามจำ, sources และ policy |
 | Analysis | `/analysis` | วิเคราะห์ usage/operational metrics |
 | Conversation Analysis | `/analysis/conversations` | ดูประวัติบทสนทนา, issue tags, trace/tool/model/media detail, Agent Brain evidence และ export pack |
 | Logs | `/logs` | Live gateway logs (เลือก 100 / 300 / 1000 บรรทัด) |
@@ -238,8 +238,8 @@ docker compose ps
 
 - Dev server `192.168.2.109` is current on OpenClaw v2026.6.11 ERP runtime overlay.
 - Customer rollout path for `chang168` is current through `openclaw-api` + `openclaw-admin`; gateway remains pm2 + ERP runtime overlay.
-- `/analysis/conversations` supports triage, media preview, export for Codex, Agent Brain decisions, search hints, and SML description suggestion evidence.
-- `/memory` is the Agent Brain Control Center: Active Knowledge is used as safe context, Search Hints help MCP/Search, Description Suggestions guide staff to improve SML ERP `description`, Sources are evidence only, and Blocked/Deleted keeps tombstones.
+- `/analysis/conversations` เป็นหลักฐานราย turn และแสดง flow `Observed → Verified → Active/Blocked → Used`; ไม่ใช่หน้าจัดการความรู้ระยะยาว.
+- `/memory` เป็น Agent Brain Control Center: แสดงว่าความรู้ใดใช้ตอบจริง หลักฐาน/scope/อายุ/usage/conflict และให้ admin suspend, delete หรือ block relearn ได้. Description Suggestions ไม่ถูก inject เป็น truth.
 - `/line` and `/telegram` include Agent Brain audience policy per account. Default is `customer`, and SML description suggestions are hidden unless a channel is explicitly `staff` or `internal`.
 - Current operating mode: strict default-deny safe auto-learn plus generic hardening. Dynamic ERP facts such as price, stock, cost, availability, credit, and substitute products must still come from MCP/SML tools.
 

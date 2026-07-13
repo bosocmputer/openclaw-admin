@@ -5,10 +5,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveRestore,
   AlertTriangle,
+  Activity,
   Ban,
   CheckCircle2,
   Clock3,
-  Database,
   Eye,
   FileText,
   Plus,
@@ -29,6 +29,7 @@ import {
   createAgentMemory,
   deleteAgentMemory,
   getAgentMemories,
+  getAgentBrainHealth,
   getDailyMemoryContent,
   getDreamsContent,
   getMemoryBackups,
@@ -38,9 +39,12 @@ import {
   getMemoryStatus,
   promoteMemoryObservation,
   putMemoryPolicy,
+  reclassifyAgentBrain,
   rollbackMemoryBackup,
   updateAgentMemory,
   type AgentMemory,
+  type AgentBrainHealth,
+  type AgentBrainReclassifyResult,
   type AgentMemoryStatus,
   type MemoryBackup,
   type MemoryObservation,
@@ -61,7 +65,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 
-type MemoryTab = 'active' | 'search_hints' | 'description_suggestions' | 'soft' | 'blocked' | 'deleted' | 'sources' | 'settings' | 'files' | 'backups'
+type MemoryTab = 'active' | 'search_hints' | 'description_suggestions' | 'soft' | 'suspended' | 'blocked' | 'deleted' | 'sources' | 'settings' | 'files' | 'backups'
 
 const memoryTypeOptions: Array<{ value: MemoryType; label: string; help: string }> = [
   { value: 'terminology', label: 'คำศัพท์/คำพ้อง', help: 'คำเรียก, spelling, alias ที่ช่วยเข้าใจคำถาม' },
@@ -144,6 +148,7 @@ function statusVariant(status: string) {
   if (status === 'active' || status === 'promoted') return 'default'
   if (status === 'soft' || status === 'observed') return 'secondary'
   if (status === 'blocked' || status === 'deleted') return 'destructive'
+  if (status === 'suspended') return 'secondary'
   return 'outline'
 }
 
@@ -170,7 +175,7 @@ function shortText(value?: string, max = 520) {
 }
 
 function tabStatus(tab: MemoryTab): AgentMemoryStatus | undefined {
-  if (tab === 'active' || tab === 'soft' || tab === 'blocked' || tab === 'deleted') return tab
+  if (tab === 'active' || tab === 'soft' || tab === 'suspended' || tab === 'blocked' || tab === 'deleted') return tab
   return undefined
 }
 
@@ -187,7 +192,7 @@ function tabUsesMemoryList(tab: MemoryTab) {
 function tabFromSearch(): MemoryTab | null {
   if (typeof window === 'undefined') return null
   const value = new URLSearchParams(window.location.search).get('tab')
-  if (value === 'active' || value === 'search_hints' || value === 'description_suggestions' || value === 'soft' || value === 'blocked' || value === 'deleted' || value === 'sources' || value === 'settings' || value === 'files' || value === 'backups') return value
+  if (value === 'active' || value === 'search_hints' || value === 'description_suggestions' || value === 'soft' || value === 'suspended' || value === 'blocked' || value === 'deleted' || value === 'sources' || value === 'settings' || value === 'files' || value === 'backups') return value
   return null
 }
 
@@ -219,6 +224,7 @@ export default function MemoryPage() {
   const [deleteTarget, setDeleteTarget] = useState<AgentMemory | null>(null)
   const [rollbackBackup, setRollbackBackup] = useState<MemoryBackup | null>(null)
   const [cleanupResult, setCleanupResult] = useState<MemoryCleanupResult | null>(null)
+  const [reclassifyResult, setReclassifyResult] = useState<AgentBrainReclassifyResult | null>(null)
   const [cleanupMode, setCleanupMode] = useState<'structured' | 'legacy' | 'all'>('structured')
   const [memoryForm, setMemoryForm] = useState({
     type: 'workflow_hint' as MemoryType,
@@ -242,6 +248,14 @@ export default function MemoryPage() {
 
   const effectiveAgentId = agentId || agents[0]?.agentId || ''
   const currentAgent = agents.find(agent => agent.agentId === effectiveAgentId)
+
+  const { data: brainHealth, isLoading: brainHealthLoading } = useQuery({
+    queryKey: ['agent-brain-health', effectiveAgentId],
+    queryFn: () => getAgentBrainHealth(effectiveAgentId),
+    enabled: Boolean(effectiveAgentId),
+    retry: false,
+    refetchInterval: 30000,
+  })
 
   function handleAgentChange(value: string | null) {
     const nextAgentId = value || ''
@@ -332,6 +346,7 @@ export default function MemoryPage() {
     queryClient.invalidateQueries({ queryKey: ['memory-observations'] })
     queryClient.invalidateQueries({ queryKey: ['memory-policies'] })
     queryClient.invalidateQueries({ queryKey: ['memory-backups'] })
+    queryClient.invalidateQueries({ queryKey: ['agent-brain-health'] })
   }
 
   async function openView(title: string, loader: () => Promise<string>) {
@@ -466,6 +481,25 @@ export default function MemoryPage() {
     onError: err => toast.error(err instanceof Error ? err.message : 'Apply cleanup ไม่สำเร็จ'),
   })
 
+  const reclassifyPreviewMutation = useMutation({
+    mutationFn: () => reclassifyAgentBrain(effectiveAgentId, true),
+    onSuccess: result => {
+      setReclassifyResult(result)
+      toast.success(`ตรวจข้อมูล v3 แล้ว: พบ ${result.actions.length} รายการที่ต้องจัดการ`)
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'ตรวจข้อมูล Brain v3 ไม่สำเร็จ'),
+  })
+
+  const reclassifyApplyMutation = useMutation({
+    mutationFn: () => reclassifyAgentBrain(effectiveAgentId, false),
+    onSuccess: result => {
+      setReclassifyResult(result)
+      toast.success(result.errors?.length ? 'จัดการสำเร็จบางส่วน กรุณาตรวจรายละเอียด' : 'จัดการข้อมูล Brain v3 พร้อม backup แล้ว')
+      invalidateMemory()
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Apply Brain v3 reclassify ไม่สำเร็จ'),
+  })
+
   const rollbackMutation = useMutation({
     mutationFn: (backup: MemoryBackup) => rollbackMemoryBackup(effectiveAgentId, backup.backupId),
     onSuccess: result => {
@@ -514,6 +548,36 @@ export default function MemoryPage() {
         </div>
       </div>
 
+      <section className="flex flex-col gap-3 rounded-lg border bg-card p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="rounded-md border bg-muted/40 p-2"><Activity className="size-4" /></div>
+          <div>
+            <p className="text-sm font-medium">
+              {brainHealthLoading
+                ? 'กำลังตรวจ Brain Health...'
+                : brainHealth?.memory.activeCount
+                  ? `Brain ใช้ความรู้ที่ยืนยันแล้ว ${brainHealth.memory.activeCount} รายการ`
+                  : 'Brain ปลอดภัย แต่ยังไม่มีความรู้ที่ผ่านการยืนยัน'}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {brainHealth
+                ? `ใช้ตอบจริงแล้ว ${brainHealth.memory.activeUsedCount} รายการ · หลักฐานยืนยัน ${brainHealth.observations.verifiedCount} · lookup p95 ${brainHealth.usage.lookupP95Ms === null ? '-' : `${Math.round(brainHealth.usage.lookupP95Ms)} ms`}`
+                : 'MCP และ flow เดิมยังตอบได้ตามปกติ แม้ Brain health ยังโหลดไม่ได้'}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={brainHealth?.featureFlags.v2 ? 'default' : 'secondary'}>Evidence V{brainHealth?.contractVersion || 2}</Badge>
+          <Badge variant={brainHealth?.featureFlags.injection ? 'default' : 'outline'}>
+            {brainHealth?.featureFlags.injection ? 'Injection เปิด' : 'Shadow / ไม่ inject'}
+          </Badge>
+          <Button variant="outline" onClick={() => reclassifyPreviewMutation.mutate()} disabled={!effectiveAgentId || reclassifyPreviewMutation.isPending}>
+            <ShieldCheck className="size-4" />
+            ตรวจข้อมูลเก่า
+          </Button>
+        </div>
+      </section>
+
       <LearningControlPanel
         agentId={effectiveAgentId}
         mode={summary.autoLearnMode}
@@ -531,6 +595,7 @@ export default function MemoryPage() {
         onCleanupModeChange={setCleanupMode}
         onPreviewCleanup={() => cleanupPreviewMutation.mutate()}
         cleanupBusy={cleanupPreviewMutation.isPending || cleanupApplyMutation.isPending}
+        brainHealth={brainHealth}
       />
 
       <section className="grid gap-3 lg:grid-cols-4">
@@ -545,14 +610,14 @@ export default function MemoryPage() {
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">ใช้ตอบจริง</p>
             <p className="mt-2 text-xl font-semibold">{summary.activeMemoryCount}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Active memory ที่ runtime สามารถใช้ได้เมื่อ policy เปิด</p>
+            <p className="mt-1 text-xs text-muted-foreground">ใช้แล้วจริง {brainHealth?.memory.activeUsedCount || 0} รายการ</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">ชั่วคราว</p>
+            <p className="text-sm text-muted-foreground">กำลังเรียนรู้</p>
             <p className="mt-2 text-xl font-semibold">{summary.softMemoryCount}</p>
-            <p className="mt-1 text-xs text-muted-foreground">ใช้กับ session/contact หรือข้อมูลที่ยังไม่ควรเป็น truth</p>
+            <p className="mt-1 text-xs text-muted-foreground">เฉพาะ contact และมีวันหมดอายุ</p>
           </CardContent>
         </Card>
         <Card>
@@ -600,9 +665,10 @@ export default function MemoryPage() {
           <div className="border-b px-4 py-3">
             <TabsList className="flex w-full flex-wrap justify-start sm:w-fit">
               <TabsTrigger value="active">ใช้ตอบจริง</TabsTrigger>
-              <TabsTrigger value="search_hints">Search Hints</TabsTrigger>
-              <TabsTrigger value="description_suggestions">Description</TabsTrigger>
-              <TabsTrigger value="soft">พักไว้</TabsTrigger>
+              <TabsTrigger value="search_hints">คำช่วยค้น</TabsTrigger>
+              <TabsTrigger value="description_suggestions">คำแนะนำ SML</TabsTrigger>
+              <TabsTrigger value="soft">กำลังเรียนรู้</TabsTrigger>
+              <TabsTrigger value="suspended">หยุดใช้</TabsTrigger>
               <TabsTrigger value="blocked">ห้ามจำ</TabsTrigger>
               <TabsTrigger value="deleted">ลบแล้ว</TabsTrigger>
               <TabsTrigger value="sources">สัญญาณจากแชท</TabsTrigger>
@@ -612,7 +678,7 @@ export default function MemoryPage() {
             </TabsList>
           </div>
 
-          {(['active', 'search_hints', 'description_suggestions', 'soft', 'blocked', 'deleted'] as MemoryTab[]).map(statusTab => (
+          {(['active', 'search_hints', 'description_suggestions', 'soft', 'suspended', 'blocked', 'deleted'] as MemoryTab[]).map(statusTab => (
             <TabsContent key={statusTab} value={statusTab} className="p-4">
               {statusTab === 'search_hints' ? (
                 <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
@@ -622,6 +688,11 @@ export default function MemoryPage() {
               {statusTab === 'description_suggestions' ? (
                 <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
                   Description Suggestions คือคำแนะนำให้ staff เติมช่อง description ใน SML ERP เพื่อให้ search_product.v2 ค้นง่ายขึ้น ไม่ใช่ข้อมูลที่ bot ใช้ตอบลูกค้าโดยตรง
+                </div>
+              ) : null}
+              {statusTab === 'suspended' ? (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  รายการที่หลักฐานใหม่จาก MCP ขัดแย้ง หรือยังไม่ผ่าน Evidence Contract v3 จะถูกหยุดใช้ทันทีและไม่ถูก inject เข้า prompt
                 </div>
               ) : null}
               {memoriesLoading ? <div className="rounded-lg border p-4 text-sm text-muted-foreground">กำลังโหลด memory...</div> : null}
@@ -635,7 +706,7 @@ export default function MemoryPage() {
                   <MemoryCard
                     key={memory.id}
                     memory={memory}
-                    onDisable={() => updateMutation.mutate({ id: memory.id, body: { status: memory.status === 'active' ? 'soft' : 'active' } })}
+                    onDisable={() => updateMutation.mutate({ id: memory.id, body: { status: memory.status === 'active' ? 'suspended' : 'active' } })}
                     onBlock={() => blockMutation.mutate(memory)}
                     onDelete={() => setDeleteTarget(memory)}
                     busy={updateMutation.isPending || blockMutation.isPending}
@@ -731,7 +802,7 @@ export default function MemoryPage() {
                   <p>ระบบจะไม่จำราคา สต็อก ต้นทุน สินค้ามี/ไม่มี หรือสินค้าทดแทนจากบทสนทนาเป็นความจริงถาวร</p>
                   <p>ถ้า admin ลบ memory ระบบจะสร้าง tombstone เพื่อกันการเรียนซ้ำทันทีจาก pattern เดิม</p>
                   <p>Search Hints และ Description Suggestions เป็น Agent Brain evidence ไม่ใช่ราคา/สต็อกหรือ master data</p>
-                  <p>Business Profile, SOUL และ MCP/Search ยังเป็นชั้นแยก ไม่ถูกแก้อัตโนมัติจาก Auto-Learn v2</p>
+                  <p>Business Profile, SOUL และ MCP/Search ยังเป็นชั้นแยก ไม่ถูกแก้อัตโนมัติจาก Agent Brain v3</p>
                 </CardContent>
               </Card>
             </div>
@@ -919,6 +990,13 @@ export default function MemoryPage() {
         onApply={() => cleanupApplyMutation.mutate()}
       />
 
+      <ReclassifyDialog
+        result={reclassifyResult}
+        busy={reclassifyApplyMutation.isPending}
+        onClose={() => setReclassifyResult(null)}
+        onApply={() => reclassifyApplyMutation.mutate()}
+      />
+
       <Dialog open={!!viewDialog} onOpenChange={open => { if (!open) setViewDialog(null) }}>
         <DialogContent className="grid max-h-[86vh] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden sm:max-w-4xl">
           <DialogHeader>
@@ -953,6 +1031,7 @@ function LearningControlPanel({
   cleanupBusy,
   lastResult,
   cleanupMode,
+  brainHealth,
   onEnable,
   onApply,
   onCleanupModeChange,
@@ -970,6 +1049,7 @@ function LearningControlPanel({
   cleanupBusy: boolean
   lastResult?: MemoryAutoApplyResult
   cleanupMode: 'structured' | 'legacy' | 'all'
+  brainHealth?: AgentBrainHealth
   onEnable: () => void
   onApply: () => void
   onCleanupModeChange: (mode: 'structured' | 'legacy' | 'all') => void
@@ -1016,8 +1096,8 @@ function LearningControlPanel({
               <p className="mt-1 text-lg font-semibold">{memoryHealth.noiseCount + memoryHealth.dynamicFactCount}</p>
             </div>
             <div className="rounded-lg border bg-muted/20 p-3">
-              <p className="text-xs text-muted-foreground">ไม่ได้ inject</p>
-              <p className="mt-1 text-lg font-semibold">{memoryHealth.activeButNotInjectedCount}</p>
+              <p className="text-xs text-muted-foreground">หยุดใช้ / ไม่ inject</p>
+              <p className="mt-1 text-lg font-semibold">{(brainHealth?.memory.suspendedCount || 0) + memoryHealth.activeButNotInjectedCount}</p>
             </div>
           </div>
         </div>
@@ -1196,6 +1276,79 @@ function CleanupDialog({
   )
 }
 
+function ReclassifyDialog({
+  result,
+  busy,
+  onClose,
+  onApply,
+}: {
+  result: AgentBrainReclassifyResult | null
+  busy: boolean
+  onClose: () => void
+  onApply: () => void
+}) {
+  const actionCount = result?.actions.length || 0
+  return (
+    <Dialog open={!!result} onOpenChange={open => { if (!open) onClose() }}>
+      <DialogContent className="grid max-h-[88vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldCheck className="size-4" />
+            {result?.dryRun ? 'Preview Brain v3 Reclassify' : 'ผลการจัดการข้อมูล Brain v3'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 space-y-4 overflow-auto pr-1">
+          <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+            <p className="font-medium">{result?.dryRun ? 'ยังไม่มีข้อมูลถูกแก้ไข' : 'ระบบสร้าง backup ก่อนแก้ข้อมูลแล้ว'}</p>
+            <p className="mt-1 text-muted-foreground">
+              รายการผิดรูปแบบเดิมจะถูก ignore/block และ Search Hint ที่ยังไม่มีหลักฐาน v2 จะถูก suspend ไม่ให้ใช้ตอบ
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {Object.entries(result?.summary || {}).map(([key, value]) => (
+                <Badge key={key} variant={key === 'scanned' ? 'outline' : 'secondary'}>{key}: {value}</Badge>
+              ))}
+            </div>
+          </div>
+          {actionCount ? (
+            <div className="space-y-2">
+              {result?.actions.slice(0, 200).map(action => (
+                <div key={`${action.kind}:${action.id}`} className="rounded-lg border p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={action.action === 'block' ? 'destructive' : 'secondary'}>{action.action}</Badge>
+                    <Badge variant="outline">{action.kind}</Badge>
+                    <span className="font-mono text-xs text-muted-foreground">{action.id}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{action.reason}</p>
+                </div>
+              ))}
+              {actionCount > 200 ? <p className="text-xs text-muted-foreground">แสดง 200 จาก {actionCount} รายการ</p> : null}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+              ไม่พบข้อมูลเก่าที่ต้อง reclassify
+            </div>
+          )}
+          {result?.errors?.length ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-950">
+              <p className="font-medium">สำเร็จบางส่วน กรุณาส่งผลนี้ให้ทีมเทคนิค</p>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(result.errors, null, 2)}</pre>
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>ปิด</Button>
+          {result?.dryRun && actionCount > 0 ? (
+            <Button onClick={onApply} disabled={busy}>
+              <ShieldCheck className="size-4" />
+              Apply พร้อม backup
+            </Button>
+          ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function MetricTile({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-lg border bg-muted/20 p-3">
@@ -1218,6 +1371,14 @@ function MemoryCard({
   onDelete: () => void
   busy: boolean
 }) {
+  const verifiedSearchHint = memory.type !== 'search_hint'
+    || ['agent_verified', 'contact_verified', 'admin_verified', 'authority_verified'].includes(memory.verificationState || '')
+  const canActivate = memory.status === 'active' || memory.status === 'deleted' || verifiedSearchHint
+  const suspendedReason = typeof memory.evidence?.suspendedReason === 'string'
+    ? memory.evidence.suspendedReason
+    : memory.status === 'suspended'
+      ? 'หลักฐานยังไม่ผ่าน v3 หรือ MCP ให้ผลขัดแย้ง'
+      : null
   return (
     <div className="rounded-lg border p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1226,20 +1387,28 @@ function MemoryCard({
             <Badge variant={statusVariant(memory.status)}>{memory.status}</Badge>
             <Badge variant="outline">{typeLabel(memory.type)}</Badge>
             <Badge variant="secondary">{scopeLabel(memory.scope)}</Badge>
+            <Badge variant={memory.verificationState?.includes('verified') ? 'default' : 'outline'}>
+              {memory.verificationState || 'legacy'}
+            </Badge>
             {memory.confidence !== null ? <Badge variant="outline">{Math.round(memory.confidence * 100)}%</Badge> : null}
           </div>
           <p className="mt-3 whitespace-pre-wrap break-words text-sm font-medium leading-relaxed">{memory.content}</p>
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
             <span>source: {memory.sourceAuthority}</span>
             <span>used: {memory.usageCount}</span>
+            <span>last used: {formatDateTime(memory.lastUsedAt)}</span>
+            {memory.ttlExpiresAt ? <span>expires: {formatDateTime(memory.ttlExpiresAt)}</span> : null}
             <span>updated: {formatDateTime(memory.updatedAt)}</span>
           </div>
+          {suspendedReason ? (
+            <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-950">เหตุผลที่หยุดใช้: {suspendedReason}</p>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           {memory.status !== 'deleted' ? (
-            <Button variant="outline" size="sm" onClick={onDisable} disabled={busy}>
+            <Button variant="outline" size="sm" onClick={onDisable} disabled={busy || !canActivate} title={!canActivate ? 'Search Hint ต้องมีหลักฐานยืนยันจาก MCP ก่อนเปิดใช้' : undefined}>
               <Clock3 className="size-4" />
-              {memory.status === 'active' ? 'ทำเป็น Soft' : 'Activate'}
+              {memory.status === 'active' ? 'หยุดใช้' : 'เปิดใช้'}
             </Button>
           ) : null}
           {memory.status !== 'blocked' && memory.status !== 'deleted' ? (
@@ -1262,8 +1431,8 @@ function MemoryCard({
 
 function ObservationRow({ observation, onPromote, busy }: { observation: MemoryObservation; onPromote: () => void; busy: boolean }) {
   const highRisk = isHighRiskObservation(observation)
-  const canPromote = observation.safeToPromote === true || highRisk
-  const actionDisabled = busy || !canPromote || observation.status === 'promoted' || observation.status === 'blocked'
+  const actionDisabled = busy || observation.status === 'promoted' || observation.status === 'blocked'
+  const verified = ['agent_verified', 'contact_verified', 'authority_verified', 'admin_verified'].includes(observation.verificationState || '')
   return (
     <div className="rounded-lg border p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1273,11 +1442,16 @@ function ObservationRow({ observation, onPromote, busy }: { observation: MemoryO
             <Badge variant={observation.risk === 'high' ? 'destructive' : 'outline'}>risk: {observation.risk}</Badge>
             <Badge variant="outline">{typeLabel(observation.type)}</Badge>
             <Badge variant="secondary">{observation.recommendedAction}</Badge>
+            <Badge variant={verified ? 'default' : 'outline'}>{observation.verificationState || 'unverified'}</Badge>
             {observation.decision ? <Badge variant={observation.safeToPromote ? 'default' : 'outline'}>{observation.decision}</Badge> : null}
           </div>
           <p className="mt-3 whitespace-pre-wrap break-words text-sm font-medium">{observation.summary}</p>
           <p className="mt-2 text-xs text-muted-foreground">
             turn: {observation.sourceTurnId || '-'} · updated {formatDateTime(observation.updatedAt)}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Observed → {verified ? 'Verified' : 'รอ MCP ยืนยัน'} → {observation.status === 'promoted' ? 'Active/Soft' : observation.status === 'blocked' ? 'Blocked' : 'ยังไม่ใช้ตอบ'}
+            {' · '}หลักฐาน {observation.verificationCount || 0} ครั้ง จาก {observation.independentSubjectCount || 0} subject
           </p>
           {highRisk ? (
             <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
@@ -1290,10 +1464,14 @@ function ObservationRow({ observation, onPromote, busy }: { observation: MemoryO
             </p>
           ) : null}
         </div>
-        <Button variant={highRisk ? 'destructive' : 'outline'} size="sm" onClick={onPromote} disabled={actionDisabled}>
-          {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
-          {highRisk ? 'ห้ามจำเรื่องนี้' : canPromote ? 'บันทึกเป็น Soft memory' : 'ใช้เป็นหลักฐานเท่านั้น'}
-        </Button>
+        {highRisk ? (
+          <Button variant="destructive" size="sm" onClick={onPromote} disabled={actionDisabled}>
+            <Ban className="size-4" />
+            ห้ามจำเรื่องนี้
+          </Button>
+        ) : (
+          <Badge variant={verified ? 'default' : 'outline'}>{verified ? 'ระบบจัดการตาม policy' : 'ใช้เป็นหลักฐานเท่านั้น'}</Badge>
+        )}
       </div>
       {Object.keys(observation.evidence || {}).length ? (
         <details className="mt-3 rounded-md border bg-muted/20">

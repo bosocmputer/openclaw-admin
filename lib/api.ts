@@ -1844,7 +1844,7 @@ export async function getDailyMemoryContent(agentId: string, filename: string): 
 
 export type MemoryType = 'terminology' | 'preference' | 'workflow_hint' | 'search_hint' | 'description_suggestion' | 'faq_pattern' | 'entity_alias' | 'staff_instruction' | 'blocked_fact'
 export type MemoryScope = 'session' | 'contact' | 'agent' | 'business' | 'global'
-export type AgentMemoryStatus = 'active' | 'soft' | 'blocked' | 'deleted'
+export type AgentMemoryStatus = 'active' | 'soft' | 'suspended' | 'blocked' | 'deleted'
 export type MemoryPolicyMode = 'off' | 'observe_only' | 'safe_auto' | 'manual_review'
 export type LegacyMemoryMode = 'managed_only' | 'full' | 'disabled'
 export type MemoryObservationStatus = 'observed' | 'promoted' | 'blocked' | 'ignored'
@@ -1868,6 +1868,9 @@ export interface AgentMemory {
   scope: MemoryScope
   content: string
   sourceAuthority: string
+  subjectHash?: string | null
+  verificationState?: string
+  decisionVersion?: string
   confidence: number | null
   evidence: Record<string, unknown>
   sourceTurnIds: string[]
@@ -1877,6 +1880,7 @@ export interface AgentMemory {
   createdBy?: string | null
   updatedBy?: string | null
   deletedAt?: string | null
+  suspendedAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -1897,6 +1901,13 @@ export interface MemoryObservation {
   blockedReason?: string | null
   status: MemoryObservationStatus
   confidence: number | null
+  contractVersion?: number
+  decisionVersion?: string
+  verificationState?: string
+  verificationCount?: number
+  independentSubjectCount?: number
+  sourceAuthority?: string
+  subjectHash?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -1909,6 +1920,7 @@ export interface MemoryPolicy {
   safeTypes: MemoryType[]
   allowChatTeaching: boolean
   retentionDays: number | null
+  policyRevision?: number
   updatedBy?: string | null
   createdAt?: string | null
   updatedAt?: string | null
@@ -1928,6 +1940,7 @@ export interface MemoryAutoApplyResult {
 
 export interface MemoryUsageEvent {
   id: number
+  lookupId?: string | null
   turnId?: string | null
   memoryId?: string | null
   agentId?: string | null
@@ -1936,6 +1949,56 @@ export interface MemoryUsageEvent {
   outcome?: string | null
   metadata: Record<string, unknown>
   createdAt: string
+}
+
+export interface AgentBrainHealth {
+  ok: boolean
+  contractVersion: number
+  decisionVersion: string
+  featureFlags: {
+    v2: boolean
+    injection: boolean
+    autoPromote: boolean
+  }
+  memory: {
+    activeCount: number
+    softCount: number
+    suspendedCount: number
+    blockedCount: number
+    activeUsedCount: number
+    usableChars: number
+  }
+  observations: {
+    total: number
+    verifiedCount: number
+    unverifiedCount: number
+    legacyCount: number
+  }
+  usage: {
+    count: number
+    injectedChars: number
+    lookupP95Ms: number | null
+  }
+  recentDecisions: Record<string, number>
+  generatedAt: string
+}
+
+export interface AgentBrainReclassifyAction {
+  kind: 'memory' | 'observation'
+  id: string
+  agentId: string
+  action: 'ignore' | 'block' | 'suspend' | string
+  reason: string
+}
+
+export interface AgentBrainReclassifyResult {
+  ok: boolean
+  dryRun: boolean
+  summary: Record<string, number>
+  actions: AgentBrainReclassifyAction[]
+  backups?: Array<{ backupId?: string; fileName?: string; existed?: boolean } | null>
+  applied?: AgentBrainReclassifyAction[]
+  errors?: Array<AgentBrainReclassifyAction & { error: string }>
 }
 
 export type AgentBrainAudience = 'customer' | 'staff' | 'internal'
@@ -1991,6 +2054,16 @@ export async function getAgentBrainItems(params: {
   limit?: number
 } = {}): Promise<{ memories: AgentMemory[] }> {
   const { data } = await api.get('/api/agent-brain/items', { params })
+  return data
+}
+
+export async function getAgentBrainHealth(agentId?: string): Promise<AgentBrainHealth> {
+  const { data } = await api.get('/api/agent-brain/health', { params: { agentId } })
+  return data
+}
+
+export async function reclassifyAgentBrain(agentId?: string, dryRun = true): Promise<AgentBrainReclassifyResult> {
+  const { data } = await api.post('/api/agent-brain/maintenance/reclassify', { agentId, dryRun })
   return data
 }
 

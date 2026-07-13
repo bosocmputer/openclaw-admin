@@ -685,13 +685,13 @@ export default function ConversationAnalysisPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Conversation Learning Workbench</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            หน้านี้ใช้ดูบทสนทนาและหลักฐานว่าควรเรียนรู้อะไร ส่วนความจำที่ใช้ตอบจริงให้คุมที่หน้า Memory
+            หน้านี้ใช้ตรวจหลักฐานราย turn ว่า Brain สังเกต ยืนยัน หรือ block อะไร ส่วนความรู้ระยะยาวที่ใช้ตอบจริงให้ควบคุมใน Agent Brain
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => { window.location.href = '/memory' }}>
             <Brain className="size-4" />
-            เปิด Memory
+            เปิด Agent Brain
           </Button>
           <Button variant="outline" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={cn('size-4', isFetching && 'animate-spin')} />
@@ -705,18 +705,22 @@ export default function ConversationAnalysisPage() {
       </div>
 
       <div className="shrink-0 rounded-xl border bg-card p-3">
-        <div className="grid gap-2 text-sm lg:grid-cols-3">
+        <div className="grid gap-2 text-sm lg:grid-cols-4">
           <div className="rounded-lg border bg-muted/20 p-3">
-            <p className="font-medium">1. ดูบทสนทนาจริง</p>
-            <p className="mt-1 text-xs text-muted-foreground">เลือก turn เพื่อดูคำถาม คำตอบ tool และปัญหาที่ flag</p>
+            <p className="font-medium">1. Observed</p>
+            <p className="mt-1 text-xs text-muted-foreground">พบคำสอนหรือ signal จากบทสนทนาจริง</p>
           </div>
           <div className="rounded-lg border bg-muted/20 p-3">
-            <p className="font-medium">2. ตรวจ Learning signals</p>
-            <p className="mt-1 text-xs text-muted-foreground">Safe Auto จะเรียน low-risk และ block ราคา/สต็อกเองตาม policy</p>
+            <p className="font-medium">2. Verified</p>
+            <p className="mt-1 text-xs text-muted-foreground">MCP ยืนยัน entity และไม่นับหลักฐานซ้ำ</p>
           </div>
           <div className="rounded-lg border bg-muted/20 p-3">
-            <p className="font-medium">3. Export for Codex</p>
-            <p className="mt-1 text-xs text-muted-foreground">ส่งข้อมูล 1-3 วันมาให้วิเคราะห์ SOUL, MCP/Search และ memory tuning</p>
+            <p className="font-medium">3. Active / Blocked</p>
+            <p className="mt-1 text-xs text-muted-foreground">ใช้เฉพาะ low-risk; ราคาและสต็อกถูก block เสมอ</p>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <p className="font-medium">4. Used</p>
+            <p className="mt-1 text-xs text-muted-foreground">แสดง memory ที่ inject จริงและผลของ turn</p>
           </div>
         </div>
       </div>
@@ -1118,7 +1122,7 @@ export default function ConversationAnalysisPage() {
                       <p className="text-sm font-medium">Learning signals</p>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      แสดงสิ่งที่ระบบสังเกตได้จาก turn นี้ ถ้า Safe Auto เปิด ระบบจะจัดการ low-risk/block ให้เองโดยไม่ต้อง approve ทีละรายการ
+                      แสดงเส้นทาง Observed → Verified → Active/Blocked → Used โดย admin ไม่ต้อง approve low-risk ทีละรายการ
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1143,8 +1147,8 @@ export default function ConversationAnalysisPage() {
                     {learningSignals.map(signal => {
                       const decision = memoryDecisions.find(item => item.observationId === signal.id)
                       const highRisk = isHighRiskSignal(signal)
-                      const canPromoteSignal = highRisk || signal.safeToPromote === true || decision?.safeToPromote === true
-                      const actionDisabled = !canPromoteSignal || signal.status === 'promoted' || signal.status === 'blocked' || promoteObservationMutation.isPending
+                      const verified = ['agent_verified', 'contact_verified', 'authority_verified', 'admin_verified'].includes(signal.verificationState || '')
+                      const actionDisabled = signal.status === 'promoted' || signal.status === 'blocked' || promoteObservationMutation.isPending
                       return (
                         <div key={signal.id} className="rounded-md border bg-muted/20 p-3">
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -1152,25 +1156,29 @@ export default function ConversationAnalysisPage() {
                             <Badge variant={signal.risk === 'high' ? 'destructive' : 'outline'}>risk: {signal.risk}</Badge>
                             <Badge variant="secondary">{memoryTypeLabel(signal.type)}</Badge>
                             <Badge variant="outline">{signal.recommendedAction}</Badge>
+                            <Badge variant={verified ? 'default' : 'outline'}>{signal.verificationState || 'unverified'}</Badge>
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm">{signal.summary}</p>
                           {decision?.reason ? <p className="mt-2 text-xs text-muted-foreground">{decision.reason}</p> : null}
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Observed → {verified ? 'Verified' : 'รอ MCP ยืนยัน'} → {signal.status === 'promoted' ? 'Active/Soft' : signal.status === 'blocked' ? 'Blocked' : 'ยังไม่ใช้ตอบ'} · หลักฐาน {signal.verificationCount || 0} ครั้ง
+                          </p>
                           {highRisk ? (
                             <p className="mt-2 text-xs text-muted-foreground">
                               ข้อมูล ERP เช่น ราคา สต็อก ต้นทุน หรือสิทธิ์ราคา ต้องดึงสดจาก MCP/SML ทุกครั้ง ไม่ควรกลายเป็นความจำที่ใช้ตอบจริง
                             </p>
                           ) : null}
-                          <div className="mt-3 flex flex-wrap gap-2">
+                          {highRisk ? <div className="mt-3 flex flex-wrap gap-2">
                             <Button
                               size="sm"
-                              variant={highRisk ? 'destructive' : 'outline'}
+                              variant="destructive"
                               disabled={actionDisabled}
                               onClick={() => promoteObservationMutation.mutate(signal)}
                             >
-                              {highRisk ? <Ban className="size-4" /> : <Database className="size-4" />}
-                              {highRisk ? 'ห้ามจำเรื่องนี้' : canPromoteSignal ? 'บันทึกเป็น Soft memory' : 'ใช้เป็นหลักฐานเท่านั้น'}
+                              <Ban className="size-4" />
+                              ห้ามจำเรื่องนี้
                             </Button>
-                          </div>
+                          </div> : null}
                         </div>
                       )
                     })}
@@ -1188,7 +1196,7 @@ export default function ConversationAnalysisPage() {
                       {memoryUsage.map(usage => (
                         <div key={usage.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
                           <span className="font-mono">{usage.memoryId || 'memory'}</span>
-                          <span className="text-muted-foreground">{usage.injectedChars} chars · score {usage.relevanceScore ?? '-'}</span>
+                          <span className="text-muted-foreground">{usage.injectedChars} chars · score {usage.relevanceScore ?? '-'} · {usage.outcome || 'context_injected'}</span>
                         </div>
                       ))}
                     </div>
