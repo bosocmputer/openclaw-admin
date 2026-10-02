@@ -135,6 +135,13 @@ interface SessionGroup {
   events: FlatEvent[]
 }
 
+interface LatestActualModel {
+  agentId: string
+  model: string
+  provider: string | null
+  timeMs: number | null
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function stateInfo(state: string) {
   switch (state) {
@@ -396,6 +403,29 @@ function buildGroups(data: MonitorData): SessionGroup[] {
   })
 }
 
+function latestActualModels(groups: SessionGroup[]): LatestActualModel[] {
+  const latestByAgent = new Map<string, LatestActualModel>()
+
+  for (const group of groups) {
+    for (const event of group.events) {
+      if (!event.model || event.modelSource !== 'actual') continue
+
+      const next: LatestActualModel = {
+        agentId: event.agentId,
+        model: event.model,
+        provider: event.provider ?? null,
+        timeMs: eventTimeMs(event),
+      }
+      const current = latestByAgent.get(event.agentId)
+      if (!current || (next.timeMs ?? 0) >= (current.timeMs ?? 0)) {
+        latestByAgent.set(event.agentId, next)
+      }
+    }
+  }
+
+  return [...latestByAgent.values()].sort((a, b) => a.agentId.localeCompare(b.agentId))
+}
+
 function NoiseToggle({ hiddenCount, checked, onChange }: { hiddenCount: number; checked: boolean; onChange: (value: boolean) => void }) {
   return (
     <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
@@ -450,6 +480,7 @@ export default function MonitorPage() {
   const groups = data ? buildGroups(data) : []
   const stats = data?.stats
   const activeCount = groups.filter(g => g.state === 'thinking' || g.state === 'tool_call').length
+  const actualModels = latestActualModels(groups)
 
   // sync activeCount → refetch interval
   useEffect(() => {
@@ -568,6 +599,25 @@ export default function MonitorPage() {
           {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
           {paused ? 'Resume' : 'Pause'}
         </Button>
+      </div>
+
+      <div className="shrink-0 flex items-center gap-2 flex-wrap rounded-md border border-zinc-800 bg-zinc-950/50 px-2.5 py-1.5 text-xs">
+        <span className="font-medium text-zinc-300">Model ที่ Gateway ใช้งานจริงล่าสุด</span>
+        {actualModels.length === 0 ? (
+          <span className="text-zinc-500">ยังไม่มี model call ที่ runtime บันทึกไว้</span>
+        ) : actualModels.map(item => (
+          <span
+            key={item.agentId}
+            className="max-w-full truncate rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-400"
+            title={`${item.agentId} · ${item.provider ? `${item.provider} · ` : ''}${item.model}${item.timeMs ? `\nใช้งานเมื่อ ${formatBangkokTime(item.timeMs, true)}` : ''}`}
+          >
+            <span className={agentColor(item.agentId)}>{item.agentId}</span>
+            <span className="text-zinc-600"> · </span>
+            {compactModel(item.model)}
+            {item.timeMs ? <span className="text-zinc-600"> · {formatBangkokTime(item.timeMs, true)}</span> : null}
+          </span>
+        ))}
+        <span className="text-zinc-600">จาก event ที่ runtime ระบุว่า actual</span>
       </div>
 
       {/* ── Row 2: Session dropdown + filters + search + autoscroll ──────── */}
