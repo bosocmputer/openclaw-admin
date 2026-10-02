@@ -589,6 +589,20 @@ export default function MonitorPage() {
               <Badge variant="outline" className={durationColor(longestDur)}>🐢 {longestDur.toFixed(1)}s</Badge>
             )}
             {errorCount > 0 && <Badge variant="destructive">{errorCount} errors</Badge>}
+            {actualModels.map(item => (
+              <Badge
+                key={item.agentId}
+                variant="secondary"
+                className="max-w-[320px] gap-1 overflow-hidden text-muted-foreground"
+                title={`Model ที่ใช้งานจริงล่าสุด: ${item.agentId} · ${item.provider ? `${item.provider} · ` : ''}${item.model}${item.timeMs ? ` · ${formatBangkokTime(item.timeMs, true)}` : ''}`}
+              >
+                <span className="shrink-0">🤖 ล่าสุด</span>
+                <span className={`shrink-0 ${agentColor(item.agentId)}`}>{item.agentId}</span>
+                <span className="shrink-0">·</span>
+                <span className="truncate">{compactModel(item.model)}</span>
+                {item.timeMs ? <span className="shrink-0">· {formatBangkokTime(item.timeMs, false)}</span> : null}
+              </Badge>
+            ))}
           </>
         )}
         <div className="flex-1" />
@@ -599,25 +613,6 @@ export default function MonitorPage() {
           {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
           {paused ? 'Resume' : 'Pause'}
         </Button>
-      </div>
-
-      <div className="shrink-0 flex items-center gap-2 flex-wrap rounded-md border border-zinc-800 bg-zinc-950/50 px-2.5 py-1.5 text-xs">
-        <span className="font-medium text-zinc-300">Model ที่ Gateway ใช้งานจริงล่าสุด</span>
-        {actualModels.length === 0 ? (
-          <span className="text-zinc-500">ยังไม่มี model call ที่ runtime บันทึกไว้</span>
-        ) : actualModels.map(item => (
-          <span
-            key={item.agentId}
-            className="max-w-full truncate rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-400"
-            title={`${item.agentId} · ${item.provider ? `${item.provider} · ` : ''}${item.model}${item.timeMs ? `\nใช้งานเมื่อ ${formatBangkokTime(item.timeMs, true)}` : ''}`}
-          >
-            <span className={agentColor(item.agentId)}>{item.agentId}</span>
-            <span className="text-zinc-600"> · </span>
-            {compactModel(item.model)}
-            {item.timeMs ? <span className="text-zinc-600"> · {formatBangkokTime(item.timeMs, true)}</span> : null}
-          </span>
-        ))}
-        <span className="text-zinc-600">จาก event ที่ runtime ระบุว่า actual</span>
       </div>
 
       {/* ── Row 2: Session dropdown + filters + search + autoscroll ──────── */}
