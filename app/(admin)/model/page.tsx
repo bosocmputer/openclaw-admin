@@ -1427,12 +1427,26 @@ export default function ModelPage() {
 
         <div className="grid gap-0 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
           <div className="space-y-4 border-b p-5 lg:border-b-0 lg:border-r">
-            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-3 text-sm text-amber-950 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                <p>Agent ยังรับรูปได้อยู่ จึงห้ามบันทึกค่า Image model ว่าง หากต้องการปิดการอ่านรูป ต้องปิดเครื่องมือ <code className="font-mono text-xs">image</code> ของ agent ก่อน</p>
+            {imageReady ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50/70 px-3 py-3 text-sm text-emerald-950 dark:border-emerald-950 dark:bg-emerald-950/20 dark:text-emerald-100" role="status">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium">Image model ถูกกำหนดและทดสอบแล้ว</p>
+                    <p className="mt-1 text-xs text-emerald-900 dark:text-emerald-200">
+                      ระบบจะใช้ <code className="break-all font-mono">{imageTargetModel}</code> ตามที่ตั้งค่าไว้ และจะไม่เลือก provider อัตโนมัติ
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-3 text-sm text-amber-950 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-100" role="alert">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <p>Agent ยังรับรูปได้อยู่ จึงห้ามบันทึกค่า Image model ว่าง หากต้องการปิดการอ่านรูป ต้องปิดเครื่องมือ <code className="font-mono text-xs">image</code> ของ agent ก่อน</p>
+                </div>
+              </div>
+            )}
 
             {imageMode === 'chat_model' ? (
               <div className="space-y-3">
