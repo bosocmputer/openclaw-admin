@@ -86,7 +86,7 @@ const OLLAMA_CLOUD_RECOMMENDED_IDS = [
 ]
 
 type KeyTestState = 'idle' | 'ok' | 'fail'
-type ImageMode = 'off' | 'chat_model' | 'image_model'
+type ImageMode = 'chat_model' | 'image_model'
 type ImageUploadDraft = ModelImageUploadPayload & {
   previewUrl: string
   size: number
@@ -665,16 +665,19 @@ export default function ModelPage() {
   const imageTargetModel = imageMode === 'chat_model' ? primary : imagePrimary
   const imageTargetFallbacks = imageMode === 'chat_model' ? fallbacks : imageFallbacks
   const currentImageHash = imageModelHash(imageMode, imageTargetModel, imagePrimary, imageTargetFallbacks, imageTimeoutMs)
-  const imageReady = imageMode !== 'image_model' || !imagePrimary || isRuntimeVerified(runtimeState(imagePrimary, 'image')) || lastImageTestHash === currentImageHash
-  const shouldSaveImageModel = Boolean(imageMode === 'image_model' && imagePrimary && imageReady)
+  const imageReady = Boolean(imageTargetModel) && (
+    isRuntimeVerified(runtimeState(imageTargetModel, 'image'))
+    || lastImageTestHash === currentImageHash
+  )
+  const shouldSaveImageModel = imageReady
   const payload = useMemo<ModelSettingsPayload>(() => ({
     defaults: {
       model: { primary, fallbacks },
       imageModel: shouldSaveImageModel
-        ? { primary: imagePrimary, fallbacks: imageFallbacks, timeoutMs: imageTimeoutMs }
+        ? { primary: imageTargetModel, fallbacks: imageTargetFallbacks, timeoutMs: imageTimeoutMs }
         : null,
     },
-  }), [fallbacks, imageFallbacks, imagePrimary, imageTimeoutMs, primary, shouldSaveImageModel])
+  }), [fallbacks, imageTargetFallbacks, imageTargetModel, imageTimeoutMs, primary, shouldSaveImageModel])
 
   const currentHash = settingsHash(payload)
   const hasDraftChanges = Boolean(savedHash && currentHash !== savedHash)
@@ -701,12 +704,14 @@ export default function ModelPage() {
   const canSave = Boolean(primary)
     && !missingTextProvider
     && textModelsReady
+    && imageReady
     && !keyChanged
     && hasDraftChanges
     && !messageTesting
     && !imageTesting
   const canOverrideSave = Boolean(primary)
     && !missingTextProvider
+    && imageReady
     && !keyChanged
     && hasDraftChanges
     && !messageTesting
@@ -715,6 +720,7 @@ export default function ModelPage() {
   const settingsAlreadySaved = Boolean(primary)
     && !missingTextProvider
     && textModelsReady
+    && imageReady
     && !keyChanged
     && !hasDraftChanges
     && !messageTesting
@@ -727,6 +733,10 @@ export default function ModelPage() {
         ? 'บันทึก key ที่แก้ไขไว้ก่อน'
         : !textModelsReady
           ? `เลือกไว้ได้ แต่ยังไม่ผ่านการทดสอบ (${unverifiedTextModels.length} ตัว)`
+          : !imageTargetModel
+            ? 'เลือก Image model ก่อนบันทึก เพื่อป้องกันการเลือก provider อัตโนมัติ'
+            : !imageReady
+              ? 'ต้องทดสอบ Image model ให้ผ่านก่อนบันทึก'
           : ''
 
   useEffect(() => {
@@ -984,10 +994,6 @@ export default function ModelPage() {
   }
 
   async function runImageTest() {
-    if (imageMode === 'off') {
-      toast.warning('เปิดการทดสอบอ่านรูปสินค้าก่อน')
-      return
-    }
     const targetModel = imageMode === 'chat_model' ? primary : imagePrimary
     if (!targetModel) {
       toast.warning(imageMode === 'chat_model' ? 'เลือก Model หลักก่อนทดสอบรูปภาพ' : 'เลือก Model อ่านรูปแยกก่อน')
@@ -1073,13 +1079,11 @@ export default function ModelPage() {
   const fallbackPassedCount = fallbacks.filter(model => textModelReady(model)).length
   const providerKeyCount = PROVIDERS.filter(provider => provider.noApiKey || config?.env?.[provider.envKey]).length
   const imageTestPassed = Boolean(imageTestResult?.ok)
-  const imageStateLabel = imageMode === 'off'
-    ? 'ปิดอยู่'
-    : imageMode === 'chat_model'
-      ? imageTestPassed ? 'อ่านรูปผ่าน' : 'ใช้ Model หลัก'
-      : imagePrimary
-        ? imageTestPassed || imageReady ? 'อ่านรูปผ่าน' : 'รอทดสอบ'
-        : 'ยังไม่เลือก'
+  const imageStateLabel = imageReady || imageTestPassed
+    ? 'อ่านรูปผ่าน'
+    : imageTargetModel
+      ? 'รอทดสอบ'
+      : 'ยังไม่เลือก'
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
@@ -1389,17 +1393,16 @@ export default function ModelPage() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold">อ่านรูปสินค้า</h2>
-              <Badge variant={imageTestPassed || (imageMode === 'image_model' && imageReady) ? 'default' : 'secondary'}>
+              <Badge variant={imageReady ? 'default' : 'secondary'}>
                 {imageStateLabel}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground">
-              ไม่บังคับ ใช้ตรวจว่า chatbot อ่านรูปที่ลูกค้าส่งได้จริงหรือไม่
+              กำหนด Model อย่างชัดเจนและทดสอบก่อนบันทึก เพื่อไม่ให้ OpenClaw เลือก provider เอง
             </p>
           </div>
           <div className="inline-flex w-full flex-col gap-1 rounded-lg border bg-muted/40 p-1 sm:w-auto sm:flex-row">
             {([
-              ['off', 'ปิด'] as const,
               ['chat_model', 'ใช้ Model หลัก'] as const,
               ['image_model', 'เลือก Model แยก'] as const,
             ]).map(([mode, label]) => (
@@ -1411,12 +1414,11 @@ export default function ModelPage() {
                 className={imageMode === mode ? 'bg-background text-foreground shadow-sm hover:bg-background' : 'text-muted-foreground'}
                 onClick={() => {
                   setImageMode(mode)
-                  if (mode === 'image_model' && !imagePrimary) setImagePrimary(KILO_RECOMMENDED.imagePrimary)
                   resetImageTest()
                 }}
                 disabled={imageTesting}
               >
-                {mode === 'off' ? <XCircle className="size-4" /> : <ImageIcon className="size-4" />}
+                <ImageIcon className="size-4" />
                 {label}
               </Button>
             ))}
@@ -1425,19 +1427,22 @@ export default function ModelPage() {
 
         <div className="grid gap-0 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
           <div className="space-y-4 border-b p-5 lg:border-b-0 lg:border-r">
-            {imageMode === 'off' ? (
-              <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-                ปิดการตั้งค่าอ่านรูปสินค้าไว้ ส่วน chat ข้อความยังใช้งานได้ตามปกติ
+            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-3 text-sm text-amber-950 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <p>Agent ยังรับรูปได้อยู่ จึงห้ามบันทึกค่า Image model ว่าง หากต้องการปิดการอ่านรูป ต้องปิดเครื่องมือ <code className="font-mono text-xs">image</code> ของ agent ก่อน</p>
               </div>
-            ) : imageMode === 'chat_model' ? (
+            </div>
+
+            {imageMode === 'chat_model' ? (
               <div className="space-y-3">
                 <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm">
-                  <p className="font-medium">ทดสอบเหมือน Telegram ใช้งานจริง</p>
+                  <p className="font-medium">บันทึก Model หลักเป็น Image model โดยตรง</p>
                   <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                     {primary || 'ยังไม่ได้เลือก Model หลัก'}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    ถ้า Model หลักอ่านรูปไม่ผ่าน ระบบจะลอง Model สำรองตามลำดับ
+                    ระบบจะไม่ใช้ auto pairing และจะใช้เฉพาะ Model หลักกับ Model สำรองที่กำหนดไว้
                   </p>
                 </div>
               </div>
@@ -1445,7 +1450,7 @@ export default function ModelPage() {
               <div className="space-y-3">
                 {!imageReady && imagePrimary ? (
                   <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-                    Model อ่านรูปแยกยังไม่ผ่านการทดสอบ ระบบจะไม่บันทึกส่วนนี้ แต่ยังบันทึก Model ข้อความได้ตามปกติ
+                    Model อ่านรูปแยกยังไม่ผ่านการทดสอบ จึงยังบันทึกค่าไม่ได้
                   </div>
                 ) : null}
                 <Button
@@ -1474,58 +1479,51 @@ export default function ModelPage() {
               </div>
             )}
 
-            {imageMode !== 'off' && (
-              <div className="space-y-2">
-                <label htmlFor="image-model-test-file" className="text-sm font-medium">รูปทดสอบ</label>
-                <label
-                  htmlFor="image-model-test-file"
-                  className="flex h-[260px] cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed bg-muted/30 text-center text-sm text-muted-foreground transition hover:bg-muted/50"
-                >
-                  {imageUpload ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={imageUpload.previewUrl} alt="รูปที่ใช้ทดสอบ model" className="h-full w-full object-contain" />
-                  ) : (
-                    <span className="px-4">คลิกเพื่ออัปโหลดรูป PNG, JPG, WEBP หรือ GIF</span>
-                  )}
-                </label>
-                <Input
-                  id="image-model-test-file"
-                  type="file"
-                  accept={SUPPORTED_IMAGE_UPLOAD_TYPES.join(',')}
-                  className="hidden"
-                  disabled={imageTesting}
-                  onChange={event => {
-                    void handleImageFileChange(event.target.files?.[0] || null)
-                    event.currentTarget.value = ''
-                  }}
-                />
-                {imageUpload && (
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">{imageUpload.fileName}</span>
-                    <span>{Math.ceil(imageUpload.size / 1024)}KB</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => void handleImageFileChange(null)}
-                      disabled={imageTesting}
-                    >
-                      ลบรูป
-                    </Button>
-                  </div>
+            <div className="space-y-2">
+              <label htmlFor="image-model-test-file" className="text-sm font-medium">รูปทดสอบ</label>
+              <label
+                htmlFor="image-model-test-file"
+                className="flex h-[260px] cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed bg-muted/30 text-center text-sm text-muted-foreground transition hover:bg-muted/50"
+              >
+                {imageUpload ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={imageUpload.previewUrl} alt="รูปที่ใช้ทดสอบ model" className="h-full w-full object-contain" />
+                ) : (
+                  <span className="px-4">คลิกเพื่ออัปโหลดรูป PNG, JPG, WEBP หรือ GIF</span>
                 )}
-              </div>
-            )}
+              </label>
+              <Input
+                id="image-model-test-file"
+                type="file"
+                accept={SUPPORTED_IMAGE_UPLOAD_TYPES.join(',')}
+                className="hidden"
+                disabled={imageTesting}
+                onChange={event => {
+                  void handleImageFileChange(event.target.files?.[0] || null)
+                  event.currentTarget.value = ''
+                }}
+              />
+              {imageUpload && (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="min-w-0 truncate">{imageUpload.fileName}</span>
+                  <span>{Math.ceil(imageUpload.size / 1024)}KB</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => void handleImageFileChange(null)}
+                    disabled={imageTesting}
+                  >
+                    ลบรูป
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="space-y-4 p-5">
-            {imageMode === 'off' ? (
-              <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-                เปิด “ใช้ Model หลัก” ถ้าต้องการทดสอบรูปเหมือนที่ Telegram ใช้งานจริง
-              </div>
-            ) : (
-              <>
+            <>
                 <div className="space-y-2">
                   <label htmlFor="image-model-test-prompt" className="text-sm font-medium">ข้อความทดสอบรูปภาพ</label>
                   <Textarea
@@ -1611,8 +1609,7 @@ export default function ModelPage() {
                     )}
                   </div>
                 )}
-              </>
-            )}
+            </>
           </div>
         </div>
       </section>
